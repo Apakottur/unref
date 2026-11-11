@@ -7,6 +7,7 @@ from pathlib import Path
 from unref._definitions import find_definitions
 from unref._discover import discover, is_under
 from unref._models import Finding, Override
+from unref._modules import module_name
 from unref._references import find_references
 
 
@@ -31,20 +32,39 @@ def find_unreferenced(
     Returns:
         A finding for each unreferenced definition, sorted by file and line.
     """
-    modules = [(path, ast.parse(path.read_bytes(), filename=str(path))) for path in discover(paths, exclude=exclude)]
+    files = discover(paths, exclude=exclude)
+    trees = {path: ast.parse(path.read_bytes(), filename=str(path)) for path in files}
+    references = {path: find_references(tree) for path, tree in trees.items()}
+    names = {path: module_name(path) for path in files}
 
-    # References are matched by name only: a name that is referred to anywhere in the project keeps
-    # every definition of that name alive.
-    references: set[str] = set()
-    for _, module in modules:
-        references |= find_references(module)
+    files_by_name: dict[str, list[Path]] = {}
+    for path, name in names.items():
+        files_by_name.setdefault(name.name, []).append(path)
+
+    # A plain name refers to the module that it is read in, and an imported name to the module that it
+    # is imported from.
+    module_references = {path: set(references[path].names) for path in files}
+    star_imported: set[Path] = set()
+    for path in files:
+        for source, level, name in references[path].imports:
+            for imported in files_by_name.get(names[path].resolve(source, level) or "", []):
+                if name == "*":
+                    star_imported.add(imported)
+                else:
+                    module_references[imported].add(name)
+
+    # An attribute is matched by name only: a name that is read as an attribute anywhere in the project
+    # keeps every definition of that name alive.
+    attribute_references: set[str] = set()
+    for path in files:
+        attribute_references |= references[path].attributes
 
     project_names = list(used_names)
     project_decorators = set(used_decorators)
     resolved_overrides = [([Path(path).resolve() for path in override.paths], override) for override in overrides]
 
     findings: list[Finding] = []
-    for path, module in modules:
+    for path in files:
         # The options of a file are those of the project, plus those of every override that covers it.
         file_names = list(project_names)
         file_decorators = set(project_decorators)
@@ -53,6 +73,10 @@ def find_unreferenced(
                 file_names += override.used_names
                 file_decorators |= set(override.used_decorators)
 
+        # A star import imports the names in `__all__`, which are references of the module already,
+        # or every public name if there is no `__all__`.
+        all_public = path in star_imported and not references[path].has_all
+
         findings += [
             Finding(
                 path=definition.path,
@@ -60,8 +84,10 @@ def find_unreferenced(
                 kind=f"unused {definition.kind}",
                 name=definition.name,
             )
-            for definition in find_definitions(path, module)
-            if definition.name not in references
+            for definition in find_definitions(path, trees[path])
+            if definition.name not in module_references[path]
+            and definition.name not in attribute_references
+            and not (all_public and not definition.name.startswith("_"))
             and not _is_dunder(definition.name)
             and not any(fnmatchcase(definition.name, pattern) for pattern in file_names)
             and file_decorators.isdisjoint(definition.decorators)

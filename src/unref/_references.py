@@ -1,74 +1,92 @@
 import ast
+from dataclasses import dataclass, field
 
 
-def find_references(module: ast.Module) -> set[str]:
+@dataclass
+class References:
     """
-    Find the names that a Python module refers to.
+    What a Python module refers to.
 
-    A name is referred to when it is read, as a plain name (`name`) or as an attribute (`value.name`),
-    when it is imported from another module (`from module import name`), or when it is listed in
-    `__all__`.
+    Attributes:
+        names: The names that are read as a plain name (`name`), without the local variables and
+            parameters, and the names that are listed in `__all__`. They refer to the module itself.
+        attributes: The names that are read as an attribute (`value.name`).
+        imports: The names that are imported from another module (`from module import name`), each
+            with the module, as it is written, and its number of leading dots. A star import has the
+            name `*`.
+        has_all: Whether the module defines `__all__`.
+    """
 
-    A read of a local variable or a parameter is left out, since it does not refer to a definition.
+    names: set[str] = field(default_factory=set)
+    attributes: set[str] = field(default_factory=set)
+    imports: set[tuple[str | None, int, str]] = field(default_factory=set)
+    has_all: bool = False
+
+
+def find_references(module: ast.Module) -> References:
+    """
+    Find what a Python module refers to.
 
     Args:
         module: The parsed module.
 
     Returns:
-        The names.
+        The references.
     """
-    names: set[str] = set()
-    _visit(module, local_names=frozenset(), names=names)
-    return names
+    references = References()
+    _visit(module, local_names=frozenset(), references=references)
+    return references
 
 
-def _visit(node: ast.AST, *, local_names: frozenset[str], names: set[str]) -> None:
+def _visit(node: ast.AST, *, local_names: frozenset[str], references: References) -> None:
     """
-    Add the names that a node, and everything under it, refers to.
+    Add what a node, and everything under it, refers to.
 
     Args:
         node: The node.
         local_names: The local variables and parameters that are visible at the node.
-        names: The names to add to.
+        references: The references to add to.
     """
     match node:
         case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.Lambda():
-            _visit_function(node, local_names=local_names, names=names)
+            _visit_function(node, local_names=local_names, references=references)
             return
         case ast.ListComp() | ast.SetComp() | ast.DictComp() | ast.GeneratorExp():
             # The variables of a comprehension are local to it.
             local_names |= _bound_names([node])
         case ast.Name(id=name, ctx=ast.Load()):
             if name not in local_names:
-                names.add(name)
+                references.names.add(name)
         case ast.Attribute(attr=name, ctx=ast.Load()):
-            names.add(name)
-        case ast.ImportFrom(names=aliases):
-            names.update(alias.name for alias in aliases)
+            references.attributes.add(name)
+        case ast.ImportFrom(module=source, level=level, names=aliases):
+            references.imports.update((source, level, alias.name) for alias in aliases)
         case ast.Assign(targets=targets, value=value) if any(map(_is_all, targets)):
-            names.update(_string_literals(value))
+            references.has_all = True
+            references.names.update(_string_literals(value))
         case ast.AnnAssign(target=target, value=value) | ast.AugAssign(target=target, value=value) if _is_all(target):
-            names.update(_string_literals(value))
+            references.has_all = True
+            references.names.update(_string_literals(value))
         case _:
             pass
 
     for child in ast.iter_child_nodes(node):
-        _visit(child, local_names=local_names, names=names)
+        _visit(child, local_names=local_names, references=references)
 
 
 def _visit_function(
     function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
     *,
     local_names: frozenset[str],
-    names: set[str],
+    references: References,
 ) -> None:
     """
-    Add the names that a function or lambda refers to.
+    Add what a function or lambda refers to.
 
     Args:
         function: The function or lambda.
         local_names: The local variables and parameters that are visible where the function is defined.
-        names: The names to add to.
+        references: The references to add to.
     """
     arguments = function.args
     parameters = [
@@ -90,11 +108,11 @@ def _visit_function(
         outside += [*function.decorator_list, function.returns]
     for node in outside:
         if node is not None:
-            _visit(node, local_names=local_names, names=names)
+            _visit(node, local_names=local_names, references=references)
 
     local_names |= {parameter.arg for parameter in parameters} | _bound_names(body)
     for node in body:
-        _visit(node, local_names=local_names, names=names)
+        _visit(node, local_names=local_names, references=references)
 
 
 def _bound_names(nodes: list[ast.AST]) -> frozenset[str]:
