@@ -93,14 +93,15 @@ def _parse_override(options: dict[str, Any], path: Path) -> Override:
     Build an override from one of the `overrides` tables of a configuration file.
     """
     where = f"an override in the configuration file {path}"
-    _check_names(options, {"paths", "used-names", "used-decorators"}, where)
+    _check_names(options, {"paths", "base-classes", "used-names", "used-decorators"}, where)
 
-    if "paths" not in options:
-        raise UnrefConfigError(f"Option 'paths' is missing in {where}")
+    if "paths" not in options and "base-classes" not in options:
+        raise UnrefConfigError(f"{where[0].upper()}{where[1:]} needs the 'paths' or the 'base-classes' option")
 
     return Override(
         # The paths are relative to the directory of the configuration file.
         paths=tuple(path.parent / item for item in _string_list(options, "paths", where)),
+        base_classes=tuple(_string_list(options, "base-classes", where)),
         used_names=tuple(_string_list(options, "used-names", where)),
         used_decorators=tuple(_decorators(options, where)),
     )

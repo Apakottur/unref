@@ -80,7 +80,12 @@ A path is relative to the directory of the configuration file. Hidden directorie
 
 ## Overrides
 
-Options that apply only to some of the files of the project are given in `overrides` tables:
+Options that apply only to some of the definitions of the project are given in `overrides` tables. An
+override selects by path, by base class, or by both.
+
+In a file that is not named `pyproject.toml`, the table is `[[overrides]]`.
+
+### By path
 
 ```toml
 [tool.unref]
@@ -94,10 +99,37 @@ used-decorators = ["pytest.fixture"]
 
 Here, a function named `test_connection` counts as used in `tests`, and is reported anywhere else.
 
-- `paths` lists the files and directories that the override applies to, relative to the directory of the
-  configuration file.
-- An override takes the `used-names` and `used-decorators` options.
-- The options of an override add to those of the project, they do not replace them.
-- A file that several overrides cover gets the options of all of them.
+`paths` lists files and directories, relative to the directory of the configuration file.
 
-In a file that is not named `pyproject.toml`, the table is `[[overrides]]`.
+### By base class
+
+```toml
+[[tool.unref.overrides]]
+base-classes = ["pydantic.BaseModel"]
+used-names = ["model_config"]
+
+[[tool.unref.overrides]]
+base-classes = ["typing.NamedTuple"]
+used-names = ["*"]
+```
+
+Here, `model_config` counts as used in a Pydantic model, and is reported in any other class. Every field
+of a named tuple counts as used.
+
+`base-classes` lists base classes by their dotted name: the module that the class is imported from, and
+its name. The override applies to what is defined in a class that inherits from one of them:
+
+- Directly, however the base class is imported: `from pydantic import BaseModel`, `import pydantic`
+  or `from pydantic import BaseModel as Base`.
+- Through other classes of the project, in any module.
+
+The name has to be the one that the project imports: `pydantic.BaseModel` does not cover
+`from pydantic.main import BaseModel`.
+
+### Rules
+
+- An override takes the `used-names` and `used-decorators` options.
+- An override needs `paths` or `base-classes`. With both, it applies to the classes under the paths that
+  inherit from one of the base classes.
+- The options of an override add to those of the project, they do not replace them.
+- A definition that several overrides cover gets the options of all of them.

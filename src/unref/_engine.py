@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+from unref._classes import ClassHierarchy
 from unref._definitions import find_definitions
 from unref._discover import discover, is_under
 from unref._models import Finding, Override
@@ -59,39 +60,66 @@ def find_unreferenced(
     for path in files:
         attribute_references |= references[path].attributes
 
+    definitions = {path: find_definitions(path, trees[path]) for path in files}
+    hierarchy = ClassHierarchy(
+        names=names,
+        files_by_name=files_by_name,
+        bindings={path: references[path].bindings for path in files},
+        classes={
+            path: {
+                definition.qualified_name: definition.bases
+                for definition in definitions[path]
+                if definition.kind == "class"
+            }
+            for path in files
+        },
+    )
+
     project_names = list(used_names)
     project_decorators = set(used_decorators)
     resolved_overrides = [([Path(path).resolve() for path in override.paths], override) for override in overrides]
 
     findings: list[Finding] = []
     for path in files:
-        # The options of a file are those of the project, plus those of every override that covers it.
-        file_names = list(project_names)
-        file_decorators = set(project_decorators)
-        for roots, override in resolved_overrides:
-            if is_under(path, roots):
-                file_names += override.used_names
-                file_decorators |= set(override.used_decorators)
+        # An override with paths applies to the files under them.
+        file_overrides = [override for roots, override in resolved_overrides if not roots or is_under(path, roots)]
 
         # A star import imports the names in `__all__`, which are references of the module already,
         # or every public name if there is no `__all__`.
         all_public = path in star_imported and not references[path].has_all
 
-        findings += [
-            Finding(
-                path=definition.path,
-                line=definition.line,
-                kind=f"unused {definition.kind}",
-                name=definition.name,
-            )
-            for definition in find_definitions(path, trees[path])
-            if definition.name not in module_references[path]
-            and definition.name not in attribute_references
-            and not (all_public and not definition.name.startswith("_"))
-            and not _is_dunder(definition.name)
-            and not any(fnmatchcase(definition.name, pattern) for pattern in file_names)
-            and file_decorators.isdisjoint(definition.decorators)
-        ]
+        for definition in definitions[path]:
+            # The options of a definition are those of the project, plus those of every override that
+            # covers it.
+            names_of_definition = list(project_names)
+            decorators_of_definition = set(project_decorators)
+            for override in file_overrides:
+                # An override with base classes applies to what is defined in a class that inherits
+                # from one of them.
+                if override.base_classes and (
+                    definition.owner is None
+                    or hierarchy.ancestors(path, definition.owner).isdisjoint(override.base_classes)
+                ):
+                    continue
+                names_of_definition += override.used_names
+                decorators_of_definition |= set(override.used_decorators)
+
+            if (
+                definition.name not in module_references[path]
+                and definition.name not in attribute_references
+                and not (all_public and not definition.name.startswith("_"))
+                and not _is_dunder(definition.name)
+                and not any(fnmatchcase(definition.name, pattern) for pattern in names_of_definition)
+                and decorators_of_definition.isdisjoint(definition.decorators)
+            ):
+                findings.append(
+                    Finding(
+                        path=definition.path,
+                        line=definition.line,
+                        kind=f"unused {definition.kind}",
+                        name=definition.name,
+                    )
+                )
     return findings
 
 

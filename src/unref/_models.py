@@ -30,12 +30,19 @@ class Override:
     """
     Options that apply only to some of the files of a project, on top of the options of the project.
 
+    The options apply to the definitions that match every selector that is given: `paths`,
+    `base_classes`, or both.
+
     Attributes:
         paths: The files and directories that the options apply to.
+        base_classes: The base classes, as dotted names such as `pydantic.BaseModel`, of the classes
+            that the options apply to. The options apply to what is defined in a class that inherits
+            from one of them, directly or not.
         used_names: The names, as patterns, of the definitions that count as used.
         used_decorators: The decorators that make the definitions they decorate count as used.
     """
 
-    paths: Sequence[str | os.PathLike[str]]
+    paths: Sequence[str | os.PathLike[str]] = ()
+    base_classes: Sequence[str] = ()
     used_names: Sequence[str] = ()
     used_decorators: Sequence[str] = ()
