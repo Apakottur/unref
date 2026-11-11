@@ -25,6 +25,7 @@ Rozantsev
 showlocals
 shpyx
 softprops
+strerror
 subclassing
 taplo
 typer

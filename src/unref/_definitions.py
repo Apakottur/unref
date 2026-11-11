@@ -3,7 +3,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from unref._models import Finding
+
+@dataclass(frozen=True)
+class Definition:
+    """
+    Something that a Python module defines.
+
+    Attributes:
+        path: The file that holds the definition.
+        line: The line of the definition in the file, starting at 1.
+        kind: What is defined.
+        name: The name of the definition.
+        decorators: The dotted names of the decorators of the definition, such as `app.command`,
+            without their arguments. A decorator that is not a dotted name is left out.
+    """
+
+    path: Path
+    line: int
+    kind: Literal["function", "class", "method", "variable", "attribute"]
+    name: str
+    decorators: tuple[str, ...] = ()
 
 
 @dataclass
@@ -23,7 +42,7 @@ class _Scope:
     instance: str | None = None
 
 
-def find_definitions(path: Path, module: ast.Module) -> list[Finding]:
+def find_definitions(path: Path, module: ast.Module) -> list[Definition]:
     """
     Find the functions, classes, methods, variables and attributes that a Python module defines.
 
@@ -34,69 +53,87 @@ def find_definitions(path: Path, module: ast.Module) -> list[Finding]:
         module: The parsed module.
 
     Returns:
-        A finding for each definition, in the order of the file.
+        The definitions, in the order of the file.
     """
-    findings: list[Finding] = []
-    _collect(module, path=path, scope=_Scope(kind="module"), findings=findings)
-    return findings
+    definitions: list[Definition] = []
+    _collect(module, path=path, scope=_Scope(kind="module"), definitions=definitions)
+    return definitions
 
 
-def _collect(node: ast.AST, *, path: Path, scope: _Scope, findings: list[Finding]) -> None:
+def _collect(node: ast.AST, *, path: Path, scope: _Scope, definitions: list[Definition]) -> None:
     """
-    Add a finding for each definition under a node.
+    Add the definitions under a node.
 
     Args:
         node: The node to search under.
         path: The file of the node.
         scope: The scope of the node.
-        findings: The findings to add to.
+        definitions: The definitions to add to.
     """
     for child in ast.iter_child_nodes(node):
         match child:
             case ast.ClassDef():
-                findings.append(Finding(path=path, line=child.lineno, kind="unused class", name=child.name))
-                _collect(child, path=path, scope=_Scope(kind="class"), findings=findings)
+                definitions.append(
+                    Definition(
+                        path=path,
+                        line=child.lineno,
+                        kind="class",
+                        name=child.name,
+                        decorators=_decorators(child),
+                    )
+                )
+                _collect(child, path=path, scope=_Scope(kind="class"), definitions=definitions)
             case ast.FunctionDef() | ast.AsyncFunctionDef():
+                kind: Literal["function", "method"]
                 if scope.kind == "class":
-                    kind = "unused method"
+                    kind = "method"
                     parameters = [*child.args.posonlyargs, *child.args.args]
                     instance = parameters[0].arg if parameters else None
                     function_scope = _Scope(kind="function", names=scope.names, instance=instance)
                 else:
-                    kind = "unused function"
+                    kind = "function"
                     function_scope = _Scope(kind="function")
-                findings.append(Finding(path=path, line=child.lineno, kind=kind, name=child.name))
-                _collect(child, path=path, scope=function_scope, findings=findings)
+                definitions.append(
+                    Definition(
+                        path=path,
+                        line=child.lineno,
+                        kind=kind,
+                        name=child.name,
+                        decorators=_decorators(child),
+                    )
+                )
+                _collect(child, path=path, scope=function_scope, definitions=definitions)
             case ast.Assign():
                 for target in child.targets:
-                    _collect_target(target, path=path, scope=scope, findings=findings)
+                    _collect_target(target, path=path, scope=scope, definitions=definitions)
             case ast.AnnAssign():
-                _collect_target(child.target, path=path, scope=scope, findings=findings)
+                _collect_target(child.target, path=path, scope=scope, definitions=definitions)
             case _:
-                _collect(child, path=path, scope=scope, findings=findings)
+                _collect(child, path=path, scope=scope, definitions=definitions)
 
 
-def _collect_target(target: ast.expr, *, path: Path, scope: _Scope, findings: list[Finding]) -> None:
+def _collect_target(target: ast.expr, *, path: Path, scope: _Scope, definitions: list[Definition]) -> None:
     """
-    Add a finding for each variable or attribute that an assignment target defines.
+    Add the variables and attributes that an assignment target defines.
 
     Args:
         target: The assignment target.
         path: The file of the target.
         scope: The scope of the assignment.
-        findings: The findings to add to.
+        definitions: The definitions to add to.
     """
+    kind: Literal["variable", "attribute"]
     match target:
         case ast.Name(id=name) if scope.kind != "function":
-            kind = "unused variable" if scope.kind == "module" else "unused attribute"
+            kind = "variable" if scope.kind == "module" else "attribute"
         case ast.Attribute(value=ast.Name(id=owner), attr=name) if owner == scope.instance:
-            kind = "unused attribute"
+            kind = "attribute"
         case ast.Tuple(elts=elements) | ast.List(elts=elements):
             for element in elements:
-                _collect_target(element, path=path, scope=scope, findings=findings)
+                _collect_target(element, path=path, scope=scope, definitions=definitions)
             return
         case ast.Starred(value=value):
-            _collect_target(value, path=path, scope=scope, findings=findings)
+            _collect_target(value, path=path, scope=scope, definitions=definitions)
             return
         case _:
             # A local variable, or an assignment into an object that is defined elsewhere.
@@ -105,4 +142,31 @@ def _collect_target(target: ast.expr, *, path: Path, scope: _Scope, findings: li
     # A variable or attribute is found once, where it is first assigned.
     if name not in scope.names:
         scope.names.add(name)
-        findings.append(Finding(path=path, line=target.lineno, kind=kind, name=name))
+        definitions.append(Definition(path=path, line=target.lineno, kind=kind, name=name))
+
+
+def _decorators(node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[str, ...]:
+    """
+    Get the dotted names of the decorators of a class or function.
+    """
+    names = (_dotted_name(decorator) for decorator in node.decorator_list)
+    return tuple(name for name in names if name is not None)
+
+
+def _dotted_name(expression: ast.expr) -> str | None:
+    """
+    Get the dotted name of a decorator, such as `app.command` for `@app.command("name")`.
+
+    Returns:
+        The dotted name, or None if the decorator is not a dotted name, for example `@decorators[0]`.
+    """
+    match expression:
+        case ast.Call(func=function):
+            return _dotted_name(function)
+        case ast.Name(id=name):
+            return name
+        case ast.Attribute(value=value, attr=name):
+            prefix = _dotted_name(value)
+            return None if prefix is None else f"{prefix}.{name}"
+        case _:
+            return None

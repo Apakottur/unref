@@ -8,12 +8,17 @@ from unref._models import Finding
 from unref._references import find_references
 
 
-def find_unreferenced(paths: Iterable[str | os.PathLike[str]]) -> list[Finding]:
+def find_unreferenced(
+    paths: Iterable[str | os.PathLike[str]],
+    *,
+    used_decorators: Iterable[str],
+) -> list[Finding]:
     """
     Find the definitions in a Python project that nothing references.
 
     Args:
         paths: The files and directories that make up the project.
+        used_decorators: The decorators that make the definitions they decorate count as used.
 
     Returns:
         A finding for each unreferenced definition, sorted by file and line.
@@ -26,11 +31,21 @@ def find_unreferenced(paths: Iterable[str | os.PathLike[str]]) -> list[Finding]:
     for _, module in modules:
         references |= find_references(module)
 
+    # A decorator may be written with its `@`.
+    used_decorator_names = {decorator.removeprefix("@") for decorator in used_decorators}
+
     return [
-        finding
+        Finding(
+            path=definition.path,
+            line=definition.line,
+            kind=f"unused {definition.kind}",
+            name=definition.name,
+        )
         for path, module in modules
-        for finding in find_definitions(path, module)
-        if finding.name not in references and not _is_dunder(finding.name)
+        for definition in find_definitions(path, module)
+        if definition.name not in references
+        and not _is_dunder(definition.name)
+        and used_decorator_names.isdisjoint(definition.decorators)
     ]
 
 

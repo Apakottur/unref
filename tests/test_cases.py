@@ -11,6 +11,8 @@ Several findings on one line are separated by commas:
     first, second = 1, 2  # expect: unused variable, unused variable
 
 The findings must match exactly: a line without the comment must not have a finding.
+
+A case is configured with a `pyproject.toml` in its directory.
 """
 
 import tokenize
@@ -19,6 +21,7 @@ from pathlib import Path
 import pytest
 
 import unref
+from unref._config import load_config
 
 _CASES_DIR = Path(__file__).parent / "cases"
 _EXPECT_PREFIX = "# expect:"
@@ -45,10 +48,14 @@ def _expected_findings(case: Path) -> list[_Finding]:
 
 def _actual_findings(case: Path) -> list[_Finding]:
     """
-    Run the check on a case and collect its findings.
+    Run the check on a case, with the configuration of the case, and collect its findings.
     """
+    pyproject = case / "pyproject.toml"
+    config = load_config(pyproject if pyproject.exists() else None)
+
     return sorted(
-        (finding.path.relative_to(case).as_posix(), finding.line, finding.kind) for finding in unref.check([case])
+        (finding.path.relative_to(case).as_posix(), finding.line, finding.kind)
+        for finding in unref.check([case], used_decorators=config.used_decorators)
     )
 
 

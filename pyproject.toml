@@ -47,5 +47,8 @@ repository = "https://github.com/Apakottur/unref"
 [tool.hatch.version]
 source = "vcs"
 
+[tool.unref]
+used-decorators = ["app.command"]
+
 [tool.uv]
 package = true
