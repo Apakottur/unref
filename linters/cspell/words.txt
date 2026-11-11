@@ -20,6 +20,7 @@ pathlib
 posonlyargs
 prek
 pycache
+Pydantic
 Pydocstyle
 pyproject
 pytest

@@ -18,10 +18,12 @@ class Config:
     The configuration of a check.
 
     Attributes:
+        used_names: The names, as patterns, of the definitions that count as used.
         used_decorators: The decorators that make the definitions they decorate count as used.
         exclude: The files and directories that are not part of the project.
     """
 
+    used_names: tuple[str, ...] = ()
     used_decorators: tuple[str, ...] = ()
     exclude: tuple[Path, ...] = ()
 
@@ -67,7 +69,7 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
     Build the configuration from the options of a configuration file.
     """
     for name in options:
-        if name not in {"used-decorators", "exclude"}:
+        if name not in {"used-names", "used-decorators", "exclude"}:
             raise UnrefConfigError(f"Unknown option {name!r} in the configuration file {path}")
 
     used_decorators = _string_list(options, "used-decorators", path)
@@ -79,6 +81,7 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
             )
 
     return Config(
+        used_names=tuple(_string_list(options, "used-names", path)),
         used_decorators=tuple(used_decorators),
         # The excluded paths are relative to the directory of the configuration file.
         exclude=tuple(path.parent / item for item in _string_list(options, "exclude", path)),
