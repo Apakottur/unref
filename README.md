@@ -1,36 +1,25 @@
 [![image](https://img.shields.io/pypi/v/unref.svg)](https://pypi.python.org/pypi/unref)
 [![image](https://img.shields.io/pypi/l/unref.svg)](https://github.com/Apakottur/unref/blob/main/LICENSE)
 [![image](https://img.shields.io/pypi/pyversions/unref.svg)](https://pypi.python.org/pypi/unref)
+[![Documentation](https://readthedocs.org/projects/unref/badge/?version=latest)](https://unref.readthedocs.io/)
 
 # unref
 
 Find unreferenced Python code.
 
-## Usage
+`unref` reports the functions, classes, methods, variables and attributes of a Python project that
+nothing references.
+
+**Documentation**: [unref.readthedocs.io](https://unref.readthedocs.io/)
+
+## Quick start
 
 Check the project in the current directory, using [`uvx`](https://docs.astral.sh/uv/):
 
 ```shell
-uvx unref
-```
-
-Or from Python:
-
-```python
-import unref
-
-findings = unref.check(["."])
-```
-
-Or as a [pre-commit](https://pre-commit.com/) / [prek](https://prek.j178.dev/) hook, pinned to the
-[latest release](https://github.com/Apakottur/unref/releases):
-
-```yaml
-repos:
-  - repo: https://github.com/Apakottur/unref
-    rev: v0.0.1
-    hooks:
-      - id: unref
+$ uvx unref
+src/project/models.py:12: unused class 'Account'
+src/project/utils.py:40: unused function 'parse_date'
 ```
 
 ## Why
