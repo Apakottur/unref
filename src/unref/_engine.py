@@ -1,6 +1,7 @@
 import ast
 import os
 from collections.abc import Iterable
+from fnmatch import fnmatchcase
 
 from unref._definitions import find_definitions
 from unref._discover import discover
@@ -11,6 +12,7 @@ from unref._references import find_references
 def find_unreferenced(
     paths: Iterable[str | os.PathLike[str]],
     *,
+    used_names: Iterable[str],
     used_decorators: Iterable[str],
     exclude: Iterable[str | os.PathLike[str]],
 ) -> list[Finding]:
@@ -19,6 +21,7 @@ def find_unreferenced(
 
     Args:
         paths: The files and directories that make up the project.
+        used_names: The names, as patterns, of the definitions that count as used.
         used_decorators: The decorators that make the definitions they decorate count as used.
         exclude: The files and directories that are not part of the project.
 
@@ -33,6 +36,7 @@ def find_unreferenced(
     for _, module in modules:
         references |= find_references(module)
 
+    used_name_patterns = list(used_names)
     used_decorator_names = set(used_decorators)
 
     return [
@@ -46,6 +50,7 @@ def find_unreferenced(
         for definition in find_definitions(path, module)
         if definition.name not in references
         and not _is_dunder(definition.name)
+        and not any(fnmatchcase(definition.name, pattern) for pattern in used_name_patterns)
         and used_decorator_names.isdisjoint(definition.decorators)
     ]
 

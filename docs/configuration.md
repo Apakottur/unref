@@ -24,8 +24,22 @@ does not read a configuration file.
 
 | Option            | Library argument  | Description                                                              |
 | ----------------- | ----------------- | ------------------------------------------------------------------------ |
+| `used-names`      | `used_names`      | Names of the definitions that count as used.                             |
 | `used-decorators` | `used_decorators` | Decorators that make the definitions they decorate count as used.        |
 | `exclude`         | `exclude`         | Files and directories that are not part of the project.                  |
+
+### `used-names`
+
+Names of the definitions that count as used. Use it for names that a framework looks up, such as the
+`visit_*` methods of a visitor or the `model_config` of a Pydantic model.
+
+```toml
+[tool.unref]
+used-names = ["model_config", "visit_*"]
+```
+
+A name is a pattern, matched with its case: `*` stands for any text, `?` for one character, and
+`[abc]` for one of the characters.
 
 ### `used-decorators`
 

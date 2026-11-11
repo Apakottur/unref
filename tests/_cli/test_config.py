@@ -103,7 +103,7 @@ def test_config_decorator_with_at_sign(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("option", ["used-decorators", "exclude"])
+@pytest.mark.parametrize("option", ["used-names", "used-decorators", "exclude"])
 @pytest.mark.parametrize("value", ['"text"', '["text", 1]'])
 def test_config_wrong_type(tmp_path: Path, option: str, value: str) -> None:
     config = tmp_path / "unref.toml"
@@ -135,6 +135,16 @@ def test_config_exclude_given_file() -> None:
     case = _CASES_DIR / "exclude"
 
     result = _runner.invoke(app, ["--config", str(case / "pyproject.toml"), str(case / "single.py")])
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
+
+
+def test_config_used_names(tmp_path: Path) -> None:
+    config = tmp_path / "unref.toml"
+    config.write_text('used-names = ["func*"]\n')
+
+    result = _runner.invoke(app, ["--config", str(config), str(_CASES_DIR / "function")])
 
     assert result.exit_code == 0
     assert result.stdout == ""
