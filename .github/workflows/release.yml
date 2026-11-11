@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+  workflow_dispatch:
+
+jobs:
+  release:
+    # A manual run on a branch would build a dev version (.devN+g<hash>) that PyPI rejects,
+    # so only release from a version tag.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Required for PyPI Trusted Publishing (OIDC), so no API token is stored.
+      id-token: write
+      # Required to create the GitHub Release.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # hatch-vcs derives the version from the git tag, so it needs the
+          # full history and tags, not a shallow clone.
+          fetch-depth: 0
+
+      - uses: ./.github/workflows/util/setup_python
+
+      - name: Build
+        run: uv build
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
