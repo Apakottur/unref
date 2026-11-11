@@ -103,14 +103,38 @@ def test_config_decorator_with_at_sign(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("value", ['"functools.cache"', '["functools.cache", 1]'])
-def test_config_wrong_type(tmp_path: Path, value: str) -> None:
+@pytest.mark.parametrize("option", ["used-decorators", "exclude"])
+@pytest.mark.parametrize("value", ['"text"', '["text", 1]'])
+def test_config_wrong_type(tmp_path: Path, option: str, value: str) -> None:
     config = tmp_path / "unref.toml"
-    config.write_text(f"used-decorators = {value}\n")
+    config.write_text(f"{option} = {value}\n")
 
     result = _runner.invoke(app, ["--config", str(config)])
 
     assert result.exit_code == 2
-    assert result.stderr == (
-        f"Error: Option 'used-decorators' in the configuration file {config} must be a list of strings\n"
+    assert result.stderr == f"Error: Option '{option}' in the configuration file {config} must be a list of strings\n"
+
+
+def test_config_exclude_is_relative_to_config_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The excluded paths are relative to the directory of the configuration file, not the current directory.
+    case = _CASES_DIR / "exclude"
+    monkeypatch.chdir(case / "pkg")
+
+    result = _runner.invoke(app, ["--config", str(case / "pyproject.toml"), str(case)])
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        f"{case}/main.py:1: unused function 'function'\n"
+        f"{case}/main.py:6: unused function 'used_by_excluded'\n"
+        f"{case}/pkg/generated/module.py:2: unused function 'nested'\n"
     )
+
+
+def test_config_exclude_given_file() -> None:
+    # A file that is excluded is not checked, even when it is given directly.
+    case = _CASES_DIR / "exclude"
+
+    result = _runner.invoke(app, ["--config", str(case / "pyproject.toml"), str(case / "single.py")])
+
+    assert result.exit_code == 0
+    assert result.stdout == ""

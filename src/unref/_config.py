@@ -19,9 +19,11 @@ class Config:
 
     Attributes:
         used_decorators: The decorators that make the definitions they decorate count as used.
+        exclude: The files and directories that are not part of the project.
     """
 
     used_decorators: tuple[str, ...] = ()
+    exclude: tuple[Path, ...] = ()
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -65,13 +67,10 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
     Build the configuration from the options of a configuration file.
     """
     for name in options:
-        if name != "used-decorators":
+        if name not in {"used-decorators", "exclude"}:
             raise UnrefConfigError(f"Unknown option {name!r} in the configuration file {path}")
 
-    used_decorators = options.get("used-decorators", [])
-    if not isinstance(used_decorators, list) or not all(isinstance(item, str) for item in used_decorators):
-        raise UnrefConfigError(f"Option 'used-decorators' in the configuration file {path} must be a list of strings")
-
+    used_decorators = _string_list(options, "used-decorators", path)
     for decorator in used_decorators:
         if decorator.startswith("@"):
             raise UnrefConfigError(
@@ -79,4 +78,18 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
                 f"must list decorators without the '@': {decorator!r}"
             )
 
-    return Config(used_decorators=tuple(used_decorators))
+    return Config(
+        used_decorators=tuple(used_decorators),
+        # The excluded paths are relative to the directory of the configuration file.
+        exclude=tuple(path.parent / item for item in _string_list(options, "exclude", path)),
+    )
+
+
+def _string_list(options: dict[str, Any], name: str, path: Path) -> list[str]:
+    """
+    Get an option that is a list of strings, empty if the option is not set.
+    """
+    value = options.get(name, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise UnrefConfigError(f"Option {name!r} in the configuration file {path} must be a list of strings")
+    return value

@@ -12,6 +12,7 @@ def find_unreferenced(
     paths: Iterable[str | os.PathLike[str]],
     *,
     used_decorators: Iterable[str],
+    exclude: Iterable[str | os.PathLike[str]],
 ) -> list[Finding]:
     """
     Find the definitions in a Python project that nothing references.
@@ -19,11 +20,12 @@ def find_unreferenced(
     Args:
         paths: The files and directories that make up the project.
         used_decorators: The decorators that make the definitions they decorate count as used.
+        exclude: The files and directories that are not part of the project.
 
     Returns:
         A finding for each unreferenced definition, sorted by file and line.
     """
-    modules = [(path, ast.parse(path.read_bytes(), filename=str(path))) for path in discover(paths)]
+    modules = [(path, ast.parse(path.read_bytes(), filename=str(path))) for path in discover(paths, exclude=exclude)]
 
     # References are matched by name only: a name that is referred to anywhere in the project keeps
     # every definition of that name alive.

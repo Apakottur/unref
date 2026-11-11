@@ -55,7 +55,7 @@ def _actual_findings(case: Path) -> list[_Finding]:
 
     return sorted(
         (finding.path.relative_to(case).as_posix(), finding.line, finding.kind)
-        for finding in unref.check([case], used_decorators=config.used_decorators)
+        for finding in unref.check([case], used_decorators=config.used_decorators, exclude=config.exclude)
     )
 
 
