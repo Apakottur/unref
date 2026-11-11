@@ -30,5 +30,14 @@ def find_unreferenced(paths: Iterable[str | os.PathLike[str]]) -> list[Finding]:
         finding
         for path, module in modules
         for finding in find_definitions(path, module)
-        if finding.name not in references
+        if finding.name not in references and not _is_dunder(finding.name)
     ]
+
+
+def _is_dunder(name: str) -> bool:
+    """
+    Check whether a name is a dunder, such as `__init__` or `__all__`.
+
+    Python and tools refer to dunders implicitly, so they always count as referenced.
+    """
+    return len(name) > 4 and name.startswith("__") and name.endswith("__")
