@@ -33,31 +33,6 @@ repos:
       - id: unref
 ```
 
-## Configuration
-
-`unref` reads its configuration from the `[tool.unref]` table of the `pyproject.toml` in the current
-directory:
-
-```toml
-[tool.unref]
-used-decorators = ["app.command", "pytest.fixture"]
-```
-
-Another file can be given with `--config`. A file that is not named `pyproject.toml` has the options
-at the top level:
-
-```toml
-used-decorators = ["app.command", "pytest.fixture"]
-```
-
-### `used-decorators`
-
-Decorators that make the definitions they decorate count as used. Use it for decorators that register
-a function or class, such as a route or a command, which is then never referenced by name.
-
-A decorator is given by its dotted name, as it is written in the code, and covers the decorator with and
-without arguments: `app.command` covers `@app.command`, `@app.command()` and `@app.command("name")`.
-
 ## Why
 
 Unused code piles up in every codebase, and faster than ever now that AI tools write much of it and
