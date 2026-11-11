@@ -8,7 +8,7 @@ import sys
 import httpx
 import shpyx
 
-_MAIN_BRANCH = "master"
+_MAIN_BRANCH = "main"
 
 
 def _abort(message: str) -> None:
@@ -23,14 +23,14 @@ def _confirm(question: str) -> None:
 
 
 def main() -> None:
-    # Verify we are on a clean, up-to-date `master` before tagging.
+    # Verify we are on a clean, up-to-date `main` before tagging.
     branch = shpyx.run("git rev-parse --abbrev-ref HEAD").stdout.strip()
     if branch != _MAIN_BRANCH:
         _abort(f"Must be on the '{_MAIN_BRANCH}' branch, but currently on '{branch}'.")
     if shpyx.run("git status --porcelain").stdout.strip():
         _abort("Working tree is not clean. Commit or stash your changes first.")
 
-    # Fetch and fast-forward to origin/master.
+    # Fetch and fast-forward to origin/main.
     print("Fetching from origin...")
     shpyx.run("git pull")
 
@@ -55,8 +55,8 @@ def main() -> None:
     # picked from them. This calls the same GitHub endpoint that `generate_release_notes: true`
     # uses in release.yml, so the output matches what the Release workflow produces (assuming
     # no new merges land before the tag is pushed). The tag is not chosen yet, so the notes are
-    # generated for the master branch: only the "Full Changelog" compare link differs, ending at
-    # master instead of the new tag. A failure here aborts before tagging, since it likely means
+    # generated for the main branch: only the "Full Changelog" compare link differs, ending at
+    # main instead of the new tag. A failure here aborts before tagging, since it likely means
     # the release notes the workflow produces would be wrong too.
     print("\nGenerating release notes preview...")
     notes = shpyx.run(
