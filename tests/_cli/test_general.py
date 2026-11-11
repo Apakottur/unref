@@ -7,7 +7,7 @@ from unref._cli import app
 
 _runner = CliRunner()
 
-_CASES_DIR = Path(__file__).parent / "cases"
+_CASES_DIR = Path(__file__).parent.parent / "cases"
 
 
 def test_no_findings() -> None:
