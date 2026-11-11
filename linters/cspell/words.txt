@@ -12,7 +12,9 @@ elts
 httpx
 ignorelist
 isort
+lucide
 maxfail
+mkdocstrings
 mypy
 pathlib
 posonlyargs

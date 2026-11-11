@@ -14,6 +14,11 @@ dev = [
   "shpyx==1.0.0",
   "ty==0.0.101",
 ]
+docs = [
+  #
+  "mkdocstrings-python==2.0.10",
+  "zensical==0.1.1",
+]
 
 [project]
 name = "unref"
@@ -43,6 +48,7 @@ unref = "unref._cli:app"
 [project.urls]
 homepage = "https://github.com/Apakottur/unref"
 repository = "https://github.com/Apakottur/unref"
+documentation = "https://unref.readthedocs.io/"
 
 [tool.hatch.version]
 source = "vcs"
