@@ -52,16 +52,18 @@ See the [Python API](reference/api.md).
 
 ### pre-commit and prek
 
-`unref` can run as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook, pinned to
-the [latest release](https://github.com/Apakottur/unref/releases):
+`unref` can run as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook:
 
 ```yaml
 repos:
   - repo: https://github.com/Apakottur/unref
-    rev: v0.0.2
+    rev: "" # The latest release.
     hooks:
       - id: unref
 ```
+
+Set `rev` to the [latest release](https://github.com/Apakottur/unref/releases), or let `pre-commit autoupdate`
+or `prek autoupdate` fill it in.
 
 The hook checks the whole project, not only the changed files: a definition is unused only if no file
 references it.
