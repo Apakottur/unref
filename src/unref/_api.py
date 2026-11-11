@@ -1,7 +1,6 @@
 import os
 from collections.abc import Iterable
 
-from unref._discover import discover
 from unref._engine import find_unreferenced
 from unref._models import Finding
 
@@ -16,4 +15,4 @@ def check(paths: Iterable[str | os.PathLike[str]]) -> list[Finding]:
     Returns:
         The findings, one for each definition that nothing references, sorted by file and line.
     """
-    return find_unreferenced(discover(paths))
+    return find_unreferenced(paths)
