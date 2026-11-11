@@ -6,12 +6,14 @@ commitish
 contextlib
 docstrings
 elif
+elts
 httpx
 ignorelist
 isort
 maxfail
 mypy
 pathlib
+posonlyargs
 prek
 pycache
 Pydocstyle

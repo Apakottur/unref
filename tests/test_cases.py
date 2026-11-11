@@ -6,6 +6,10 @@ it is reported on:
 
     def unused():  # expect: unused function
 
+Several findings on one line are separated by commas:
+
+    first, second = 1, 2  # expect: unused variable, unused variable
+
 The findings must match exactly: a line without the comment must not have a finding.
 """
 
@@ -31,13 +35,10 @@ def _expected_findings(case: Path) -> list[_Finding]:
     for path in case.rglob("*.py"):
         with tokenize.open(path) as file:
             findings.extend(
-                (
-                    path.relative_to(case).as_posix(),
-                    token.start[0],
-                    token.string.removeprefix(_EXPECT_PREFIX).strip(),
-                )
+                (path.relative_to(case).as_posix(), token.start[0], kind.strip())
                 for token in tokenize.generate_tokens(file.readline)
                 if token.type == tokenize.COMMENT and token.string.startswith(_EXPECT_PREFIX)
+                for kind in token.string.removeprefix(_EXPECT_PREFIX).split(",")
             )
     return sorted(findings)
 
