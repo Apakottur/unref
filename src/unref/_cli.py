@@ -23,13 +23,5 @@ def main(
 ) -> None:
     """
     Find unreferenced Python code.
-
-    Exits with a non-zero status if anything is found.
     """
-    findings = check(paths or [Path()])
-
-    for finding in findings:
-        typer.echo(finding)
-
-    if findings:
-        raise typer.Exit(code=1)
+    check(paths or [Path()])
