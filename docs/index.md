@@ -58,7 +58,7 @@ the [latest release](https://github.com/Apakottur/unref/releases):
 ```yaml
 repos:
   - repo: https://github.com/Apakottur/unref
-    rev: v0.0.1
+    rev: v0.0.2
     hooks:
       - id: unref
 ```
