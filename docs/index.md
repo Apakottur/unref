@@ -5,10 +5,6 @@ Find unreferenced Python code.
 `unref` reports the functions, classes, methods, variables and attributes of a Python project that
 nothing references.
 
-!!! warning
-
-    `unref` is in early development. Expect false positives, and changes between versions.
-
 ## Installation
 
 unref is available as [`unref`](https://pypi.org/project/unref/) on PyPI. Run it without installing via
