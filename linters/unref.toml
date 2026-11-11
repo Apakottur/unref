@@ -1,0 +1,10 @@
+# See: https://unref.readthedocs.io/en/latest/configuration/
+# The paths are relative to this file.
+
+# The test cases are small projects that are unused on purpose.
+exclude = ["../tests/cases"]
+used-decorators = ["app.command"]
+
+[[overrides]]
+paths = ["../tests"]
+used-names = ["test_*"]

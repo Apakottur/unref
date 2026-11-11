@@ -53,8 +53,5 @@ documentation = "https://unref.readthedocs.io/"
 [tool.hatch.version]
 source = "vcs"
 
-[tool.unref]
-used-decorators = ["app.command"]
-
 [tool.uv]
 package = true
