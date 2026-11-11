@@ -17,8 +17,7 @@ def check(
 
     Args:
         paths: The files and directories that make up the project.
-        used_names: The names of the definitions that count as used. A name is a pattern, where `*`
-            stands for any text and `?` for one character. For example, `test_*` covers `test_check`.
+        used_names: The names of the definitions that count as used, as glob patterns such as `test_*`.
         used_decorators: The decorators that make the definitions they decorate count as used, as
             dotted names. For example, `app.command` covers `@app.command` and `@app.command("name")`.
         exclude: The files and directories that are not part of the project. They are not checked, and
