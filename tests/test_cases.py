@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 import unref
-from unref._config import load_config
+from unref._config import Config, load_config
 
 _CASES_DIR = Path(__file__).parent / "cases"
 _EXPECT_PREFIX = "# expect:"
@@ -51,7 +51,7 @@ def _actual_findings(case: Path) -> list[_Finding]:
     Run the check on a case, with the configuration of the case, and collect its findings.
     """
     pyproject = case / "pyproject.toml"
-    config = load_config(pyproject if pyproject.exists() else None)
+    config = load_config(pyproject) if pyproject.exists() else Config()
 
     return sorted(
         (finding.path.relative_to(case).as_posix(), finding.line, finding.kind)
