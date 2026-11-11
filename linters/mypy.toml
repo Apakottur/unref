@@ -12,6 +12,9 @@ ignore_missing_imports = false
 follow_imports = "normal"
 follow_imports_for_stubs = true
 
+# The test cases are small projects that are unused and odd on purpose.
+exclude = ["tests/cases/"]
+
 ##########################
 # Platform configuration #
 ##########################

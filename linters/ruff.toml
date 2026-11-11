@@ -14,6 +14,9 @@ fix = true
 # Output format, can be used to print more detailed errors.
 output-format = "concise"
 
+# The test cases are small projects that are unused and odd on purpose.
+extend-exclude = ["tests/cases"]
+
 [format]
 # Preview mode is unstable and should not be used.
 preview = false

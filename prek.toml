@@ -99,3 +99,17 @@ args = ["--config", "./linters/ruff.toml"]
 [[repos.hooks]]
 id = "ruff-format"
 args = ["--config", "./linters/ruff.toml"]
+
+#########
+# UNREF #
+#########
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "unref"
+name = "unref"
+entry = "uv run unref src"
+language = "system"
+types = ["python"]
+pass_filenames = false

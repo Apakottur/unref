@@ -1,6 +1,7 @@
 addopts
 anyio
 Apakottur
+capsys
 commitish
 contextlib
 docstrings
@@ -22,6 +23,7 @@ shpyx
 softprops
 subclassing
 taplo
+typer
 typeshed
 unref
 venv
