@@ -37,6 +37,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+unref = "unref._cli:main"
+
 [project.urls]
 homepage = "https://github.com/Apakottur/unref"
 repository = "https://github.com/Apakottur/unref"

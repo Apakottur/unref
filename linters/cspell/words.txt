@@ -1,8 +1,10 @@
 addopts
 anyio
 Apakottur
+capsys
 commitish
 contextlib
+dedented
 docstrings
 elif
 httpx
