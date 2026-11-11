@@ -42,10 +42,15 @@ def main() -> None:
         _abort(f"Cannot parse a GitHub 'owner/repo' slug from origin URL {remote_url!r}.")
     package_name = slug.split("/")[1]
 
-    # Look up the latest published version on PyPI.
+    # Look up the latest published version on PyPI. A package that was never published
+    # has no version yet, so the first release is bumped from 0.0.0.
     pypi_response = httpx.get(f"https://pypi.org/pypi/{package_name}/json")
-    pypi_response.raise_for_status()
-    version = pypi_response.json()["info"]["version"]
+    if pypi_response.status_code == httpx.codes.NOT_FOUND:
+        print(f"\n'{package_name}' is not on PyPI yet, this will be its first release.")
+        version = "0.0.0"
+    else:
+        pypi_response.raise_for_status()
+        version = pypi_response.json()["info"]["version"]
     parts = version.split(".")
     if len(parts) != 3 or not all(part.isdigit() for part in parts):
         _abort(f"Cannot parse PyPI version {version!r} as 'major.minor.patch'.")
