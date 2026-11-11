@@ -7,5 +7,4 @@ used-decorators = ["app.command"]
 
 [[overrides]]
 paths = ["../tests"]
-used-decorators = ["pytest.fixture"]
 used-names = ["test_*"]
