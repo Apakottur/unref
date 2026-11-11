@@ -1,5 +1,5 @@
 [![image](https://img.shields.io/pypi/v/unref.svg)](https://pypi.python.org/pypi/unref)
-[![image](https://img.shields.io/pypi/l/unref.svg)](https://github.com/Apakottur/unref/blob/master/LICENSE)
+[![image](https://img.shields.io/pypi/l/unref.svg)](https://github.com/Apakottur/unref/blob/main/LICENSE)
 [![image](https://img.shields.io/pypi/pyversions/unref.svg)](https://pypi.python.org/pypi/unref)
 
 # unref
@@ -21,4 +21,4 @@ Use `unref` today, and migrate when Ruff ships it.
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/master/CONTRIBUTING.md).
+See [CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md).
