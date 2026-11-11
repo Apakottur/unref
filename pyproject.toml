@@ -53,15 +53,5 @@ documentation = "https://unref.readthedocs.io/"
 [tool.hatch.version]
 source = "vcs"
 
-[tool.unref]
-# The test cases are small projects that are unused on purpose.
-exclude = ["tests/cases"]
-used-decorators = ["app.command"]
-
-[[tool.unref.overrides]]
-paths = ["tests"]
-used-decorators = ["pytest.fixture"]
-used-names = ["test_*"]
-
 [tool.uv]
 package = true
