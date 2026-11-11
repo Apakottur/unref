@@ -7,47 +7,7 @@ from unref._cli import app
 
 _runner = CliRunner()
 
-_CASES_DIR = Path(__file__).parent / "cases"
-
-
-def test_no_findings() -> None:
-    result = _runner.invoke(app, [str(_CASES_DIR / "empty_file")])
-
-    assert result.exit_code == 0
-    assert result.stdout == ""
-
-
-def test_findings() -> None:
-    case = _CASES_DIR / "method"
-
-    result = _runner.invoke(app, [str(case)])
-
-    assert result.exit_code == 1
-    assert result.stdout == (
-        f"{case}/main.py:1: unused class 'Class'\n"
-        f"{case}/main.py:2: unused method 'method'\n"
-        f"{case}/main.py:5: unused method 'async_method'\n"
-    )
-
-
-def test_file_path() -> None:
-    # Only the given file is checked, not the other files next to it.
-    case = _CASES_DIR / "package" / "pkg"
-
-    result = _runner.invoke(app, [str(case / "module.py")])
-
-    assert result.exit_code == 1
-    assert result.stdout == f"{case}/module.py:1: unused function 'function'\n"
-
-
-def test_default_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Without arguments, the current directory is checked.
-    monkeypatch.chdir(_CASES_DIR / "package")
-
-    result = _runner.invoke(app, [])
-
-    assert result.exit_code == 1
-    assert result.stdout == "pkg/module.py:1: unused function 'function'\npkg/sub/module.py:1: unused class 'Class'\n"
+_CASES_DIR = Path(__file__).parent.parent / "cases"
 
 
 def test_config_in_current_directory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,6 +88,19 @@ def test_config_unknown_option(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: Unknown option 'used-decorator' in the configuration file {config}\n"
+
+
+def test_config_decorator_with_at_sign(tmp_path: Path) -> None:
+    config = tmp_path / "unref.toml"
+    config.write_text('used-decorators = ["functools.cache", "@app.command"]\n')
+
+    result = _runner.invoke(app, ["--config", str(config)])
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        f"Error: Option 'used-decorators' in the configuration file {config} "
+        "must list decorators without the '@': '@app.command'\n"
+    )
 
 
 @pytest.mark.parametrize("value", ['"functools.cache"', '["functools.cache", 1]'])

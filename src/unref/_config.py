@@ -72,4 +72,11 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
     if not isinstance(used_decorators, list) or not all(isinstance(item, str) for item in used_decorators):
         raise UnrefConfigError(f"Option 'used-decorators' in the configuration file {path} must be a list of strings")
 
+    for decorator in used_decorators:
+        if decorator.startswith("@"):
+            raise UnrefConfigError(
+                f"Option 'used-decorators' in the configuration file {path} "
+                f"must list decorators without the '@': {decorator!r}"
+            )
+
     return Config(used_decorators=tuple(used_decorators))

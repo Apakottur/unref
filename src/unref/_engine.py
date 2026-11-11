@@ -31,8 +31,7 @@ def find_unreferenced(
     for _, module in modules:
         references |= find_references(module)
 
-    # A decorator may be written with its `@`.
-    used_decorator_names = {decorator.removeprefix("@") for decorator in used_decorators}
+    used_decorator_names = set(used_decorators)
 
     return [
         Finding(

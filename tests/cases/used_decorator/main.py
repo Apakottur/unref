@@ -17,7 +17,7 @@ def with_arguments():
     return 3
 
 
-# The configuration may write a decorator with its `@`.
+# A class can be decorated too.
 @registry.register
 class Registered:
     pass

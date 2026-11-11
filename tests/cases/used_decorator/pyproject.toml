@@ -1,2 +1,2 @@
 [tool.unref]
-used-decorators = ["app.command", "@registry.register", "plain"]
+used-decorators = ["app.command", "registry.register", "plain"]
