@@ -1,0 +1,11 @@
+[tool.unref]
+used-names = ["everywhere_*"]
+
+[[tool.unref.overrides]]
+paths = ["tests", "conftest.py"]
+used-names = ["test_*"]
+used-decorators = ["pytest.fixture"]
+
+[[tool.unref.overrides]]
+paths = ["tests/unit"]
+used-names = ["Test*"]

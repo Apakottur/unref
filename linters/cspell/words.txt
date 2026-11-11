@@ -3,6 +3,7 @@ anyio
 Apakottur
 capsys
 commitish
+conftest
 contextlib
 docstrings
 dunder

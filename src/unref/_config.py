@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from unref._models import Override
+
 _PYPROJECT = "pyproject.toml"
 
 
@@ -21,11 +23,13 @@ class Config:
         used_names: The names, as patterns, of the definitions that count as used.
         used_decorators: The decorators that make the definitions they decorate count as used.
         exclude: The files and directories that are not part of the project.
+        overrides: The options that apply only to some of the files of the project.
     """
 
     used_names: tuple[str, ...] = ()
     used_decorators: tuple[str, ...] = ()
     exclude: tuple[Path, ...] = ()
+    overrides: tuple[Override, ...] = ()
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -68,31 +72,67 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
     """
     Build the configuration from the options of a configuration file.
     """
-    for name in options:
-        if name not in {"used-names", "used-decorators", "exclude"}:
-            raise UnrefConfigError(f"Unknown option {name!r} in the configuration file {path}")
+    where = f"the configuration file {path}"
+    _check_names(options, {"used-names", "used-decorators", "exclude", "overrides"}, where)
 
-    used_decorators = _string_list(options, "used-decorators", path)
-    for decorator in used_decorators:
-        if decorator.startswith("@"):
-            raise UnrefConfigError(
-                f"Option 'used-decorators' in the configuration file {path} "
-                f"must list decorators without the '@': {decorator!r}"
-            )
+    overrides = options.get("overrides", [])
+    if not isinstance(overrides, list) or not all(isinstance(item, dict) for item in overrides):
+        raise UnrefConfigError(f"Option 'overrides' in {where} must be a list of tables")
 
     return Config(
-        used_names=tuple(_string_list(options, "used-names", path)),
-        used_decorators=tuple(used_decorators),
-        # The excluded paths are relative to the directory of the configuration file.
-        exclude=tuple(path.parent / item for item in _string_list(options, "exclude", path)),
+        used_names=tuple(_string_list(options, "used-names", where)),
+        used_decorators=tuple(_decorators(options, where)),
+        # The paths are relative to the directory of the configuration file.
+        exclude=tuple(path.parent / item for item in _string_list(options, "exclude", where)),
+        overrides=tuple(_parse_override(item, path) for item in overrides),
     )
 
 
-def _string_list(options: dict[str, Any], name: str, path: Path) -> list[str]:
+def _parse_override(options: dict[str, Any], path: Path) -> Override:
+    """
+    Build an override from one of the `overrides` tables of a configuration file.
+    """
+    where = f"an override in the configuration file {path}"
+    _check_names(options, {"paths", "used-names", "used-decorators"}, where)
+
+    if "paths" not in options:
+        raise UnrefConfigError(f"Option 'paths' is missing in {where}")
+
+    return Override(
+        # The paths are relative to the directory of the configuration file.
+        paths=tuple(path.parent / item for item in _string_list(options, "paths", where)),
+        used_names=tuple(_string_list(options, "used-names", where)),
+        used_decorators=tuple(_decorators(options, where)),
+    )
+
+
+def _check_names(options: dict[str, Any], known: set[str], where: str) -> None:
+    """
+    Check that every option is a known one.
+    """
+    for name in options:
+        if name not in known:
+            raise UnrefConfigError(f"Unknown option {name!r} in {where}")
+
+
+def _decorators(options: dict[str, Any], where: str) -> list[str]:
+    """
+    Get the `used-decorators` option, which lists dotted names without the `@`.
+    """
+    decorators = _string_list(options, "used-decorators", where)
+    for decorator in decorators:
+        if decorator.startswith("@"):
+            raise UnrefConfigError(
+                f"Option 'used-decorators' in {where} must list decorators without the '@': {decorator!r}"
+            )
+    return decorators
+
+
+def _string_list(options: dict[str, Any], name: str, where: str) -> list[str]:
     """
     Get an option that is a list of strings, empty if the option is not set.
     """
     value = options.get(name, [])
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise UnrefConfigError(f"Option {name!r} in the configuration file {path} must be a list of strings")
+        raise UnrefConfigError(f"Option {name!r} in {where} must be a list of strings")
     return value

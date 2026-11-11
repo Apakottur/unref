@@ -1,3 +1,5 @@
+import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,3 +23,19 @@ class Finding:
 
     def __str__(self) -> str:
         return f"{self.path}:{self.line}: {self.kind} '{self.name}'"
+
+
+@dataclass(frozen=True)
+class Override:
+    """
+    Options that apply only to some of the files of a project, on top of the options of the project.
+
+    Attributes:
+        paths: The files and directories that the options apply to.
+        used_names: The names, as patterns, of the definitions that count as used.
+        used_decorators: The decorators that make the definitions they decorate count as used.
+    """
+
+    paths: Sequence[str | os.PathLike[str]]
+    used_names: Sequence[str] = ()
+    used_decorators: Sequence[str] = ()
