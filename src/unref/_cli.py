@@ -1,33 +1,35 @@
-import argparse
-import sys
-from collections.abc import Sequence
 from pathlib import Path
+from typing import Annotated
+
+import typer
 
 from unref._api import check
 
+app = typer.Typer(
+    add_completion=False,
+    pretty_exceptions_enable=False,
+)
 
-def main(argv: Sequence[str] | None = None) -> int:
+
+@app.command()
+def main(
+    paths: Annotated[
+        list[Path] | None,
+        typer.Argument(
+            help="Files and directories that make up the project. Defaults to the current directory.",
+            show_default=False,
+        ),
+    ] = None,
+) -> None:
     """
-    Run the command line interface.
+    Find unreferenced Python code.
 
-    Args:
-        argv: The command line arguments, defaults to the arguments of the current process.
-
-    Returns:
-        The exit code: 1 if there are findings, 0 otherwise.
+    Exits with a non-zero status if anything is found.
     """
-    parser = argparse.ArgumentParser(prog="unref", description="Find unreferenced Python code.")
-    parser.add_argument(
-        "paths",
-        nargs="*",
-        type=Path,
-        default=[Path()],
-        help="files and directories that make up the project (default: the current directory)",
-    )
-    args = parser.parse_args(argv)
+    findings = check(paths or [Path()])
 
-    findings = check(args.paths)
     for finding in findings:
-        sys.stdout.write(f"{finding}\n")
+        typer.echo(finding)
 
-    return 1 if findings else 0
+    if findings:
+        raise typer.Exit(code=1)

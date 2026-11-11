@@ -1,23 +1,30 @@
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from unref import _cli
 
+_runner = CliRunner()
 
-def test_no_findings(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+
+def test_no_findings(tmp_path: Path) -> None:
     (tmp_path / "main.py").write_text("")
 
-    assert _cli.main([str(tmp_path)]) == 0
-    assert capsys.readouterr().out == ""
+    result = _runner.invoke(_cli.app, [str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
 
 
-def test_findings(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_findings(monkeypatch: pytest.MonkeyPatch) -> None:
     # The core cannot produce findings yet, so they are faked to pin down the output and exit code.
     monkeypatch.setattr(_cli, "check", lambda _paths: ["first finding", "second finding"])
 
-    assert _cli.main(["."]) == 1
-    assert capsys.readouterr().out == "first finding\nsecond finding\n"
+    result = _runner.invoke(_cli.app, ["."])
+
+    assert result.exit_code == 1
+    assert result.stdout == "first finding\nsecond finding\n"
 
 
 def test_default_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -29,5 +36,7 @@ def test_default_path(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(_cli, "check", fake_check)
 
-    assert _cli.main([]) == 0
+    result = _runner.invoke(_cli.app, [])
+
+    assert result.exit_code == 0
     assert checked == [Path()]

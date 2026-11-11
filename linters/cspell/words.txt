@@ -24,6 +24,7 @@ shpyx
 softprops
 subclassing
 taplo
+typer
 typeshed
 unref
 venv

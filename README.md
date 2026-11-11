@@ -6,11 +6,6 @@
 
 Find unreferenced Python code.
 
-`unref` reports the functions, classes and methods in a Python codebase that nothing references.
-
-> [!NOTE]
-> `unref` is in early development and does not do anything useful yet.
-
 ## Usage
 
 Check the project in the current directory, using [`uvx`](https://docs.astral.sh/uv/):
@@ -40,11 +35,14 @@ repos:
 
 ## Why
 
-Finding dead code needs whole-program analysis: a function is unused only if no file in the project
-references it. [Ruff](https://docs.astral.sh/ruff/) analyses one file at a time and does not have this
-feature yet, see [astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872).
+Unused code piles up in every codebase, and faster than ever now that AI tools write much of it and
+tend to leave unused code behind.
 
-Use `unref` today, and migrate when Ruff ships it.
+Finding and removing dead code reduces bloat, speeds up AI code scanning and simplifies development.
+
+[Ruff](https://docs.astral.sh/ruff/) does not support this yet, see
+[astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` exists to fill the gap until
+Ruff supports it natively.
 
 ## Contributing
 
