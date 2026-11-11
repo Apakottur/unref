@@ -23,20 +23,20 @@ class _Scope:
     instance: str | None = None
 
 
-def find_definitions(path: Path) -> list[Finding]:
+def find_definitions(path: Path, module: ast.Module) -> list[Finding]:
     """
-    Find the functions, classes, methods, variables and attributes that a Python file defines.
+    Find the functions, classes, methods, variables and attributes that a Python module defines.
 
     Local variables and imports are left out.
 
     Args:
-        path: The Python file.
+        path: The file of the module.
+        module: The parsed module.
 
     Returns:
         A finding for each definition, in the order of the file.
     """
     findings: list[Finding] = []
-    module = ast.parse(path.read_bytes(), filename=str(path))
     _collect(module, path=path, scope=_Scope(kind="module"), findings=findings)
     return findings
 
