@@ -1,0 +1,9 @@
+# Configuration of the underlying coverage.py application.
+# See: https://coverage.readthedocs.io/en/latest/config.html
+
+[tool.coverage.report]
+# Regexes for lines to exclude from reports.
+exclude_lines = ["if TYPE_CHECKING:", '\.\.\.$', "if __name__ == .__main__.:"]
+# Multi-line regexes to exclude from reports.
+# See: https://github.com/nedbat/coveragepy/issues/1797
+exclude_also = ['case _:\n\s*assert_never\(']
