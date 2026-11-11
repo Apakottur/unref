@@ -14,7 +14,11 @@ dev = [
   "shpyx==1.0.0",
   "ty==0.0.101",
 ]
-docs = ["mkdocstrings-python==2.0.10", "zensical==0.1.1"]
+docs = [
+  #
+  "mkdocstrings-python==2.0.10",
+  "zensical==0.1.1",
+]
 
 [project]
 name = "unref"
