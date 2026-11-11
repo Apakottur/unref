@@ -28,7 +28,8 @@ python-version = "3.14"
 # [[overrides]]
 
 [src]
-# exclude =
+# The test cases are small projects that are unused and odd on purpose.
+exclude = ["tests/cases"]
 # include =
 respect-ignore-files = true
 

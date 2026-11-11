@@ -4,7 +4,6 @@ Apakottur
 capsys
 commitish
 contextlib
-dedented
 docstrings
 elif
 httpx
@@ -12,6 +11,7 @@ ignorelist
 isort
 maxfail
 mypy
+norecursedirs
 pathlib
 prek
 pycache

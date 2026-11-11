@@ -109,7 +109,7 @@ repo = "local"
 [[repos.hooks]]
 id = "unref"
 name = "unref"
-entry = "uv run unref"
+entry = "uv run unref src"
 language = "system"
 types = ["python"]
 pass_filenames = false

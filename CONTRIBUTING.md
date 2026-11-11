@@ -29,6 +29,21 @@ Run the unit tests with `pytest`:
 uv run pytest -c tests/pytest.ini tests
 ```
 
+### Test cases
+
+The behavior of the check is tested with case projects. Each directory under `tests/cases` is a small
+Python project, and `tests/test_cases.py` runs the check on each of them.
+
+A finding is expected with a comment on the line it is reported on:
+
+```python
+def unused():  # expect: unused function
+    return 1
+```
+
+The findings must match exactly, so a line without the comment must not have a finding. To test a new
+behavior, add a directory with the files that show it.
+
 Run the type checks with `mypy` and `ty` (both run in CI):
 
 ```shell
