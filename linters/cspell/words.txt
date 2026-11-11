@@ -1,6 +1,7 @@
 addopts
 anyio
 Apakottur
+asname
 capsys
 commitish
 conftest
@@ -13,6 +14,7 @@ elts
 httpx
 ignorelist
 isort
+kwonlyargs
 lucide
 maxfail
 mkdocstrings
@@ -35,5 +37,6 @@ taplo
 typer
 typeshed
 unref
+vararg
 venv
 Yossi
