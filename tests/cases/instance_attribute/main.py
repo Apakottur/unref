@@ -21,5 +21,3 @@ class Class:  # expect: unused class
         def inner(other):  # expect: unused function
             other.inner = 9
             self.from_inner = 10
-
-        return inner
