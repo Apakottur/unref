@@ -41,7 +41,7 @@ def main(
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=2) from error
 
-    findings = check(paths or [Path()], used_decorators=options.used_decorators)
+    findings = check(paths or [Path()], used_decorators=options.used_decorators, exclude=options.exclude)
 
     for finding in findings:
         typer.echo(finding)
