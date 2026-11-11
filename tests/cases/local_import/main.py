@@ -2,8 +2,7 @@
 operating_system = 1  # expect: unused variable
 separator = 2  # expect: unused variable
 os = 3  # expect: unused variable
-# Not reported yet: an import counts as a reference to every definition of that name.
-join = 4
+join = 4  # expect: unused variable
 # `import os.path` binds `os`, not `path`.
 path = 5
 
