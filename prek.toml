@@ -99,3 +99,18 @@ args = ["--config", "./linters/ruff.toml"]
 [[repos.hooks]]
 id = "ruff-format"
 args = ["--config", "./linters/ruff.toml"]
+
+#########
+# UNREF #
+#########
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "unref"
+name = "unref"
+entry = "uv run unref"
+language = "system"
+types = ["python"]
+# The whole project is checked, not only the changed files.
+pass_filenames = false
