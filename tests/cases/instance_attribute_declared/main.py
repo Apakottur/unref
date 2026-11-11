@@ -1,7 +1,7 @@
 class Class:  # expect: unused class
     declared: int  # expect: unused attribute
 
-    def __init__(self):  # expect: unused method
+    def __init__(self):
         # Already reported on the class.
         self.declared = 1
 

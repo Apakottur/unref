@@ -1,5 +1,5 @@
 class Class:  # expect: unused class
-    def __init__(self):  # expect: unused method
+    def __init__(self):
         self.plain = 1  # expect: unused attribute
         self.annotated: int = 2  # expect: unused attribute
         self.first, self.second = 3, 4  # expect: unused attribute, unused attribute

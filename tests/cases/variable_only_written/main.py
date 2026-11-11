@@ -1,5 +1,5 @@
 class Class:
-    def __init__(self):  # expect: unused method
+    def __init__(self):
         self.count = 0  # expect: unused attribute
 
     def increment(self):
