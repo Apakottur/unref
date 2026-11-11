@@ -11,7 +11,6 @@ ignorelist
 isort
 maxfail
 mypy
-norecursedirs
 pathlib
 prek
 pycache
