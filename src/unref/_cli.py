@@ -46,6 +46,7 @@ def main(
         used_names=options.used_names,
         used_decorators=options.used_decorators,
         exclude=options.exclude,
+        overrides=options.overrides,
     )
 
     for finding in findings:

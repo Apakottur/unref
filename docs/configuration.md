@@ -77,3 +77,27 @@ exclude = ["generated", "scripts/legacy.py"]
 
 A path is relative to the directory of the configuration file. Hidden directories, such as `.venv` and
 `.git`, are always left out.
+
+## Overrides
+
+Options that apply only to some of the files of the project are given in `overrides` tables:
+
+```toml
+[tool.unref]
+used-decorators = ["app.command"]
+
+[[tool.unref.overrides]]
+paths = ["tests"]
+used-names = ["test_*", "Test*"]
+used-decorators = ["pytest.fixture"]
+```
+
+Here, a function named `test_connection` counts as used in `tests`, and is reported anywhere else.
+
+- `paths` lists the files and directories that the override applies to, relative to the directory of the
+  configuration file.
+- An override takes the `used-names` and `used-decorators` options.
+- The options of an override add to those of the project, they do not replace them.
+- A file that several overrides cover gets the options of all of them.
+
+In a file that is not named `pyproject.toml`, the table is `[[overrides]]`.

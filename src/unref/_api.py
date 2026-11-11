@@ -2,7 +2,7 @@ import os
 from collections.abc import Iterable
 
 from unref._engine import find_unreferenced
-from unref._models import Finding
+from unref._models import Finding, Override
 
 
 def check(
@@ -11,6 +11,7 @@ def check(
     used_names: Iterable[str] = (),
     used_decorators: Iterable[str] = (),
     exclude: Iterable[str | os.PathLike[str]] = (),
+    overrides: Iterable[Override] = (),
 ) -> list[Finding]:
     """
     Find the unreferenced code in a Python project.
@@ -22,6 +23,8 @@ def check(
             dotted names. For example, `app.command` covers `@app.command` and `@app.command("name")`.
         exclude: The files and directories that are not part of the project. They are not checked, and
             a reference from them does not count.
+        overrides: Options that apply only to some of the files of the project, on top of the options
+            above. For example, `Override(paths=["tests"], used_names=["test_*"])`.
 
     Returns:
         The findings, one for each definition that nothing references, sorted by file and line.
@@ -31,4 +34,5 @@ def check(
         used_names=used_names,
         used_decorators=used_decorators,
         exclude=exclude,
+        overrides=overrides,
     )

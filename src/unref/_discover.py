@@ -26,7 +26,7 @@ def discover(
     for path in map(Path, paths):
         if path.is_dir():
             files.update(_walk(path, excluded))
-        elif not _is_excluded(path, excluded):
+        elif not is_under(path, excluded):
             files.add(path)
     return sorted(files)
 
@@ -39,16 +39,20 @@ def _walk(directory: Path, excluded: list[Path]) -> Iterator[Path]:
     for root, directories, files in os.walk(directory):
         # Pruned in place, so that the skipped directories are not walked into.
         directories[:] = [
-            name for name in directories if not name.startswith(".") and not _is_excluded(Path(root, name), excluded)
+            name for name in directories if not name.startswith(".") and not is_under(Path(root, name), excluded)
         ]
         for name in files:
-            if name.endswith(".py") and not _is_excluded(Path(root, name), excluded):
+            if name.endswith(".py") and not is_under(Path(root, name), excluded):
                 yield Path(root, name)
 
 
-def _is_excluded(path: Path, excluded: list[Path]) -> bool:
+def is_under(path: Path, roots: list[Path]) -> bool:
     """
-    Check whether a path is excluded, or is under an excluded directory.
+    Check whether a path is one of the given files, or is under one of the given directories.
+
+    Args:
+        path: The path to check.
+        roots: The files and directories, resolved.
     """
     absolute = Path(path).resolve()
-    return any(absolute.is_relative_to(directory) for directory in excluded)
+    return any(absolute.is_relative_to(root) for root in roots)

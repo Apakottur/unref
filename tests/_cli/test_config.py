@@ -148,3 +148,62 @@ def test_config_used_names(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert result.stdout == ""
+
+
+def test_config_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The paths of an override are relative to the directory of the configuration file.
+    case = _CASES_DIR / "override"
+    monkeypatch.chdir(case / "tests")
+
+    result = _runner.invoke(app, ["--config", str(case / "pyproject.toml"), str(case / "tests")])
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        f"{case}/tests/test_module.py:13: unused function 'helper_in_tests'\n"
+        f"{case}/tests/test_module.py:23: unused class 'TestInTests'\n"
+        f"{case}/tests/unit/test_unit.py:6: unused method 'helper'\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("content", "error"),
+    [
+        (
+            'overrides = "tests"',
+            "Option 'overrides' in the configuration file {config} must be a list of tables",
+        ),
+        (
+            'overrides = ["tests"]',
+            "Option 'overrides' in the configuration file {config} must be a list of tables",
+        ),
+        (
+            '[[overrides]]\nused-names = ["test_*"]',
+            "Option 'paths' is missing in an override in the configuration file {config}",
+        ),
+        (
+            '[[overrides]]\npaths = "tests"',
+            "Option 'paths' in an override in the configuration file {config} must be a list of strings",
+        ),
+        (
+            '[[overrides]]\npaths = ["tests"]\nused-names = "test_*"',
+            "Option 'used-names' in an override in the configuration file {config} must be a list of strings",
+        ),
+        (
+            '[[overrides]]\npaths = ["tests"]\nexclude = ["tests/data"]',
+            "Unknown option 'exclude' in an override in the configuration file {config}",
+        ),
+        (
+            '[[overrides]]\npaths = ["tests"]\nused-decorators = ["@pytest.fixture"]',
+            "Option 'used-decorators' in an override in the configuration file {config} "
+            "must list decorators without the '@': '@pytest.fixture'",
+        ),
+    ],
+)
+def test_config_overrides_invalid(tmp_path: Path, content: str, error: str) -> None:
+    config = tmp_path / "unref.toml"
+    config.write_text(f"{content}\n")
+
+    result = _runner.invoke(app, ["--config", str(config)])
+
+    assert result.exit_code == 2
+    assert result.stderr == f"Error: {error.format(config=config)}\n"
