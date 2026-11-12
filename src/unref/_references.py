@@ -269,6 +269,13 @@ class _Walker:
             self.bind(name)
         self.visit_children(node)
 
+    def visit_match_class(self, node: ast.MatchClass) -> None:
+        """
+        Add a read of each attribute that a class pattern matches by keyword (`Class(name=pattern)`).
+        """
+        self.references.attributes.update((self.owner, name) for name in node.kwd_attrs)
+        self.visit_children(node)
+
     def bind(self, name: str) -> None:
         """
         Bind a name in the current scope, and in the scopes that it binds names in as well.
@@ -333,6 +340,7 @@ _HANDLERS: dict[type[ast.AST], Callable[[_Walker, Any], None]] = {
     ast.MatchAs: _Walker.visit_pattern_or_handler,
     ast.MatchStar: _Walker.visit_pattern_or_handler,
     ast.MatchMapping: _Walker.visit_pattern_or_handler,
+    ast.MatchClass: _Walker.visit_match_class,
 }
 
 
