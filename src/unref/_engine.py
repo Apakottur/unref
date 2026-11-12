@@ -153,7 +153,8 @@ def find_unused(
                 decorators_of_definition |= set(override.used_decorators)
 
             if (
-                _is_dunder(definition.name)
+                definition.name == "_"
+                or _is_dunder(definition.name)
                 or any(fnmatchcase(definition.name, pattern) for pattern in names_of_definition)
                 or not decorators_of_definition.isdisjoint(definition.decorators)
             ):

@@ -94,7 +94,8 @@ count. A function that only calls itself is unused, and so is a function that on
 calls. The rest of a module runs when it is imported, including class bodies, decorators and default
 values, so a reference from there always counts.
 
-Dunders, such as `__init__` and `__all__`, are never reported.
+Dunders, such as `__init__` and `__all__`, are never reported, and neither is `_`, the name of a value
+that is not used, such as the `_: KW_ONLY` field of a data class.
 
 ## Ignoring a finding
 
