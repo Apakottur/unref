@@ -32,9 +32,9 @@ Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.
 
 | Tool                | Time   |
 | ------------------- | ------ |
-| unref               | 5.75s  |
-| unref (one process) | 8.95s  |
-| vulture             | 17.66s |
+| unref               | 2.66s  |
+| unref (one process) | 9.87s  |
+| vulture             | 19.46s |
 
 Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py).
 
