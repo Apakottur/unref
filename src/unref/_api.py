@@ -12,6 +12,7 @@ def check(
     used_decorators: Iterable[str] = (),
     exclude: Iterable[str | os.PathLike[str]] = (),
     overrides: Iterable[Override] = (),
+    jobs: int | None = 1,
 ) -> list[Finding]:
     """
     Find the unused code in a Python project.
@@ -25,6 +26,10 @@ def check(
             a reference from them does not count.
         overrides: Options that apply only to some of the files of the project, on top of the options
             above. For example, `Override(paths=["tests"], used_names=["test_*"])`.
+        jobs: The number of processes that analyze the files, or None for one for each CPU. A small
+            project is always analyzed in the current process. With more than one process, a script
+            that calls this function must guard its code with `if __name__ == "__main__":`, as
+            [`multiprocessing`](https://docs.python.org/3/library/multiprocessing.html) requires.
 
     Returns:
         The findings, one for each unused definition, sorted by file and line.
@@ -35,4 +40,5 @@ def check(
         used_decorators=used_decorators,
         exclude=exclude,
         overrides=overrides,
+        jobs=jobs,
     )

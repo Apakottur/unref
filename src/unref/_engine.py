@@ -1,7 +1,5 @@
-import ast
 import os
 import sys
-import warnings
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -9,13 +7,13 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from unref._classes import ClassHierarchy
-from unref._definitions import Definition, find_definitions
+from unref._definitions import Definition
 from unref._discover import discover, is_under
 from unref._external import ExternalModules, star_imports
-from unref._ignores import find_ignored_lines
+from unref._files import FileFacts, analyze_files
 from unref._models import Finding, Override
 from unref._modules import import_root, module_name
-from unref._references import Owner, find_references
+from unref._references import Owner
 
 
 def find_unused(
@@ -25,6 +23,7 @@ def find_unused(
     used_decorators: Iterable[str],
     exclude: Iterable[str | os.PathLike[str]],
     overrides: Iterable[Override],
+    jobs: int | None,
 ) -> list[Finding]:
     """
     Find the unused definitions of a Python project, which are those that nothing references.
@@ -35,25 +34,26 @@ def find_unused(
         used_decorators: The decorators that make the definitions they decorate count as used.
         exclude: The files and directories that are not part of the project.
         overrides: The options that apply only to some of the files of the project.
+        jobs: The number of processes that analyze the files, or None for one for each CPU.
 
     Returns:
         A finding for each unused definition, and for each file that does not parse, sorted by file and
         line.
     """
     discovered = discover(paths, exclude=exclude)
-    sources = {path: path.read_bytes() for path in discovered}
 
     # A file that does not parse is a finding itself, and is left out of the project.
-    trees: dict[Path, ast.Module] = {}
+    facts: dict[Path, FileFacts] = {}
     syntax_errors: dict[Path, Finding] = {}
-    for path, source in sources.items():
-        try:
-            trees[path] = _parse(source, path)
-        except SyntaxError as error:
-            syntax_errors[path] = Finding(path=path, line=error.lineno or 1, kind="syntax error", name=error.msg)
-    files = [path for path in discovered if path in trees]
+    for path, result in analyze_files(discovered, jobs=jobs).items():
+        if isinstance(result, Finding):
+            syntax_errors[path] = result
+        else:
+            facts[path] = result
+    files = [path for path in discovered if path in facts]
 
-    references = {path: find_references(tree) for path, tree in trees.items()}
+    references = {path: facts[path].references for path in files}
+    definitions = {path: facts[path].definitions for path in files}
     names = {path: module_name(path) for path in files}
 
     files_by_name: dict[str, list[Path]] = {}
@@ -95,8 +95,6 @@ def find_unused(
                     first_of_object = max(first_of_object, index + 1)
             uses[path, owner].attributes.update(parts[first_of_object:])
 
-    definitions = {path: find_definitions(path, trees[path]) for path in files}
-
     # A module from outside the project is looked for where the modules of the project are imported
     # from first, as an excluded module is, and then where the check imports from.
     search_path = list(dict.fromkeys([*(import_root(path, names[path]) for path in files), *map(Path, sys.path)]))
@@ -135,7 +133,7 @@ def find_unused(
     for path in files:
         # An override with paths applies to the files under them.
         file_overrides = [override for roots, override in resolved_overrides if not roots or is_under(path, roots)]
-        ignored_lines[path] = find_ignored_lines(sources[path])
+        ignored_lines[path] = facts[path].ignored_lines
 
         for definition in definitions[path]:
             # The options of a definition are those of the project, plus those of every override that
@@ -311,28 +309,6 @@ class _Graph:
                 seen_stars.add(star)
                 use(self._public.get(star, []))
         return used
-
-
-def _parse(source: bytes, path: Path) -> ast.Module:
-    """
-    Parse a Python module.
-
-    The warnings that parsing emits, such as `SyntaxWarning` for an invalid escape sequence, are about
-    the code of the project, not about the check, so they are not shown.
-
-    Args:
-        source: The content of the module.
-        path: The file of the module.
-
-    Returns:
-        The syntax tree of the module.
-
-    Raises:
-        SyntaxError: The module does not parse.
-    """
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        return ast.parse(source, filename=str(path))
 
 
 def _is_dunder(name: str) -> bool:

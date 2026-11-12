@@ -39,6 +39,8 @@ unref src scripts
 
 `unref` exits with a non-zero status if anything is found.
 
+A large project is analyzed with a process for each CPU.
+
 ### Python
 
 ```python
@@ -48,7 +50,8 @@ for finding in unref.check(["src"]):
     print(finding)
 ```
 
-See the [Python API](reference/api.md).
+`check` uses one process by default. Pass `jobs` to use more, or `jobs=None` for one for each CPU. See the
+[Python API](reference/api.md).
 
 ### pre-commit and prek
 

@@ -3,6 +3,7 @@ anyio
 Apakottur
 asname
 capsys
+chunksize
 commitish
 conftest
 contextlib

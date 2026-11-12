@@ -55,6 +55,8 @@ def main(
             used_decorators=options.used_decorators,
             exclude=options.exclude,
             overrides=options.overrides,
+            # The command runs as its own program, so it can use a process for each CPU.
+            jobs=None,
         )
 
     for finding in findings:
