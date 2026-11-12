@@ -9,6 +9,7 @@ conftest
 contextlib
 dataclass
 dataclasses
+delenv
 docstrings
 dunder
 dunders

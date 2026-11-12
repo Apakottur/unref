@@ -12,10 +12,7 @@ _CASE = Path(__file__).parent.parent / "cases" / "external_environment"
 
 # The findings with the environment of the case, and without it, which is when the check only looks in
 # its own environment.
-_WITH_ENVIRONMENT = (
-    f"{_CASE}/main.py:15: unused method 'own_method'\n"
-    f"{_CASE}/main.py:28: unused method 'command'\n"
-)
+_WITH_ENVIRONMENT = f"{_CASE}/main.py:15: unused method 'own_method'\n{_CASE}/main.py:28: unused method 'command'\n"
 _WITHOUT_ENVIRONMENT = (
     f"{_CASE}/main.py:9: unused attribute 'impl'\n"
     f"{_CASE}/main.py:10: unused attribute 'cache_ok'\n"

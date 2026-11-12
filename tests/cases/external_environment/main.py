@@ -1,6 +1,6 @@
 import typer
 import editable_module
-from envonly.types import Text, TypeDecorator
+from project_only.types import Text, TypeDecorator
 
 
 # A base class is found in the site-packages of the environment of the project, which the check does not
