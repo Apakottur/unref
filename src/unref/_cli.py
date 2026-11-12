@@ -32,6 +32,16 @@ def main(
             show_default=False,
         ),
     ] = None,
+    jobs: Annotated[
+        int | None,
+        typer.Option(
+            "--jobs",
+            "-j",
+            help="Number of processes that analyze the files of a large project. Defaults to one for each CPU.",
+            min=1,
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """
     Find unreferenced Python code.
@@ -55,6 +65,7 @@ def main(
             used_decorators=options.used_decorators,
             exclude=options.exclude,
             overrides=options.overrides,
+            jobs=jobs,
         )
 
     for finding in findings:
