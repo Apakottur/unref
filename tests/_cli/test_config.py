@@ -143,6 +143,30 @@ def test_config_exclude_given_file() -> None:
     assert result.stdout == f"{case}/single.py:1: unused function 'function'\n"
 
 
+def test_config_exclude_given_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # An excluded directory is still checked when it is given directly, as with ruff and ty, but the
+    # patterns that match below it still count.
+    case = _CASES_DIR / "exclude"
+    config = tmp_path / "unref.toml"
+    config.write_text('exclude = ["generated", "**/deep"]\n')
+    monkeypatch.chdir(case)
+
+    result = _runner.invoke(app, ["--config", str(config), "generated"])
+
+    assert result.exit_code == 1
+    assert result.stdout == "generated/module.py:4: unused function 'function'\n"
+
+
+def test_config_exclude_under_given_directory_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A directory under an excluded one is checked when it is given directly.
+    monkeypatch.chdir(_CASES_DIR.parent.parent)
+
+    result = _runner.invoke(app, ["--config", "linters/unref.toml", "tests/cases/function"])
+
+    assert result.exit_code == 1
+    assert result.stdout == "tests/cases/function/main.py:1: unused function 'function'\n"
+
+
 def test_config_used_names(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('used-names = ["func*"]\n')

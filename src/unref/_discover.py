@@ -3,6 +3,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from pathspec import GitIgnoreSpec
+from pathspec.pattern import RegexPattern
 
 # The patterns that are excluded by default, before the `exclude` ones. The same as ty's defaults.
 DEFAULT_EXCLUDE = (
@@ -71,15 +72,16 @@ class _Exclude:
         # The patterns are anchored at the current directory.
         self._root = Path.cwd().resolve()
 
-    def __call__(self, path: Path, *, is_directory: bool) -> bool:
+    def __call__(self, path: Path, *, is_directory: bool, given: Path) -> bool:
         """
-        Check whether a file or directory is excluded. The last pattern that matches it decides.
+        Check whether a file or directory under a given directory is excluded. The last pattern that
+        matches it decides.
         """
         absolute = path.resolve()
         # A path outside of the current directory can still match the patterns that start with `**/`.
         base = self._root if absolute.is_relative_to(self._root) else Path(absolute.anchor)
         relative = absolute.relative_to(base).as_posix() + ("/" if is_directory else "")
-        return bool(self._spec.check_file(relative).include)
+        return bool(_check(self._spec, relative, _prefix(given, base)))
 
 
 def _anchor(pattern: str) -> str:
@@ -94,11 +96,50 @@ def _anchor(pattern: str) -> str:
     return negation + body
 
 
+def _prefix(given: Path, base: Path) -> str:
+    """
+    The path of a given directory, resolved, relative to the directory that patterns are relative to,
+    as the patterns see it: with a trailing `/`, or empty when the given directory is not under it.
+    """
+    if given == base or not given.is_relative_to(base):
+        return ""
+    return given.relative_to(base).as_posix() + "/"
+
+
+def _check(spec: GitIgnoreSpec, path: str, prefix: str) -> bool | None:
+    """
+    Check a path under a given directory against patterns, as `GitIgnoreSpec.check_file` does. A
+    pattern that matches the path only through the given directory or one of its parents does not
+    count, so that a directory given directly is checked even if it is excluded or ignored, as with
+    ruff and ty.
+
+    Args:
+        spec: The patterns.
+        path: The path relative to the directory that the patterns are relative to.
+        prefix: The given directory, in the same form, from `_prefix`.
+
+    Returns:
+        Whether the path is excluded, or `None` if no pattern counts.
+    """
+    if not prefix:
+        return spec.check_file(path).include
+    # A pattern matches the beginning of the path, up to the file or directory that it matches.
+    patterns = [
+        pattern
+        for pattern in spec.patterns
+        if isinstance(pattern, RegexPattern)
+        and (result := pattern.match_file(path)) is not None
+        and result.match.end() > len(prefix)
+    ]
+    return GitIgnoreSpec(patterns).check_file(path).include
+
+
 def _walk(directory: Path, excluded: _Exclude) -> Iterator[Path]:
     """
     Yield the Python files under a directory. Skips the excluded files and directories, and the ones that
-    git ignores.
+    git ignores. The directory itself is always walked, even if it is excluded or ignored.
     """
+    given = directory.resolve()
     # The `.gitignore` files that apply to each directory still to be walked, except its own.
     inherited = {directory: _ignore_files_above(directory)}
     for root, directories, files in os.walk(directory):
@@ -108,15 +149,15 @@ def _walk(directory: Path, excluded: _Exclude) -> Iterator[Path]:
         directories[:] = [
             name
             for name in directories
-            if not excluded(current / name, is_directory=True)
-            and not _is_ignored(current / name, ignore_files, is_directory=True)
+            if not excluded(current / name, is_directory=True, given=given)
+            and not _is_ignored(current / name, ignore_files, is_directory=True, given=given)
         ]
         inherited.update((current / name, ignore_files) for name in directories)
         for name in files:
             if (
                 name.endswith(".py")
-                and not excluded(current / name, is_directory=False)
-                and not _is_ignored(current / name, ignore_files, is_directory=False)
+                and not excluded(current / name, is_directory=False, given=given)
+                and not _is_ignored(current / name, ignore_files, is_directory=False, given=given)
             ):
                 yield current / name
 
@@ -147,18 +188,19 @@ def _read_ignore_file(directory: Path) -> list[_IgnoreFile]:
         return [(directory.resolve(), GitIgnoreSpec.from_lines(file))]
 
 
-def _is_ignored(path: Path, ignore_files: list[_IgnoreFile], *, is_directory: bool) -> bool:
+def _is_ignored(path: Path, ignore_files: list[_IgnoreFile], *, is_directory: bool, given: Path) -> bool:
     """
-    Check whether git ignores a file or directory. A deeper `.gitignore` file overrides the ones above
-    it, and within a file the last matching pattern wins, so that `!pattern` can bring a path back.
+    Check whether git ignores a file or directory under a given directory. A deeper `.gitignore` file
+    overrides the ones above it, and within a file the last matching pattern wins, so that `!pattern`
+    can bring a path back.
     """
     absolute = path.resolve()
     ignored = False
     for base, spec in ignore_files:
         relative = Path(os.path.relpath(absolute, base)).as_posix() + ("/" if is_directory else "")
-        result = spec.check_file(relative)
-        if result.include is not None:
-            ignored = result.include
+        include = _check(spec, relative, _prefix(given, base))
+        if include is not None:
+            ignored = include
     return ignored
 
 
