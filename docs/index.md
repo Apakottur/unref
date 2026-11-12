@@ -74,6 +74,21 @@ or `prek autoupdate` fill it in.
 The hook checks the whole project, not only the changed files: a definition is unused only if no file
 references it.
 
+`unref` leaves unused imports and local variables to [Ruff](https://docs.astral.sh/ruff/), so run both:
+
+```yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.4
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+  - repo: https://github.com/Apakottur/unref
+    rev: "" # The latest release.
+    hooks:
+      - id: unref
+```
+
 ### GitHub Actions
 
 With `--output-format github`, the findings show as annotations on the files of a pull request:
