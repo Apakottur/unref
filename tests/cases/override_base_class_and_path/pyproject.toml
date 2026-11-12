@@ -1,0 +1,5 @@
+# With both `paths` and `base-classes`, the override applies to the classes that match both.
+[[tool.unref.overrides]]
+paths = ["models"]
+base-classes = ["pydantic.BaseModel"]
+used-names = ["model_config"]

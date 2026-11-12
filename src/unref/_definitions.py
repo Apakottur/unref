@@ -16,6 +16,10 @@ class Definition:
         name: The name of the definition.
         decorators: The dotted names of the decorators of the definition, such as `app.command`,
             without their arguments. A decorator that is not a dotted name is left out.
+        owner: The class that the definition is in, by its name in the module (`Outer.Inner` for a
+            nested class), or None if it is not in a class.
+        bases: For a class, the dotted names of its base classes as they are written, without their
+            type arguments. A base class that is not a dotted name is left out.
     """
 
     path: Path
@@ -23,6 +27,15 @@ class Definition:
     kind: Literal["function", "class", "method", "variable", "attribute"]
     name: str
     decorators: tuple[str, ...] = ()
+    owner: str | None = None
+    bases: tuple[str, ...] = ()
+
+    @property
+    def qualified_name(self) -> str:
+        """
+        The name of the definition in its module, such as `Outer.Inner` for a nested class.
+        """
+        return self.name if self.owner is None else f"{self.owner}.{self.name}"
 
 
 @dataclass
@@ -35,11 +48,13 @@ class _Scope:
         names: The variables of a module, or the attributes of a class, that were already found. A
             method shares the names of its class, so that an attribute is found once.
         instance: In a method, the name of its first parameter, usually `self` or `cls`.
+        owner: In a class or a method, the name of the class in the module.
     """
 
     kind: Literal["module", "class", "function"]
     names: set[str] = field(default_factory=set)
     instance: str | None = None
+    owner: str | None = None
 
 
 def find_definitions(path: Path, module: ast.Module) -> list[Definition]:
@@ -73,23 +88,25 @@ def _collect(node: ast.AST, *, path: Path, scope: _Scope, definitions: list[Defi
     for child in ast.iter_child_nodes(node):
         match child:
             case ast.ClassDef():
-                definitions.append(
-                    Definition(
-                        path=path,
-                        line=child.lineno,
-                        kind="class",
-                        name=child.name,
-                        decorators=_decorators(child),
-                    )
+                definition = Definition(
+                    path=path,
+                    line=child.lineno,
+                    kind="class",
+                    name=child.name,
+                    decorators=_decorators(child),
+                    owner=scope.owner if scope.kind == "class" else None,
+                    bases=tuple(filter(None, map(_base_name, child.bases))),
                 )
-                _collect(child, path=path, scope=_Scope(kind="class"), definitions=definitions)
+                definitions.append(definition)
+                class_scope = _Scope(kind="class", owner=definition.qualified_name)
+                _collect(child, path=path, scope=class_scope, definitions=definitions)
             case ast.FunctionDef() | ast.AsyncFunctionDef():
                 kind: Literal["function", "method"]
                 if scope.kind == "class":
                     kind = "method"
                     parameters = [*child.args.posonlyargs, *child.args.args]
                     instance = parameters[0].arg if parameters else None
-                    function_scope = _Scope(kind="function", names=scope.names, instance=instance)
+                    function_scope = _Scope(kind="function", names=scope.names, instance=instance, owner=scope.owner)
                 else:
                     kind = "function"
                     function_scope = _Scope(kind="function")
@@ -100,6 +117,7 @@ def _collect(node: ast.AST, *, path: Path, scope: _Scope, definitions: list[Defi
                         kind=kind,
                         name=child.name,
                         decorators=_decorators(child),
+                        owner=scope.owner if scope.kind == "class" else None,
                     )
                 )
                 _collect(child, path=path, scope=function_scope, definitions=definitions)
@@ -142,7 +160,7 @@ def _collect_target(target: ast.expr, *, path: Path, scope: _Scope, definitions:
     # A variable or attribute is found once, where it is first assigned.
     if name not in scope.names:
         scope.names.add(name)
-        definitions.append(Definition(path=path, line=target.lineno, kind=kind, name=name))
+        definitions.append(Definition(path=path, line=target.lineno, kind=kind, name=name, owner=scope.owner))
 
 
 def _decorators(node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[str, ...]:
@@ -167,6 +185,25 @@ def _dotted_name(expression: ast.expr) -> str | None:
             return name
         case ast.Attribute(value=value, attr=name):
             prefix = _dotted_name(value)
+            return None if prefix is None else f"{prefix}.{name}"
+        case _:
+            return None
+
+
+def _base_name(expression: ast.expr) -> str | None:
+    """
+    Get the dotted name of a base class, such as `pydantic.BaseModel` for `pydantic.BaseModel[int]`.
+
+    Returns:
+        The dotted name, or None if the base class is not a dotted name, for example `make_base()`.
+    """
+    match expression:
+        case ast.Subscript(value=value):
+            return _base_name(value)
+        case ast.Name(id=name):
+            return name
+        case ast.Attribute(value=value, attr=name):
+            prefix = _base_name(value)
             return None if prefix is None else f"{prefix}.{name}"
         case _:
             return None

@@ -178,7 +178,11 @@ def test_config_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
         (
             '[[overrides]]\nused-names = ["test_*"]',
-            "Option 'paths' is missing in an override in the configuration file {config}",
+            "An override in the configuration file {config} needs the 'paths' or the 'base-classes' option",
+        ),
+        (
+            '[[overrides]]\nbase-classes = "pydantic.BaseModel"',
+            "Option 'base-classes' in an override in the configuration file {config} must be a list of strings",
         ),
         (
             '[[overrides]]\npaths = "tests"',

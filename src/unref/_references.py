@@ -15,12 +15,16 @@ class References:
             with the module, as it is written, and its number of leading dots. A star import has the
             name `*`.
         has_all: Whether the module defines `__all__`.
+        bindings: The names that the module imports at its top level, each with the module it is
+            imported from, as it is written, the number of leading dots, and the imported name. The
+            name is None for `import module`, which binds the module itself.
     """
 
     names: set[str] = field(default_factory=set)
     attributes: set[str] = field(default_factory=set)
     imports: set[tuple[str | None, int, str]] = field(default_factory=set)
     has_all: bool = False
+    bindings: dict[str, tuple[str | None, int, str | None]] = field(default_factory=dict)
 
 
 def find_references(module: ast.Module) -> References:
@@ -35,7 +39,34 @@ def find_references(module: ast.Module) -> References:
     """
     references = References()
     _visit(module, local_names=frozenset(), references=references)
+    _bind_imports(module, references)
     return references
+
+
+def _bind_imports(module: ast.Module, references: References) -> None:
+    """
+    Add the names that a module imports at its top level, outside its functions and classes.
+    """
+    stack: list[ast.AST] = [module]
+    while stack:
+        node = stack.pop()
+        match node:
+            case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.ClassDef() | ast.Lambda():
+                continue
+            case ast.Import(names=aliases):
+                for alias in aliases:
+                    if alias.asname is None:
+                        # `import package.module` binds `package`.
+                        package = alias.name.partition(".")[0]
+                        references.bindings[package] = (package, 0, None)
+                    else:
+                        references.bindings[alias.asname] = (alias.name, 0, None)
+            case ast.ImportFrom(module=source, level=level, names=aliases):
+                for alias in aliases:
+                    references.bindings[alias.asname or alias.name] = (source, level, alias.name)
+            case _:
+                pass
+        stack.extend(ast.iter_child_nodes(node))
 
 
 def _visit(node: ast.AST, *, local_names: frozenset[str], references: References) -> None:

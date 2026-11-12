@@ -1,0 +1,110 @@
+from pathlib import Path
+
+from unref._modules import ModuleName
+
+# A name that a module imports: the module it is imported from, as it is written, the number of leading
+# dots, and the imported name. The name is None for `import module`, which binds the module itself.
+Binding = tuple[str | None, int, str | None]
+
+
+class ClassHierarchy:
+    """
+    The classes of a project, and the base classes that they inherit from.
+
+    A base class is followed through the imports of the project, so that a class is known to inherit
+    from the base classes of its base classes, wherever they are defined.
+    """
+
+    def __init__(
+        self,
+        *,
+        names: dict[Path, ModuleName],
+        files_by_name: dict[str, list[Path]],
+        bindings: dict[Path, dict[str, Binding]],
+        classes: dict[Path, dict[str, tuple[str, ...]]],
+    ) -> None:
+        """
+        Args:
+            names: The name of each module of the project.
+            files_by_name: The files of the project by their module name.
+            bindings: The names that each module imports at its top level.
+            classes: The classes of each module, by their name in the module (`Outer.Inner` for a
+                nested class), with their base classes as they are written.
+        """
+        self._names = names
+        self._files_by_name = files_by_name
+        self._bindings = bindings
+        self._classes = classes
+        self._ancestors: dict[tuple[Path, str], frozenset[str]] = {}
+
+    def ancestors(self, path: Path, name: str) -> frozenset[str]:
+        """
+        Get the base classes that a class inherits from, directly or not.
+
+        Args:
+            path: The file of the class.
+            name: The name of the class in its module.
+
+        Returns:
+            The dotted names of the base classes, such as `pydantic.BaseModel`. A base class that is
+            imported through several modules has the name of each.
+        """
+        key = (path, name)
+        if key not in self._ancestors:
+            seen: set[str] = set()
+            found: set[str] = set()
+            for base in self._classes[path][name]:
+                found |= self._resolve(path, base, seen)
+            self._ancestors[key] = frozenset(found)
+        return self._ancestors[key]
+
+    def _resolve(self, path: Path, written: str, seen: set[str]) -> set[str]:
+        """
+        Get the dotted names of a base class, as it is written in a module, and of its base classes.
+        """
+        first, _, rest = written.partition(".")
+
+        if first in self._classes[path]:
+            # A class of the module itself.
+            return self._follow(f"{self._names[path].name}.{written}", seen)
+
+        if first in self._bindings[path]:
+            # A name that the module imports.
+            imported = self._imported(path, self._bindings[path][first])
+            if imported is None:
+                return set()
+            return self._follow(".".join(filter(None, [imported, rest])), seen)
+
+        # A builtin, or a name that the module does not define at its top level.
+        return {written}
+
+    def _follow(self, name: str, seen: set[str]) -> set[str]:
+        """
+        Get a dotted name, and the dotted names of what it stands for in the project: the base classes
+        of a class, and the origin of an imported name.
+        """
+        if name in seen:
+            return set()
+        seen.add(name)
+
+        found = {name}
+        module, _, symbol = name.rpartition(".")
+        for path in self._files_by_name.get(module, []):
+            if symbol in self._classes[path]:
+                for base in self._classes[path][symbol]:
+                    found |= self._resolve(path, base, seen)
+            elif symbol in self._bindings[path]:
+                imported = self._imported(path, self._bindings[path][symbol])
+                if imported is not None:
+                    found |= self._follow(imported, seen)
+        return found
+
+    def _imported(self, path: Path, binding: Binding) -> str | None:
+        """
+        Get the dotted name that an imported name of a module stands for.
+        """
+        module, level, name = binding
+        source = self._names[path].resolve(module, level)
+        if source is None:
+            return None
+        return ".".join(filter(None, [source, name]))
