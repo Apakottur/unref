@@ -13,7 +13,7 @@ from unref._modules import module_name
 from unref._references import find_references
 
 
-def find_unreferenced(
+def find_unused(
     paths: Iterable[str | os.PathLike[str]],
     *,
     used_names: Iterable[str],
@@ -22,7 +22,7 @@ def find_unreferenced(
     overrides: Iterable[Override],
 ) -> list[Finding]:
     """
-    Find the definitions in a Python project that nothing references.
+    Find the unused definitions of a Python project, which are those that nothing references.
 
     Args:
         paths: The files and directories that make up the project.
@@ -32,7 +32,7 @@ def find_unreferenced(
         overrides: The options that apply only to some of the files of the project.
 
     Returns:
-        A finding for each unreferenced definition, sorted by file and line.
+        A finding for each unused definition, sorted by file and line.
     """
     files = discover(paths, exclude=exclude)
     sources = {path: path.read_bytes() for path in files}
@@ -174,6 +174,6 @@ def _is_dunder(name: str) -> bool:
     """
     Check whether a name is a dunder, such as `__init__` or `__all__`.
 
-    Python and tools refer to dunders implicitly, so they always count as referenced.
+    Python and tools refer to dunders implicitly, so they always count as used.
     """
     return len(name) > 4 and name.startswith("__") and name.endswith("__")

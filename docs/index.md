@@ -2,8 +2,8 @@
 
 Find unreferenced Python code.
 
-`unref` reports the functions, classes, methods, variables and attributes of a Python project that
-nothing references.
+`unref` reports the unused functions, classes, methods, variables and attributes of a Python project:
+those that nothing references.
 
 ## Installation
 
@@ -81,7 +81,7 @@ references it.
 
 Local variables and imports are not reported, [Ruff](https://docs.astral.sh/ruff/) covers them.
 
-A definition counts as referenced when:
+A definition counts as used when something references it:
 
 - A function, class or variable is read in its own module, imported from it (`from module import name`),
   read through it (`module.name`), or listed in its `__all__`.
@@ -116,3 +116,5 @@ Finding and removing dead code reduces bloat, speeds up AI code scanning and sim
 [Ruff](https://docs.astral.sh/ruff/) does not support this yet, see
 [astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` exists to fill the gap until
 Ruff supports it natively.
+
+The name is short for "unreferenced".

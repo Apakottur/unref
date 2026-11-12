@@ -1,7 +1,7 @@
 import os
 from collections.abc import Iterable
 
-from unref._engine import find_unreferenced
+from unref._engine import find_unused
 from unref._models import Finding, Override
 
 
@@ -14,7 +14,7 @@ def check(
     overrides: Iterable[Override] = (),
 ) -> list[Finding]:
     """
-    Find the unreferenced code in a Python project.
+    Find the unused code in a Python project.
 
     Args:
         paths: The files and directories that make up the project.
@@ -27,9 +27,9 @@ def check(
             above. For example, `Override(paths=["tests"], used_names=["test_*"])`.
 
     Returns:
-        The findings, one for each definition that nothing references, sorted by file and line.
+        The findings, one for each unused definition, sorted by file and line.
     """
-    return find_unreferenced(
+    return find_unused(
         paths,
         used_names=used_names,
         used_decorators=used_decorators,

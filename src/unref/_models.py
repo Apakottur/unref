@@ -7,7 +7,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Finding:
     """
-    A definition that nothing references, or an ignore comment that ignores nothing.
+    An unused definition, or an ignore comment that ignores nothing.
 
     Attributes:
         path: The file that holds the definition.
