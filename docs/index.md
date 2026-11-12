@@ -39,7 +39,7 @@ unref src scripts
 
 `unref` exits with a non-zero status if anything is found.
 
-A large project is analyzed with a process for each CPU.
+A large project is analyzed with a process for each CPU, or as many as `--jobs` (`-j`) gives.
 
 ### Python
 

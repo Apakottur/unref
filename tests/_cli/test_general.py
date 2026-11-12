@@ -77,3 +77,20 @@ def test_syntax_warning() -> None:
     assert result.stdout == f"{case}/main.py:1: unused variable 'PATTERN'\n"
     assert result.stderr == ""
     assert caught == []
+
+
+@pytest.mark.parametrize("option", ["--jobs", "-j"])
+def test_jobs(option: str) -> None:
+    case = _CASES_DIR / "function"
+
+    result = _runner.invoke(app, [option, "1", str(case)])
+
+    assert result.exit_code == 1
+    assert result.stdout == f"{case}/main.py:1: unused function 'function'\n"
+
+
+def test_invalid_jobs() -> None:
+    result = _runner.invoke(app, ["--jobs", "0", str(_CASES_DIR / "function")])
+
+    assert result.exit_code == 2
+    assert "Invalid value for '--jobs' / '-j'" in result.stderr
