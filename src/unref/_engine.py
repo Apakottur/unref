@@ -93,8 +93,8 @@ def find_unused(
 
     # An ignore comment is needed for a definition that is unused without it. Such a definition is
     # then used, and so is what it uses.
-    needed = ignored - graph.used(kept)
-    used = graph.used(kept | needed)
+    needed = ignored - graph.use(kept)
+    used = graph.use(needed)
 
     return _findings(discovered, facts=facts, syntax_errors=syntax_errors, used=used, needed=needed)
 
@@ -416,7 +416,6 @@ class _Graph:
             uses: What the code of each owner uses.
             has_all: The modules that define `__all__`.
         """
-        self._files = files
         self._uses = uses
         self._by_name: dict[tuple[Path, str], list[Definition]] = defaultdict(list)
         self._by_attribute: dict[str, list[Definition]] = defaultdict(list)
@@ -431,49 +430,54 @@ class _Graph:
             if definition.path not in has_all and not definition.name.startswith("_"):
                 self._public[definition.path].append(definition)
 
-    def used(self, roots: set[Definition]) -> set[Definition]:
+        # What is used so far, and what is left to follow. The code of every module runs.
+        self._used: set[Definition] = set()
+        self._pending: list[tuple[Path, Owner]] = [(path, None) for path in files]
+        self._seen_owners: set[tuple[Path, Owner]] = set()
+        self._seen_names: set[tuple[Path, str]] = set()
+        self._seen_attributes: set[str] = set()
+        self._seen_stars: set[Path] = set()
+
+    def use(self, roots: Iterable[Definition]) -> set[Definition]:
         """
-        Get the definitions that are used.
+        Use more definitions, and get all the definitions that are used so far.
+
+        The first call also uses what the code of the modules uses. Each later call goes on from where
+        the one before stopped.
 
         Args:
             roots: The definitions that are used whatever references them.
 
         Returns:
-            The roots, and the definitions that the code of the modules uses, directly or through the
-            functions that it uses.
+            The roots of every call, and the definitions that the code of the modules uses, directly or
+            through the functions that it uses.
         """
-        used: set[Definition] = set()
-        pending: list[tuple[Path, Owner]] = [(path, None) for path in self._files]
-
-        def use(definitions: Iterable[Definition]) -> None:
-            for definition in definitions:
-                if definition not in used:
-                    used.add(definition)
-                    if definition.kind in ("function", "method"):
-                        pending.append((definition.path, definition.line))
-
-        use(roots)
-        seen_owners: set[tuple[Path, Owner]] = set()
-        seen_names: set[tuple[Path, str]] = set()
-        seen_attributes: set[str] = set()
-        seen_stars: set[Path] = set()
-        while pending:
-            owner = pending.pop()
-            if owner in seen_owners or owner not in self._uses:
+        self._add(roots)
+        while self._pending:
+            owner = self._pending.pop()
+            if owner in self._seen_owners or owner not in self._uses:
                 continue
-            seen_owners.add(owner)
+            self._seen_owners.add(owner)
             uses = self._uses[owner]
 
-            for name in uses.names - seen_names:
-                seen_names.add(name)
-                use(self._by_name.get(name, []))
-            for attribute in uses.attributes - seen_attributes:
-                seen_attributes.add(attribute)
-                use(self._by_attribute.get(attribute, []))
-            for star in uses.stars - seen_stars:
-                seen_stars.add(star)
-                use(self._public.get(star, []))
-        return used
+            for name in uses.names - self._seen_names:
+                self._seen_names.add(name)
+                self._add(self._by_name.get(name, []))
+            for attribute in uses.attributes - self._seen_attributes:
+                self._seen_attributes.add(attribute)
+                self._add(self._by_attribute.get(attribute, []))
+            for star in uses.stars - self._seen_stars:
+                self._seen_stars.add(star)
+                self._add(self._public.get(star, []))
+        return set(self._used)
+
+    def _add(self, definitions: Iterable[Definition]) -> None:
+        """Mark definitions as used, and queue the code of the functions among them."""
+        for definition in definitions:
+            if definition not in self._used:
+                self._used.add(definition)
+                if definition.kind in ("function", "method"):
+                    self._pending.append((definition.path, definition.line))
 
 
 def _is_dunder(name: str) -> bool:
