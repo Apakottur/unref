@@ -32,10 +32,16 @@ class FromComputed(lazy.Encoder):
         return o
 
 
+# An import that leads nowhere is not followed.
+class FromTooFar(lazy.TooFar):
+    def emit(self, record):  # expect: unused method
+        return record
+
+
 # An import in another function is not given out.
 class FromOtherFunction(not_lazy.Handler):
     def emit(self, record):  # expect: unused method
         return record
 
 
-print(Executor, Processes, FromLazy, FromComputed, FromOtherFunction)
+print(Executor, Processes, FromLazy, FromComputed, FromTooFar, FromOtherFunction)

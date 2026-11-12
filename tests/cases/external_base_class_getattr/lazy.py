@@ -7,4 +7,9 @@ def __getattr__(name):
         import json
 
         return json.JSONEncoder
+    if name == "TooFar":
+        # More dots than there are packages.
+        from .... import TooFar
+
+        return TooFar
     raise AttributeError(name)
