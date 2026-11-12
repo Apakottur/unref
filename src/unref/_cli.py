@@ -85,6 +85,7 @@ def main(
             jobs=jobs,
             python=environment,
             dummy_variable_rgx=options.dummy_variable_rgx,
+            entry_points=options.entry_points,
         )
 
     for finding in findings:

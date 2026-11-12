@@ -1,6 +1,6 @@
 import re
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,8 @@ class Config:
         overrides: The options that apply only to some of the files of the project.
         python: The Python environment or interpreter of the project, or None if it is not set.
         dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
+        entry_points: The object references of the entry points of the project, such as
+            `package.module:function`.
     """
 
     used_names: tuple[str, ...] = ()
@@ -38,14 +40,15 @@ class Config:
     overrides: tuple[Override, ...] = ()
     python: Path | None = None
     dummy_variable_rgx: str = DEFAULT_DUMMY_VARIABLE_RGX
+    entry_points: tuple[str, ...] = ()
 
 
 def load_config(path: Path | None = None) -> Config:
     """
     Load the configuration from a TOML file.
 
-    A file named `pyproject.toml` holds the options in its `[tool.unref]` table, any other file holds
-    them at the top level.
+    A file named `pyproject.toml` holds the options in its `[tool.unref]` table, and the entry points of
+    the project in its `[project]` table. Any other file holds the options at the top level.
 
     Args:
         path: The configuration file. Defaults to the `pyproject.toml` of the current directory, if
@@ -70,10 +73,34 @@ def load_config(path: Path | None = None) -> Config:
     except tomllib.TOMLDecodeError as error:
         raise UnrefConfigError(f"Invalid TOML in the configuration file {path}: {error}") from error
 
+    entry_points: list[str] = []
     if path.name == _PYPROJECT:
+        entry_points = _entry_points(options.get("project", {}), path)
         options = options.get("tool", {}).get("unref", {})
 
-    return _parse(options, path)
+    return replace(_parse(options, path), entry_points=tuple(entry_points))
+
+
+def _entry_points(project: Any, path: Path) -> list[str]:
+    """
+    Get the object references of the entry points that the `[project]` table of a `pyproject.toml` gives.
+    """
+    where = f"the configuration file {path}"
+    if not isinstance(project, dict):
+        raise UnrefConfigError(f"Table 'project' in {where} must be a table")
+
+    tables = {f"project.{name}": project.get(name, {}) for name in ("scripts", "gui-scripts")}
+    groups = project.get("entry-points", {})
+    if not isinstance(groups, dict):
+        raise UnrefConfigError(f"Table 'project.entry-points' in {where} must be a table")
+    tables.update({f"project.entry-points.{group}": table for group, table in groups.items()})
+
+    references: list[str] = []
+    for name, table in tables.items():
+        if not isinstance(table, dict) or not all(isinstance(value, str) for value in table.values()):
+            raise UnrefConfigError(f"Table {name!r} in {where} must map names to strings")
+        references += table.values()
+    return references
 
 
 def _parse(options: dict[str, Any], path: Path) -> Config:

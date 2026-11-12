@@ -15,6 +15,7 @@ def check(
     jobs: int | None = 1,
     python: str | os.PathLike[str] | None = None,
     dummy_variable_rgx: str = DEFAULT_DUMMY_VARIABLE_RGX,
+    entry_points: Iterable[str] = (),
 ) -> list[Finding]:
     """
     Find the unused code in a Python project.
@@ -33,6 +34,8 @@ def check(
             runs the check.
         dummy_variable_rgx: Regular expression for the names of the variables that are not used on
             purpose. Defaults to Ruff's default.
+        entry_points: Object references of the entry points of the project, such as
+            `package.module:function`. The objects they name count as used.
 
     Returns:
         The findings, one for each unused definition, sorted by file and line.
@@ -46,4 +49,5 @@ def check(
         jobs=jobs,
         python=python,
         dummy_variable_rgx=dummy_variable_rgx,
+        entry_points=entry_points,
     )
