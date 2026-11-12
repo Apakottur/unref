@@ -1,3 +1,4 @@
+import shutil
 import warnings
 from pathlib import Path
 
@@ -49,6 +50,39 @@ def test_default_path(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 1
     assert result.stdout == "pkg/module.py:1: unused function 'function'\npkg/sub/module.py:1: unused class 'Class'\n"
+
+
+def test_gitignored_given_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A directory that git ignores is still checked when it is given directly, as with ruff and ty.
+    monkeypatch.chdir(_CASES_DIR / "gitignore")
+
+    result = _runner.invoke(app, ["main.py", "generated"])
+
+    # `used_by_ignored` is used by the ignored file.
+    assert result.exit_code == 1
+    assert result.stdout == "main.py:5: unused function 'used_by_kept'\nmain.py:9: unused function 'used_by_nested'\n"
+
+
+def test_gitignored_given_directory_parent(tmp_path: Path) -> None:
+    # A directory under one that git ignores is checked when it is given directly.
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".gitignore").write_text("/ignored\n")
+    shutil.copytree(_CASES_DIR / "function", tmp_path / "ignored" / "function")
+
+    result = _runner.invoke(app, [str(tmp_path / "ignored" / "function")])
+
+    assert result.exit_code == 1
+    assert result.stdout == f"{tmp_path}/ignored/function/main.py:1: unused function 'function'\n"
+
+
+def test_default_excluded_given_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A directory that is excluded by default is still checked when it is given directly.
+    monkeypatch.chdir(_CASES_DIR / "default_excluded")
+
+    result = _runner.invoke(app, ["main.py", "node_modules"])
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
 
 
 def test_syntax_error() -> None:

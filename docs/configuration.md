@@ -105,7 +105,10 @@ So `exclude = ["!**/dist/"]` checks the `dist` directories.
 The files and directories that git ignores, by the `.gitignore` files of the git repository, are also
 left out. Other hidden directories, such as `.github`, are part of the project.
 
-A file that is given to `unref` directly is always checked, even when it is excluded.
+A file that is given to `unref` directly is always checked, even when it is excluded or ignored, as
+with ruff and ty. So is a directory: only the patterns that match the files and directories under it
+leave them out, not those that match the directory itself or one of its parents. `unref .venv/src`
+checks the files there, but still leaves out a `.venv` under `.venv/src`.
 
 ### `python`
 
