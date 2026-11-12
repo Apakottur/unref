@@ -97,6 +97,16 @@ values, so a reference from there always counts.
 Dunders, such as `__init__` and `__all__`, are never reported, and neither is `_`, the name of a value
 that is not used, such as the `_: KW_ONLY` field of a data class.
 
+A method or attribute of a class that has the name of a member of a base class outside the project, such
+as `emit` in a subclass of `logging.Handler`, counts as used: the code of the base class uses it. Such a
+base class is read from the source of its module, which is never imported, and found in the directories
+that the project is imported from, and then in the environment that `unref` runs in. A module without a
+Python source, such as a builtin or a compiled module, is not followed.
+
+The pre-commit and prek hook runs in its own environment, which has the standard library but not the
+packages of the project. To follow the base classes of these packages, run `unref` in the environment of
+the project instead, for example with `uv run unref`.
+
 ## Ignoring a finding
 
 A definition with an `# unref: ignore` comment on its line is not reported:

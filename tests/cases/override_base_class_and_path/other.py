@@ -2,7 +2,7 @@ from pydantic import BaseModel
 
 
 class Model(BaseModel):
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
 
 
 print(Model)

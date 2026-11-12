@@ -1,6 +1,6 @@
 [[tool.unref.overrides]]
 base-classes = ["pydantic.BaseModel"]
-used-names = ["model_config"]
+used-names = ["table_name"]
 
 [[tool.unref.overrides]]
 base-classes = ["typing.NamedTuple", "collections.abc.Mapping"]

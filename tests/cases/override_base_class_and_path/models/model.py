@@ -2,11 +2,11 @@ from pydantic import BaseModel
 
 
 class Model(BaseModel):
-    model_config = {}
+    table_name = {}
 
 
 class Plain:
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
 
 
 print(Model, Plain)
