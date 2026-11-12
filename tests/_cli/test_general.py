@@ -93,4 +93,6 @@ def test_invalid_jobs() -> None:
     result = _runner.invoke(app, ["--jobs", "0", str(_CASES_DIR / "function")])
 
     assert result.exit_code == 2
-    assert "Invalid value for '--jobs' / '-j'" in result.stderr
+    assert result.stdout == ""
+    # The message is colored in some terminals, so only a part of it that has no color is checked.
+    assert "greater than or equal to" in result.stderr
