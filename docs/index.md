@@ -106,18 +106,21 @@ jobs:
 
 ## What is reported
 
-| Code                    | Finding                                                               |
-| ----------------------- | --------------------------------------------------------------------- |
-| `unused-function`       | A function, including a nested one.                                   |
-| `unused-class`          | A class.                                                              |
-| `unused-method`         | A function directly in a class.                                       |
-| `unused-variable`       | A module-level variable.                                              |
-| `unused-attribute`      | A class attribute, or an instance attribute (`self.value = ...`).     |
-| `unused-ignore-comment` | An `# unref: ignore` comment that ignores nothing.                    |
-| `invalid-syntax`        | A file that does not parse. It is skipped, the rest is still checked. |
+| Code                          | Finding                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| `unused-function`             | A function, including a nested one.                                       |
+| `unused-class`                | A class.                                                                  |
+| `unused-method`               | A function directly in a class.                                           |
+| `unused-variable`             | A module-level variable.                                                  |
+| `unused-attribute`            | A class attribute, or an instance attribute (`self.value = ...`).         |
+| `unused-ignore-comment`       | An ignore comment, or a code of one, that ignores nothing.                |
+| `invalid-ignore-comment`      | An ignore comment that names no code, or that does not parse.             |
+| `ignore-comment-unknown-rule` | A code of an ignore comment that unref does not know.                     |
+| `invalid-syntax`              | A file that does not parse. It is skipped, the rest is still checked.     |
 
-The codes are named as [ty](https://docs.astral.sh/ty/) names its rules. A finding points to the name
-of the definition, to the ignore comment, or to the syntax error, with its line and column.
+The codes are named as [ty](https://docs.astral.sh/ty/) names its rules, and the last four are ty's own
+codes for the same findings. A finding points to the name of the definition, to the ignore comment or
+its code, or to the syntax error, with its line and column.
 
 Local variables and imports are not reported, [Ruff](https://docs.astral.sh/ruff/) covers them.
 
@@ -157,20 +160,36 @@ names.
 
 ## Ignoring a finding
 
-A definition with an `# unref: ignore` comment on its line is not reported:
+An `# unref: ignore[...]` comment ignores the findings of its line that have one of the codes it names,
+as a `# ty: ignore[...]` comment does with ty:
 
 ```python
 class Setup:
     def __init__(self, name: str) -> None:
-        self.name = name  # unref: ignore
+        self.name = name  # unref: ignore[unused-attribute]
 ```
 
 The comment goes on the line of the finding, which for a function or class is the line of its name,
 usually that of its `def` or `class`. For names that a framework uses, prefer the
 [configuration](configuration.md).
 
+The codes are separated by commas, and the comment can share its line with other comments:
+
+```python
+class Plugin:
+    hook = None  # type: ignore[assignment]  # unref: ignore[unused-class, unused-attribute]
+```
+
+The comment must name its codes. A bare `# unref: ignore` ignores nothing, and is reported as an
+`invalid-ignore-comment`, as is a comment that does not parse. A code that unref does not know is
+reported as an `ignore-comment-unknown-rule`.
+
 A comment that ignores nothing is reported as an `unused-ignore-comment`, for example once the definition
-is referenced, or covered by the configuration.
+is referenced, or covered by the configuration. When some of its codes ignore nothing, each of them is
+reported instead.
+
+As with ty, a comment can also ignore the findings about the ignore comments of its line, by their
+codes, such as `unused-ignore-comment` for the codes of its line that ignore nothing.
 
 ## Why
 

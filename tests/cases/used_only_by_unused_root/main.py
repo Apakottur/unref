@@ -25,7 +25,7 @@ def from_dunder():
     return 3
 
 
-def by_comment():  # unref: ignore
+def by_comment():  # unref: ignore[unused-function]
     return from_by_comment()
 
 
@@ -34,7 +34,7 @@ def from_by_comment():
 
 
 # An ignore comment is needed when the definition is unused without it, even when it is used with it.
-def ignored_cycle():  # unref: ignore
+def ignored_cycle():  # unref: ignore[unused-function]
     return cycle()
 
 
