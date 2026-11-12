@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,24 +41,44 @@ class ModuleName:
         return ".".join([*package[: len(package) - level + 1], *filter(None, [module])])
 
 
-def module_name(path: Path) -> ModuleName:
+def module_name(path: Path, roots: Collection[Path] = ()) -> ModuleName:
     """
     Get the name that a Python file is imported by.
 
-    The name is made of the file and of the directories above it that are packages, which is to say
-    that have an `__init__.py`. The first directory that is not a package is taken to be on the import
-    path.
+    The name is made of the file and of the directories above it that are packages. A directory is a
+    package if it has an `__init__.py`, or if it is a namespace package: a directory without one below
+    a package, both under one of the given directories. The first directory that is not a package is
+    taken to be on the import path.
+
+    Args:
+        path: The file.
+        roots: The files and directories that make up the project, resolved. A namespace package is only
+            looked for under them, so that a package outside the project does not pull directories in.
     """
     path = path.resolve()
     is_package = path.name == _INIT
     parts = [] if is_package else [path.stem]
 
     directory = path.parent
-    while (directory / _INIT).is_file():
+    while (directory / _INIT).is_file() or _is_namespace_package(directory, roots):
         parts.insert(0, directory.name)
         directory = directory.parent
 
     return ModuleName(name=".".join(parts), is_package=is_package)
+
+
+def _is_namespace_package(directory: Path, roots: Collection[Path]) -> bool:
+    """
+    Check whether a directory without an `__init__.py` is a namespace package of the project, which is
+    to say that it is below a package with one, both under one of the given directories.
+    """
+    return any(
+        (ancestor / _INIT).is_file()
+        for root in roots
+        if directory.is_relative_to(root)
+        for ancestor in directory.parents
+        if ancestor.is_relative_to(root)
+    )
 
 
 def import_root(path: Path, name: ModuleName) -> Path:

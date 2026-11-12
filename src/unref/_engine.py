@@ -69,11 +69,13 @@ def find_unused(
         A finding for each unused definition, and for each file that does not parse, sorted by file and
         line.
     """
+    paths = list(paths)
     discovered = discover(paths, exclude=exclude)
     facts, syntax_errors = _analyze(discovered, jobs=jobs)
     files = [path for path in discovered if path in facts]
 
-    names = {path: module_name(path) for path in files}
+    roots = [Path(path).resolve() for path in paths]
+    names = {path: module_name(path, roots) for path in files}
     files_by_name: dict[str, list[Path]] = {}
     for path, name in names.items():
         files_by_name.setdefault(name.name, []).append(path)
