@@ -186,11 +186,14 @@ class ClassHierarchy:
         longest one that is a module outside the project.
         """
         parts = name.split(".")
-        for find in (self._files_by_name.get, self._read_external):
-            for index in range(len(parts) - 1, 0, -1):
-                files = find(".".join(parts[:index]))
-                if files:
-                    return [(file, ".".join(parts[index:])) for file in files]
+        starts = [(".".join(parts[:index]), ".".join(parts[index:])) for index in range(len(parts) - 1, 0, -1)]
+        for module, rest in starts:
+            if module in self._files_by_name:
+                return [(file, rest) for file in self._files_by_name[module]]
+        for module, rest in starts:
+            files = self._read_external(module)
+            if files:
+                return [(file, rest) for file in files]
         return []
 
     def _imported(self, path: Path, binding: Binding) -> str | None:
