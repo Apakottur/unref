@@ -1,5 +1,6 @@
 import ast
 import os
+import sys
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
@@ -10,9 +11,10 @@ from pathlib import Path
 from unref._classes import ClassHierarchy
 from unref._definitions import Definition, find_definitions
 from unref._discover import discover, is_under
+from unref._external import ExternalModules
 from unref._ignores import find_ignored_lines
 from unref._models import Finding, Override
-from unref._modules import module_name
+from unref._modules import import_root, module_name
 from unref._references import Owner, find_references
 
 
@@ -94,6 +96,10 @@ def find_unused(
             uses[path, owner].attributes.update(parts[first_of_object:])
 
     definitions = {path: find_definitions(path, trees[path]) for path in files}
+
+    # A module from outside the project is looked for where the modules of the project are imported
+    # from first, as an excluded module is, and then where the check imports from.
+    search_path = list(dict.fromkeys([*(import_root(path, names[path]) for path in files), *map(Path, sys.path)]))
     hierarchy = ClassHierarchy(
         names=names,
         files_by_name=files_by_name,
@@ -114,6 +120,7 @@ def find_unused(
             }
             for path in files
         },
+        external=ExternalModules(search_path),
     )
 
     project_names = list(used_names)

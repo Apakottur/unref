@@ -1,0 +1,6 @@
+[tool.unref]
+exclude = ["vendored"]
+
+[[tool.unref.overrides]]
+base-classes = ["enum.Enum"]
+used-names = ["*"]

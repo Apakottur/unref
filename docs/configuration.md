@@ -122,6 +122,10 @@ its name. The override applies to what is defined in a class that inherits from 
 - Directly, however the base class is imported: `from pydantic import BaseModel`, `import pydantic`
   or `from pydantic import BaseModel as Base`.
 - Through other classes of the project, in any module.
+- Through classes from outside the project: with `enum.Enum`, a subclass of `enum.StrEnum` or
+  `enum.IntEnum`. Their modules are read from their source, and never imported. They are looked for
+  in the directories that the project is imported from, and then in the environment that unref runs
+  in. A module without a Python source, such as a compiled module, is not followed.
 
 The name has to be the one that the project imports: `pydantic.BaseModel` does not cover
 `from pydantic.main import BaseModel`.
