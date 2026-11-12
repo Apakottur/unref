@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from importlib.machinery import BYTECODE_SUFFIXES, EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
 
-from unref._definitions import Definition, find_definitions
+from unref._definitions import Definition
 from unref._modules import ModuleName
-from unref._references import Binding, References, find_references
+from unref._references import Binding, References, walk_module
 
 # The files that a module can be imported from, in the order that Python looks for them: a compiled
 # module, a source, and a bytecode file.
@@ -92,11 +92,11 @@ class ExternalModules:
         except (OSError, SyntaxError, ValueError):
             return None
 
-        references = find_references(tree)
+        definitions, references = walk_module(file, tree)
         return ExternalModule(
             path=file,
             name=ModuleName(name=name, is_package=locations is not None),
-            definitions=find_definitions(file, tree),
+            definitions=definitions,
             bindings=references.bindings,
             stars=star_imports(references),
             lazy=lazy_imports(tree, references),

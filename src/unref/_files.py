@@ -7,11 +7,11 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from unref._definitions import Definition, find_definitions
+from unref._definitions import Definition
 from unref._external import lazy_imports
 from unref._ignores import find_ignored_lines
 from unref._models import Finding
-from unref._references import Binding, References, find_references
+from unref._references import Binding, References, walk_module
 
 # Below this much source code, the work of a check is shorter than starting the processes.
 MIN_PARALLEL_BYTES = 1_000_000
@@ -84,9 +84,9 @@ def analyze_file(path: Path) -> FileFacts | Finding:
     except SyntaxError as error:
         return Finding(path=path, line=error.lineno or 1, kind="syntax error", name=error.msg)
 
-    references = find_references(tree)
+    definitions, references = walk_module(path, tree)
     return FileFacts(
-        definitions=find_definitions(path, tree),
+        definitions=definitions,
         references=references,
         ignored_lines=find_ignored_lines(source),
         lazy=lazy_imports(tree, references),
