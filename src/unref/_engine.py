@@ -85,7 +85,9 @@ def find_unused(
     facts, syntax_errors = _analyze(discovered, jobs=jobs)
     files = [path for path in discovered if path in facts]
 
-    roots = [Path(path).resolve() for path in paths]
+    # Only a directory can have a namespace package under it. A hook of prek or pre-commit gives every
+    # file of the project, and checking each directory against each of them takes quadratic time.
+    roots = [root for root in (Path(path).resolve() for path in paths) if root.is_dir()]
     names = {path: module_name(path, roots) for path in files}
     files_by_name: dict[str, list[Path]] = {}
     for path, name in names.items():
