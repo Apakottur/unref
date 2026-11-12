@@ -116,6 +116,8 @@ def find_unreferenced(
         all_public = path in star_imported and not references[path].has_all
 
         ignored_lines = find_ignored_lines(sources[path])
+        unused_ignored_lines = set(ignored_lines)
+        file_findings: list[Finding] = []
 
         for definition in definitions[path]:
             # The options of a definition are those of the project, plus those of every override that
@@ -147,9 +149,11 @@ def find_unreferenced(
                 and not _is_dunder(definition.name)
                 and not any(fnmatchcase(definition.name, pattern) for pattern in names_of_definition)
                 and decorators_of_definition.isdisjoint(definition.decorators)
-                and definition.line not in ignored_lines
             ):
-                findings.append(
+                if definition.line in ignored_lines:
+                    unused_ignored_lines.discard(definition.line)
+                    continue
+                file_findings.append(
                     Finding(
                         path=definition.path,
                         line=definition.line,
@@ -157,6 +161,12 @@ def find_unreferenced(
                         name=definition.name,
                     )
                 )
+
+        # An ignore comment that ignores nothing is a finding itself.
+        file_findings.extend(
+            Finding(path=path, line=line, kind="unused comment", name="unref: ignore") for line in unused_ignored_lines
+        )
+        findings += sorted(file_findings, key=lambda finding: finding.line)
     return findings
 
 

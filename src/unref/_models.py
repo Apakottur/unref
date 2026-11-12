@@ -7,13 +7,13 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Finding:
     """
-    A definition that nothing references.
+    A definition that nothing references, or an ignore comment that ignores nothing.
 
     Attributes:
         path: The file that holds the definition.
         line: The line of the definition in the file, starting at 1.
         kind: What was found, for example "unused function".
-        name: The name of the definition.
+        name: The name of the definition, or `unref: ignore` for an ignore comment.
     """
 
     path: Path

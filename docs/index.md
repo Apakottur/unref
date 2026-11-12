@@ -77,6 +77,7 @@ references it.
 | `unused method`    | A function directly in a class.                                          |
 | `unused variable`  | A module-level variable.                                                 |
 | `unused attribute` | A class attribute, or an instance attribute (`self.value = ...`).        |
+| `unused comment`   | An `# unref: ignore` comment that ignores nothing.                       |
 
 Local variables and imports are not reported, [Ruff](https://docs.astral.sh/ruff/) covers them.
 
@@ -101,6 +102,9 @@ class Setup:
 
 The comment goes on the line of the finding, which for a function or class is the line of its `def` or
 `class`. For names that a framework uses, prefer the [configuration](configuration.md).
+
+A comment that ignores nothing is reported as an `unused comment`, for example once the definition is
+referenced, or covered by the configuration.
 
 ## Why
 
