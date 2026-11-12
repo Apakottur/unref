@@ -6,6 +6,9 @@ from pathlib import Path
 # The default of the `dummy-variable-rgx` option, the same as Ruff's.
 DEFAULT_DUMMY_VARIABLE_RGX = r"^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
+# The test frameworks that are known, all of which are on by default.
+FRAMEWORKS = ("pytest", "unittest")
+
 
 @dataclass(frozen=True)
 class Finding:

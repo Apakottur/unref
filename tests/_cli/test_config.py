@@ -341,3 +341,28 @@ def test_entry_points_invalid(tmp_path: Path, content: str, error: str) -> None:
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: {error.format(config=config)}\n"
+
+
+def test_config_frameworks_wrong_type(tmp_path: Path) -> None:
+    config = tmp_path / "unref.toml"
+    config.write_text('frameworks = "pytest"\n')
+
+    result = _runner.invoke(app, ["--config", str(config)])
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        f"Error: Option 'frameworks' in the configuration file {config} must be a list of strings\n"
+    )
+
+
+def test_config_frameworks_unknown(tmp_path: Path) -> None:
+    config = tmp_path / "unref.toml"
+    config.write_text('frameworks = ["pytest", "nose"]\n')
+
+    result = _runner.invoke(app, ["--config", str(config)])
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        f"Error: Option 'frameworks' in the configuration file {config} has an unknown framework 'nose', "
+        "expected one of 'pytest', 'unittest'\n"
+    )

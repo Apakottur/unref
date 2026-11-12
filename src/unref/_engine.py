@@ -13,7 +13,8 @@ from unref._definitions import Definition
 from unref._discover import discover, is_under
 from unref._external import ExternalModules, environment_paths, star_imports
 from unref._files import FileFacts, analyze_files
-from unref._models import Finding, Override
+from unref._frameworks import FrameworkRules
+from unref._models import FRAMEWORKS, Finding, Override
 from unref._modules import ModuleName, import_root, module_name
 from unref._references import Owner
 
@@ -49,6 +50,7 @@ def find_unused(
     python: str | os.PathLike[str] | None = None,
     dummy_variable_rgx: str,
     entry_points: Iterable[str] = (),
+    frameworks: Iterable[str] = FRAMEWORKS,
 ) -> list[Finding]:
     """
     Find the unused definitions of a Python project, which are those that nothing references.
@@ -64,12 +66,21 @@ def find_unused(
             check runs in.
         dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
         entry_points: The object references of the entry points of the project.
+        frameworks: The test frameworks whose tests, fixtures and hooks count as used.
 
     Returns:
         A finding for each unused definition, and for each file that does not parse, sorted by file and
         line.
+
+    Raises:
+        ValueError: If a framework is not a known one.
     """
     paths = list(paths)
+    frameworks = frozenset(frameworks)
+    unknown = sorted(frameworks.difference(FRAMEWORKS))
+    if unknown:
+        raise ValueError(f"Unknown framework {unknown[0]!r}, expected one of {', '.join(map(repr, FRAMEWORKS))}")
+
     discovered = discover(paths, exclude=exclude)
     facts, syntax_errors = _analyze(discovered, jobs=jobs)
     files = [path for path in discovered if path in facts]
@@ -91,6 +102,12 @@ def find_unused(
         overrides=overrides,
         dummy_variable_rgx=dummy_variable_rgx,
         entry_objects=_entry_objects(entry_points, files_by_name=files_by_name),
+        rules=FrameworkRules(
+            frameworks,
+            definitions={path: facts[path].definitions for path in files},
+            names=names,
+            hierarchy=hierarchy,
+        ),
     )
 
     graph = _Graph(
@@ -258,6 +275,7 @@ def _roots(
     overrides: Iterable[Override],
     dummy_variable_rgx: str,
     entry_objects: dict[Path, set[str]],
+    rules: FrameworkRules,
 ) -> tuple[set[Definition], set[Definition]]:
     """
     Find the definitions that count as used whatever references them, and those that are ignored.
@@ -271,6 +289,7 @@ def _roots(
         overrides: The options that apply only to some of the files of the project.
         dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
         entry_objects: The qualified names of the objects that the entry points name, in each file.
+        rules: The rules of the test frameworks of the project.
 
     Returns:
         The definitions that count as used by the options or as dunders, and the other definitions that
@@ -299,6 +318,8 @@ def _roots(
                 )
                 # The objects that the entry points name.
                 or definition.qualified_name in entry_objects.get(path, set())
+                # What the test frameworks find and call by themselves.
+                or rules.uses(definition, path)
                 # The options of a definition are those of the project, plus those of every override
                 # that covers it.
                 or _matches(definition, names=used_names, decorators=used_decorators)

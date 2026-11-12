@@ -1,4 +1,6 @@
 [tool.unref]
+# The overrides below stand in for the built-in rules of pytest, which are turned off.
+frameworks = []
 used-names = ["everywhere_*"]
 
 [[tool.unref.overrides]]

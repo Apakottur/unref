@@ -86,6 +86,7 @@ def main(
             python=environment,
             dummy_variable_rgx=options.dummy_variable_rgx,
             entry_points=options.entry_points,
+            frameworks=options.frameworks,
         )
 
     for finding in findings:

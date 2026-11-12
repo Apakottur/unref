@@ -6,6 +6,9 @@ Configurations for common frameworks, to copy into the `[tool.unref]` table of y
 A framework calls some of the code of the project itself, so nothing in the project references it. Without
 configuration, `unref` reports that code as unused.
 
+pytest and unittest need no recipe: their rules are built in, see
+[`frameworks`](configuration.md#frameworks).
+
 ## FastAPI
 
 ```toml
