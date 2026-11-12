@@ -92,6 +92,10 @@ A definition counts as used when something references it:
 - A method or attribute is read as an attribute (`value.name`) anywhere in the project. It is matched by
   name, whatever the object is.
 
+A module is named by the packages it is in, as Python imports it: the directories above it that have an
+`__init__.py`, and those without one that are below such a package in the project, which are namespace
+packages. The first directory above that is not a package is on the import path.
+
 Code in a function runs only when the function is called, so a reference from an unused function does not
 count. A function that only calls itself is unused, and so is a function that only an unused function
 calls. The rest of a module runs when it is imported, including class bodies, decorators and default
