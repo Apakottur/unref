@@ -10,6 +10,7 @@ contextlib
 dataclass
 dataclasses
 delenv
+direnv
 docstrings
 dunder
 dunders
@@ -26,6 +27,7 @@ maxfail
 mkdocstrings
 mypy
 pathlib
+pathspec
 platlib
 posonlyargs
 prek
@@ -33,8 +35,10 @@ purelib
 pycache
 Pydantic
 Pydocstyle
+pypackages
 pyproject
 pytest
+pytype
 Rozantsev
 showlocals
 shpyx

@@ -17,6 +17,9 @@ used-decorators = ["app.command", "pytest.fixture"]
 exclude = ["generated"]
 ```
 
+As with ruff, the paths in the configuration, such as `exclude` and `python`, are relative to the
+current directory, not to the configuration file.
+
 The Python API takes the same options as arguments of [`unref.check`](reference/api.md#unref.check), and
 does not read a configuration file.
 
@@ -74,11 +77,35 @@ a reference from them does not count.
 
 ```toml
 [tool.unref]
-exclude = ["generated", "scripts/legacy.py"]
+exclude = ["generated", "scripts/legacy.py", "**/fixtures/"]
 ```
 
-A path is relative to the directory of the configuration file. Hidden directories, such as `.venv` and
-`.git`, are always left out.
+As with [ty's `exclude`](https://docs.astral.sh/ty/exclusions/), the entries are patterns in the syntax
+of `.gitignore`, anchored at the current directory:
+
+- `generated` matches the file or directory `generated` there, not one deeper down. `**/generated`
+  matches one at any depth.
+- `generated/` matches only a directory.
+- `*` matches any text but `/`, `?` one character, and `[abc]` one of the characters.
+- `!pattern` brings back what an earlier pattern left out. The last pattern that matches a path decides.
+
+These patterns are always left out first, as ty does, and `exclude` comes after them:
+
+```toml
+exclude = [
+  "**/.bzr/", "**/.direnv/", "**/.eggs/", "**/.git/", "**/.git-rewrite/", "**/.hg/",
+  "**/.mypy_cache/", "**/.nox/", "**/.pants.d/", "**/.pytype/", "**/.ruff_cache/", "**/.svn/",
+  "**/.tox/", "**/.venv/", "**/__pypackages__/", "**/_build/", "**/buck-out/", "**/dist/",
+  "**/node_modules/", "**/venv/",
+]
+```
+
+So `exclude = ["!**/dist/"]` checks the `dist` directories.
+
+The files and directories that git ignores, by the `.gitignore` files of the git repository, are also
+left out. Other hidden directories, such as `.github`, are part of the project.
+
+A file that is given to `unref` directly is always checked, even when it is excluded.
 
 ### `python`
 
@@ -98,7 +125,7 @@ As with [ty's `--python`](https://docs.astral.sh/ty/reference/cli/), the path ca
 - A Python interpreter, such as `.venv/bin/python`.
 - A system Python `sys.prefix` directory, such as `/usr`.
 
-The path is relative to the directory of the configuration file. It can also be given with `--python`.
+The path is relative to the current directory. It can also be given with `--python`.
 Without either, the command uses the active virtual environment (`VIRTUAL_ENV`), or else the `.venv` of
 the current directory. An active environment that runs `unref` itself, as in a pre-commit or prek hook,
 is skipped. The library uses the environment that runs it, unless it is given `python`.
@@ -157,7 +184,7 @@ used-decorators = ["pytest.fixture"]
 
 Here, a function named `test_connection` counts as used in `tests`, and is reported anywhere else.
 
-`paths` lists files and directories, relative to the directory of the configuration file.
+`paths` lists files and directories, relative to the current directory.
 
 ### By base class
 

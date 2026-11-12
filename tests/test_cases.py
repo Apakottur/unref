@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 import unref
-from unref._config import Config, load_config
+from unref._config import load_config
 
 _CASES_DIR = Path(__file__).parent / "cases"
 _EXPECT_PREFIX = "# expect:"
@@ -50,17 +50,18 @@ def _expected_findings(case: Path) -> list[_Finding]:
     return sorted(findings)
 
 
-def _actual_findings(case: Path) -> list[_Finding]:
+def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch) -> list[_Finding]:
     """
-    Run the check on a case, with the configuration of the case, and collect its findings.
+    Run the check on a case from its directory, as the paths of its configuration are relative to the
+    current directory, and collect its findings.
     """
-    pyproject = case / "pyproject.toml"
-    config = load_config(pyproject) if pyproject.exists() else Config()
+    monkeypatch.chdir(case)
+    config = load_config()
 
     return sorted(
-        (finding.path.relative_to(case).as_posix(), finding.line, finding.kind)
+        (finding.path.as_posix(), finding.line, finding.kind)
         for finding in unref.check(
-            [case],
+            [Path()],
             used_names=config.used_names,
             used_decorators=config.used_decorators,
             exclude=config.exclude,
@@ -76,5 +77,5 @@ def _actual_findings(case: Path) -> list[_Finding]:
     sorted(path for path in _CASES_DIR.iterdir() if path.is_dir()),
     ids=lambda case: case.name,
 )
-def test_case(case: Path) -> None:
-    assert _actual_findings(case) == _expected_findings(case)
+def test_case(case: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _actual_findings(case, monkeypatch) == _expected_findings(case)

@@ -1,0 +1,3 @@
+generated/
+scratch_*.py
+!scratch_kept.py

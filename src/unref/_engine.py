@@ -23,7 +23,7 @@ def find_unused(
     *,
     used_names: Iterable[str],
     used_decorators: Iterable[str],
-    exclude: Iterable[str | os.PathLike[str]],
+    exclude: Iterable[str],
     overrides: Iterable[Override],
     jobs: int | None,
     python: str | os.PathLike[str] | None = None,
@@ -36,7 +36,7 @@ def find_unused(
         paths: The files and directories that make up the project.
         used_names: The names, as patterns, of the definitions that count as used.
         used_decorators: The decorators that make the definitions they decorate count as used.
-        exclude: The files and directories that are not part of the project.
+        exclude: The patterns of the files and directories that are not part of the project.
         overrides: The options that apply only to some of the files of the project.
         jobs: The number of processes that analyze the files, or None for one for each CPU.
         python: The Python environment or interpreter of the project, or None for the environment that the

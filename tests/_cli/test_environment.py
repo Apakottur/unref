@@ -74,11 +74,14 @@ def test_option_missing(tmp_path: Path) -> None:
 
 
 def test_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # The environment of the configuration file is relative to its directory.
-    monkeypatch.chdir(tmp_path)
+    # As with ruff, the environment of the configuration file is relative to the current directory, not
+    # to the configuration file.
+    config = tmp_path / "unref.toml"
+    config.write_text(f'python = "{_CASE.name}/.venv"\n')
+    monkeypatch.chdir(_CASE.parent)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
-    result = _runner.invoke(app, ["--config", str(_CASE / "pyproject.toml"), str(_CASE)])
+    result = _runner.invoke(app, ["--config", str(config), str(_CASE)])
 
     assert result.stdout == _WITH_ENVIRONMENT
 

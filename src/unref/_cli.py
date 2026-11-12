@@ -22,7 +22,7 @@ def main(
     paths: Annotated[
         list[Path] | None,
         typer.Argument(
-            help="Files and directories that make up the project. Defaults to the current directory.",
+            help="Files and directories to check. Defaults to the current directory.",
             show_default=False,
         ),
     ] = None,
@@ -30,7 +30,7 @@ def main(
         Path | None,
         typer.Option(
             "--config",
-            help="Read the configuration from this TOML file, instead of the pyproject.toml of the current directory.",
+            help="Configuration file. Defaults to ./pyproject.toml.",
             show_default=False,
         ),
     ] = None,
@@ -39,7 +39,7 @@ def main(
         typer.Option(
             "--jobs",
             "-j",
-            help="Number of processes that analyze the files of a large project. Defaults to one for each CPU.",
+            help="Number of processes. Defaults to one for each CPU.",
             min=1,
             show_default=False,
         ),
@@ -48,11 +48,7 @@ def main(
         Path | None,
         typer.Option(
             "--python",
-            help=(
-                "Path to the Python environment or interpreter of the project, whose installed packages"
-                " base classes are looked for in. Defaults to the active virtual environment, or else to"
-                " the .venv of the current directory."
-            ),
+            help="Python environment or interpreter of the project. Defaults to the active one, or else ./.venv.",
             show_default=False,
         ),
     ] = None,

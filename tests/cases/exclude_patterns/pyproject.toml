@@ -1,0 +1,7 @@
+[tool.unref]
+exclude = [
+  "**/fixtures/",
+  "!**/node_modules/",
+  "scripts/*.py",
+  "!scripts/keep.py",
+]
