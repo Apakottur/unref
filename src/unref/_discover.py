@@ -3,7 +3,6 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from pathspec import GitIgnoreSpec
-from pathspec.pattern import RegexPattern
 
 # The patterns that are excluded by default, before the `exclude` ones. The same as ty's defaults.
 DEFAULT_EXCLUDE = (
@@ -127,9 +126,7 @@ def _check(spec: GitIgnoreSpec, path: str, prefix: str) -> bool | None:
     patterns = [
         pattern
         for pattern in spec.patterns
-        if isinstance(pattern, RegexPattern)
-        and (result := pattern.match_file(path)) is not None
-        and result.match.end() > len(prefix)
+        if (result := pattern.match_file(path)) is not None and result.match.end() > len(prefix)
     ]
     return GitIgnoreSpec(patterns).check_file(path).include
 
