@@ -26,6 +26,18 @@ The tests, fixtures and hooks that pytest and unittest find by themselves count 
 configuration. See the [configuration](https://unref.readthedocs.io/en/latest/configuration/) to change
 that, and for the other options.
 
+## Benchmark
+
+Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.0, about 2,100 files):
+
+| Tool                | Time   |
+| ------------------- | ------ |
+| unref               | 5.75s  |
+| unref (one process) | 8.95s  |
+| vulture             | 17.66s |
+
+Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py).
+
 ## Why
 
 Unused code piles up in every codebase, and faster than ever now that AI tools write much of it and
@@ -36,6 +48,9 @@ Finding and removing dead code reduces bloat, speeds up AI code scanning and sim
 [Ruff](https://docs.astral.sh/ruff/) does not support this yet, see
 [astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` exists to fill the gap until
 Ruff supports it natively.
+
+`unref` follows [Vulture](https://github.com/jendrikseipp/vulture), the tool that has long filled this
+role, as a fast and modern package that follows the conventions of Ruff.
 
 ## Contributing
 
