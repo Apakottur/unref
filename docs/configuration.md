@@ -77,8 +77,18 @@ a reference from them does not count.
 exclude = ["generated", "scripts/legacy.py"]
 ```
 
-A path is relative to the directory of the configuration file. Hidden directories, such as `.venv` and
-`.git`, are always left out.
+A path is relative to the directory of the configuration file.
+
+Some paths are also left out without being listed, as ruff and ty do:
+
+- The files and directories that git ignores, by the `.gitignore` files of the git repository.
+- The directories `.bzr`, `.direnv`, `.eggs`, `.git`, `.git-rewrite`, `.hg`, `.ipynb_checkpoints`,
+  `.mypy_cache`, `.nox`, `.pants.d`, `.pyenv`, `.pytest_cache`, `.pytype`, `.ruff_cache`, `.svn`,
+  `.tox`, `.venv`, `.vscode`, `__pypackages__`, `_build`, `buck-out`, `dist`, `node_modules`,
+  `site-packages` and `venv`, wherever they are.
+
+Other hidden directories, such as `.github`, are part of the project. A path that is given to `unref`
+directly is always checked.
 
 ### `python`
 
