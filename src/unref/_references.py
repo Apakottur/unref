@@ -1,7 +1,10 @@
 import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
+
+from unref._definitions import Definition, base_name, decorator_names
 
 # A name that a module imports: the module it is imported from, as it is written, the number of leading
 # dots, and the imported name. The name is None for `import module`, which binds the module itself.
@@ -42,22 +45,26 @@ class References:
     bindings: dict[str, Binding] = field(default_factory=dict)
 
 
-def find_references(module: ast.Module) -> References:
+def walk_module(path: Path, module: ast.Module) -> tuple[list[Definition], References]:
     """
-    Find what a Python module refers to.
+    Find what a Python module defines and refers to.
 
     The module is walked once. A read of a name is kept with the scope that it is in until the scope
     ends, because a name that is bound anywhere in a function is local to all of it. It is then dropped
     if the name is local, and otherwise passed to the enclosing scope, until it reaches the module.
 
+    The definitions are the functions, classes, methods, variables and attributes of the module. Local
+    variables and imports are left out.
+
     Args:
+        path: The file of the module.
         module: The parsed module.
 
     Returns:
-        The references.
+        The definitions, in the order of the file, and the references.
     """
     references = References()
-    walker = _Walker(references)
+    walker = _Walker(path, references)
     walker.visit(module)
 
     # What reaches the module is read from the module itself, or from what it imports.
@@ -70,15 +77,17 @@ def find_references(module: ast.Module) -> References:
         else:
             references.attributes.update((owner, attribute) for attribute in attributes)
             references.names.add((owner, root))
-    return references
+    return walker.definitions, references
 
 
 @dataclass
 class _Scope:
     """
-    The module, a function, a lambda or a comprehension, while it is walked.
+    The module, a class body, a function, a lambda or a comprehension, while it is walked.
 
     Attributes:
+        kind: Whether the definitions in the scope are module variables, class attributes, or local
+            variables that are left out. A lambda and a comprehension hold no definitions.
         bound: The names that the scope binds, which are its local variables.
         global_names: The names that the scope declares `global`.
         imports: The names that the scope imports, each with what it stands for.
@@ -89,32 +98,44 @@ class _Scope:
             the name and the attributes in order.
         enclosing: The scope that also binds the names that the scope binds. A comprehension binds its
             variables in the function that it is in as well.
+        defined: The variables of a module, or the attributes of a class, that were already found. A
+            method shares the names of its class, so that an attribute is found once.
+        instance: In a method, the name of its first parameter, usually `self` or `cls`.
+        class_name: In a class or a method, the name of the class in the module.
     """
 
+    kind: Literal["module", "class", "function"] = "function"
     bound: set[str] = field(default_factory=set)
     global_names: set[str] = field(default_factory=set)
     imports: dict[str, Binding] = field(default_factory=dict)
     names: set[tuple[Owner, str]] = field(default_factory=set)
     chains: set[tuple[Owner, str, tuple[str, ...]]] = field(default_factory=set)
     enclosing: "_Scope | None" = None
+    defined: set[str] = field(default_factory=set)
+    instance: str | None = None
+    class_name: str | None = None
 
 
 class _Walker:
     """
-    Walk a module once, and add what it refers to.
+    Walk a module once, and add what it defines and refers to.
 
     Attributes:
+        path: The file of the module.
+        definitions: The definitions to add to.
         references: The references to add to.
         scope: The scope that the node being walked is in.
-        binder: The scope that the names bound at the node belong to. In a class body, and in what a
-            function evaluates where it is defined, it is a scope of its own that is then dropped, since
-            what they bind is not tracked.
+        binder: The scope that the names bound at the node belong to, which holds its definitions. In a
+            class body, and in what a function evaluates where it is defined, it is a scope of its own
+            that is then dropped, since the names that they bind are not tracked.
         owner: The function that the node is in, or None for code that runs when the module is imported.
     """
 
-    def __init__(self, references: References) -> None:
+    def __init__(self, path: Path, references: References) -> None:
+        self.path = path
+        self.definitions: list[Definition] = []
         self.references = references
-        self.scope = _Scope()
+        self.scope = _Scope(kind="module")
         self.binder = self.scope
         self.owner: Owner = None
 
@@ -178,8 +199,10 @@ class _Walker:
             *arguments.kw_defaults,
             *(parameter.annotation for parameter in parameters),
         ]
+        body_scope = _Scope()
         if not isinstance(function, ast.Lambda):
             outside += [*function.decorator_list, function.returns]
+            body_scope = self.define_function(function)
         binder, self.binder = self.binder, _Scope()
         for node in outside:
             if node is not None:
@@ -188,7 +211,7 @@ class _Walker:
         # The body runs only when the function is called. A lambda has no name, and is part of the code
         # that it is in.
         scope, owner = self.scope, self.owner
-        self.scope = self.binder = _Scope()
+        self.scope = self.binder = body_scope
         if isinstance(function, ast.Lambda):
             self.visit(function.body)
         else:
@@ -201,12 +224,22 @@ class _Walker:
 
     def visit_class(self, node: ast.ClassDef) -> None:
         """
-        Add what a class refers to.
+        Add a class, and what it defines and refers to.
 
-        The body of a class is not a scope that is tracked: it sees the names of the code that it is in,
-        and what it binds is an attribute of the class.
+        The body of a class is not a scope whose reads are tracked: it sees the names of the code that it
+        is in, and what it binds is an attribute of the class.
         """
-        binder, self.binder = self.binder, _Scope()
+        definition = Definition(
+            path=self.path,
+            line=node.lineno,
+            kind="class",
+            name=node.name,
+            decorators=decorator_names(node),
+            owner=self.binder.class_name if self.binder.kind == "class" else None,
+            bases=tuple(filter(None, map(base_name, node.bases))),
+        )
+        self.definitions.append(definition)
+        binder, self.binder = self.binder, _Scope(kind="class", class_name=definition.qualified_name)
         self.visit_children(node)
         self.binder = binder
 
@@ -250,9 +283,13 @@ class _Walker:
 
     def visit_assign(self, node: ast.Assign | ast.AnnAssign | ast.AugAssign) -> None:
         """
-        Add the names that an assignment to `__all__` lists, and what the assignment refers to.
+        Add the variables and attributes that an assignment defines, the names that an assignment to
+        `__all__` lists, and what the assignment refers to.
         """
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not isinstance(node, ast.AugAssign):
+            for target in targets:
+                self.define_target(target)
         if any(map(_is_all, targets)):
             self.references.has_all = True
             self.references.names.update((self.owner, name) for name in _string_literals(node.value))
@@ -275,6 +312,75 @@ class _Walker:
         """
         self.references.attributes.update((self.owner, name) for name in node.kwd_attrs)
         self.visit_children(node)
+
+    def define_function(self, function: ast.FunctionDef | ast.AsyncFunctionDef) -> _Scope:
+        """
+        Add a function or a method.
+
+        Returns:
+            The scope of its body.
+        """
+        enclosing = self.binder
+        kind: Literal["function", "method"] = "function"
+        scope = _Scope()
+        if enclosing.kind == "class":
+            kind = "method"
+            parameters = [*function.args.posonlyargs, *function.args.args]
+            instance = parameters[0].arg if parameters else None
+            scope = _Scope(defined=enclosing.defined, instance=instance, class_name=enclosing.class_name)
+        self.definitions.append(
+            Definition(
+                path=self.path,
+                line=function.lineno,
+                kind=kind,
+                name=function.name,
+                decorators=decorator_names(function),
+                owner=enclosing.class_name if enclosing.kind == "class" else None,
+            )
+        )
+        return scope
+
+    def define_target(self, target: ast.expr, *, in_unpacking: bool = False) -> None:
+        """
+        Add the variables and attributes that an assignment target defines.
+
+        Args:
+            target: The assignment target.
+            in_unpacking: Whether the target is part of an unpacking.
+        """
+        scope = self.binder
+        kind: Literal["variable", "attribute"]
+        unpacked = False
+        match target:
+            case ast.Name(id=name) if scope.kind != "function":
+                kind = "variable" if scope.kind == "module" else "attribute"
+                unpacked = in_unpacking
+            case ast.Attribute(value=ast.Name(id=owner), attr=name) if owner == scope.instance:
+                kind = "attribute"
+            case ast.Tuple(elts=elements) | ast.List(elts=elements):
+                for element in elements:
+                    self.define_target(element, in_unpacking=True)
+                return
+            case ast.Starred(value=value):
+                self.define_target(value, in_unpacking=True)
+                return
+            case _:
+                # A local variable, or an assignment into an object that is defined elsewhere.
+                return
+
+        # A variable or attribute is found once, where it is first assigned.
+        if name not in scope.defined:
+            scope.defined.add(name)
+            self.definitions.append(
+                Definition(
+                    path=self.path,
+                    line=target.lineno,
+                    kind=kind,
+                    name=name,
+                    owner=scope.class_name,
+                    unpacked=unpacked,
+                )
+            )
 
     def bind(self, name: str) -> None:
         """
