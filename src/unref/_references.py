@@ -153,8 +153,14 @@ class _Walker:
         """
         Add what the children of a node, and everything under them, refer to.
         """
-        for child in ast.iter_child_nodes(node):
-            self.visit(child)
+        for name in _child_fields(type(node)):
+            value = getattr(node, name, None)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, ast.AST):
+                        self.visit(item)
+            elif isinstance(value, ast.AST):
+                self.visit(value)
 
     def visit_name(self, node: ast.Name) -> None:
         """
@@ -448,6 +454,24 @@ _HANDLERS: dict[type[ast.AST], Callable[[_Walker, Any], None]] = {
     ast.MatchMapping: _Walker.visit_pattern_or_handler,
     ast.MatchClass: _Walker.visit_match_class,
 }
+
+
+# The fields of each type of node that can hold other nodes, as they are found.
+_CHILD_FIELDS: dict[type[ast.AST], tuple[str, ...]] = {}
+
+
+def _child_fields(node_type: type[ast.AST]) -> tuple[str, ...]:
+    """
+    Get the fields of a type of node that can hold other nodes.
+
+    The context of a name or an attribute, such as `ast.Load`, is left out, and a constant has none,
+    since they hold nothing.
+    """
+    fields = _CHILD_FIELDS.get(node_type)
+    if fields is None:
+        fields = () if node_type is ast.Constant else tuple(name for name in node_type._fields if name != "ctx")
+        _CHILD_FIELDS[node_type] = fields
+    return fields
 
 
 def _attribute_chain(attribute: ast.Attribute) -> tuple[ast.expr, tuple[str, ...]]:
