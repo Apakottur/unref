@@ -40,7 +40,11 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
 ]
-dependencies = ["pathspec>=0.12", "typer>=0.15.4"]
+dependencies = [
+  #
+  "pathspec>=0.12",
+  "typer>=0.15.4",
+]
 
 [project.scripts]
 unref = "unref._cli:app"

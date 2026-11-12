@@ -19,34 +19,20 @@ def check(
     """
     Find the unused code in a Python project.
 
+    The options are described in https://unref.readthedocs.io/en/latest/configuration/.
+
     Args:
         paths: The files and directories that make up the project.
-        used_names: The names of the definitions that count as used, as glob patterns such as `test_*`.
-        used_decorators: The decorators that make the definitions they decorate count as used, as
-            dotted names. For example, `app.command` covers `@app.command` and `@app.command("name")`.
-        exclude: The files and directories that are not part of the project, as patterns in the syntax
-            of `.gitignore`, such as `generated` or `**/fixtures/`. They are not checked, and a reference
-            from them does not count. A pattern is anchored at the current directory: `src` matches only the `src` there,
-            `**/src` matches one at any depth. They come after the default ones, such as `**/.venv/`,
-            and the last pattern that matches a path decides, so `!**/dist/` brings `dist` back. A file
-            or directory that git ignores is also left out. A file that is given in `paths` is always
-            checked.
-        overrides: Options that apply only to some of the files of the project, on top of the options
-            above. For example, `Override(paths=["tests"], used_names=["test_*"])`.
-        jobs: The number of processes that analyze the files, or None for one for each CPU. A small
-            project is always analyzed in the current process. With more than one process, a script
-            that calls this function must guard its code with `if __name__ == "__main__":`, as
-            [`multiprocessing`](https://docs.python.org/3/library/multiprocessing.html) requires.
-        python: The Python environment that the project runs in, as a virtual environment such as
-            `.venv`, a `sys.prefix` such as `/usr`, or an interpreter such as `.venv/bin/python`, as
-            ty takes it. A base class that is installed there is followed through its source, which is
-            read without being imported. The site-packages of the environment replace those of the
-            environment that runs the check. Defaults to the environment that runs the check.
-        dummy_variable_rgx: A regular expression for the names of the variables that are not used on
-            purpose, as Ruff takes it. Such a variable is not reported where Python needs a name to
-            bind: in an unpacking such as `key, _rest = pair()`. It is searched for in the name, so it
-            should be anchored with `^` and `$`. Defaults to Ruff's default, which matches a name that
-            starts with `_`, such as `_rest`.
+        used_names: Names of the definitions that count as used, as glob patterns.
+        used_decorators: Decorators that make the definitions they decorate count as used.
+        exclude: Patterns of the files and directories that are not part of the project.
+        overrides: Options that apply only to some of the definitions of the project.
+        jobs: Number of processes that analyze the files, or None for one for each CPU. More than one
+            needs an `if __name__ == "__main__":` guard, as `multiprocessing` does.
+        python: Python environment or interpreter that the project runs in. Defaults to the one that
+            runs the check.
+        dummy_variable_rgx: Regular expression for the names of the variables that are not used on
+            purpose. Defaults to Ruff's default.
 
     Returns:
         The findings, one for each unused definition, sorted by file and line.
