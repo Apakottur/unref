@@ -52,6 +52,19 @@ class ExternalModules:
         """
         self._search_path = search_path
         self._modules: dict[str, ExternalModule | None] = {}
+        self._found: dict[str, tuple[Path | None, bool] | None] = {}
+
+    def exists(self, name: str) -> bool:
+        """
+        Tell whether a module is found, whether or not it has a source that can be read.
+
+        Args:
+            name: The dotted name of the module, such as `logging.handlers`.
+
+        Returns:
+            Whether the module is found, such as a compiled module or a namespace package.
+        """
+        return self._locate(name) is not None
 
     def get(self, name: str) -> ExternalModule | None:
         """
@@ -67,22 +80,33 @@ class ExternalModules:
             self._modules[name] = self._read(name)
         return self._modules[name]
 
+    def _locate(self, name: str) -> tuple[Path | None, bool] | None:
+        """
+        Find a module, with its file and whether it is a package.
+        """
+        if name not in self._found:
+            # Each package of the name is looked for in turn, in the directories of the package above it.
+            locations: list[Path] | None = self._search_path
+            file: Path | None = None
+            for part in name.split("."):
+                if locations is None:
+                    # A module that is not a package has no submodules.
+                    self._found[name] = None
+                    return None
+                found = _find(part, locations)
+                if found is None:
+                    self._found[name] = None
+                    return None
+                file, locations = found
+            self._found[name] = (file, locations is not None)
+        return self._found[name]
+
     def _read(self, name: str) -> ExternalModule | None:
         """
         Find a module and read its source.
         """
-        # Each package of the name is looked for in turn, in the directories of the package above it.
-        locations: list[Path] | None = self._search_path
-        file: Path | None = None
-        for part in name.split("."):
-            if locations is None:
-                # A module that is not a package has no submodules.
-                return None
-            found = _find(part, locations)
-            if found is None:
-                return None
-            file, locations = found
-
+        # A module that is not found has no file, as a namespace package.
+        file, is_package = self._locate(name) or (None, False)
         if file is None or file.suffix != ".py":
             return None
         try:
@@ -95,7 +119,7 @@ class ExternalModules:
         definitions, references = walk_module(file, tree)
         return ExternalModule(
             path=file,
-            name=ModuleName(name=name, is_package=locations is not None),
+            name=ModuleName(name=name, is_package=is_package),
             definitions=definitions,
             bindings=references.bindings,
             stars=star_imports(references),
