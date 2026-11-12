@@ -11,7 +11,7 @@ from pathlib import Path
 from unref._classes import ClassHierarchy
 from unref._definitions import Definition, find_definitions
 from unref._discover import discover, is_under
-from unref._external import ExternalModules
+from unref._external import ExternalModules, star_imports
 from unref._ignores import find_ignored_lines
 from unref._models import Finding, Override
 from unref._modules import import_root, module_name
@@ -104,6 +104,7 @@ def find_unused(
         names=names,
         files_by_name=files_by_name,
         bindings={path: references[path].bindings for path in files},
+        stars={path: star_imports(references[path]) for path in files},
         classes={
             path: {
                 definition.qualified_name: definition.bases
@@ -161,6 +162,11 @@ def find_unused(
 
             if (
                 _is_dunder(definition.name)
+                # A member that a base class outside the project defines is used by its code.
+                or (
+                    definition.owner is not None
+                    and definition.name in hierarchy.external_members(path, definition.owner)
+                )
                 or any(fnmatchcase(definition.name, pattern) for pattern in names_of_definition)
                 or not decorators_of_definition.isdisjoint(definition.decorators)
             ):

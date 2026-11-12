@@ -6,7 +6,7 @@ from pathlib import Path
 
 from unref._definitions import Definition, find_definitions
 from unref._modules import ModuleName
-from unref._references import Binding, find_references
+from unref._references import Binding, References, find_references
 
 # The files that a module can be imported from, in the order that Python looks for them: a compiled
 # module, a source, and a bytecode file.
@@ -23,12 +23,15 @@ class ExternalModule:
         name: The name that the module is imported by.
         definitions: What the module defines.
         bindings: The names that the module imports at its top level.
+        stars: The modules that the module star imports at its top level, each as it is written and
+            with its number of leading dots.
     """
 
     path: Path
     name: ModuleName
     definitions: list[Definition]
     bindings: dict[str, Binding]
+    stars: list[tuple[str | None, int]]
 
 
 class ExternalModules:
@@ -90,12 +93,30 @@ class ExternalModules:
         except (OSError, SyntaxError, ValueError):
             return None
 
+        references = find_references(tree)
         return ExternalModule(
             path=file,
             name=ModuleName(name=name, is_package=locations is not None),
             definitions=find_definitions(file, tree),
-            bindings=find_references(tree).bindings,
+            bindings=references.bindings,
+            stars=star_imports(references),
         )
+
+
+def star_imports(references: References) -> list[tuple[str | None, int]]:
+    """
+    Get the modules that a module star imports at its top level.
+
+    Args:
+        references: What the module refers to.
+
+    Returns:
+        The modules, each as it is written and with its number of leading dots.
+    """
+    return sorted(
+        ((source, level) for owner, source, level, name in references.imports if owner is None and name == "*"),
+        key=str,
+    )
 
 
 def _find(name: str, locations: list[Path]) -> tuple[Path | None, list[Path] | None] | None:

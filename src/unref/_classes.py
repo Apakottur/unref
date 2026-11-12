@@ -21,6 +21,7 @@ class ClassHierarchy:
         names: dict[Path, ModuleName],
         files_by_name: dict[str, list[Path]],
         bindings: dict[Path, dict[str, Binding]],
+        stars: dict[Path, list[tuple[str | None, int]]],
         classes: dict[Path, dict[str, tuple[str, ...]]],
         decorators: dict[Path, dict[str, tuple[str, ...]]],
         external: ExternalModules,
@@ -30,6 +31,8 @@ class ClassHierarchy:
             names: The name of each module of the project.
             files_by_name: The files of the project by their module name.
             bindings: The names that each module imports at its top level.
+            stars: The modules that each module star imports at its top level, each as it is written
+                and with its number of leading dots.
             classes: The classes and functions of each module, by their name in the module
                 (`Outer.Inner` for a nested class), with their base classes as they are written. A
                 function has none.
@@ -43,9 +46,13 @@ class ClassHierarchy:
         self._names = dict(names)
         self._files_by_name = files_by_name
         self._bindings = dict(bindings)
+        self._stars = dict(stars)
         self._classes = dict(classes)
         self._ancestors: dict[tuple[Path, str], frozenset[str]] = {}
         self._external = external
+        # The members of the classes of each module outside the project, by the name of the class.
+        self._external_members: dict[Path, dict[str, set[str]]] = {}
+        self._inherited: dict[tuple[Path, str], frozenset[str]] = {}
 
     def ancestors(self, path: Path, name: str) -> frozenset[str]:
         """
@@ -67,6 +74,32 @@ class ClassHierarchy:
                 found |= self._resolve(path, base, seen)
             self._ancestors[key] = frozenset(found)
         return self._ancestors[key]
+
+    def external_members(self, path: Path, name: str) -> frozenset[str]:
+        """
+        Get the names of the members that a class inherits from the base classes outside the project.
+
+        Code outside the project can use such a member, such as `logging.Handler` calling `emit`, so a
+        member of the class with the same name overrides one that is used.
+
+        Args:
+            path: The file of the class.
+            name: The name of the class in its module.
+
+        Returns:
+            The names of the methods and attributes that the base classes outside the project define,
+            in their body or on their instances.
+        """
+        key = (path, name)
+        if key not in self._inherited:
+            found: set[str] = set()
+            for ancestor in self.ancestors(path, name):
+                module, _, symbol = ancestor.rpartition(".")
+                if module not in self._files_by_name:
+                    for file in self._read_external(module):
+                        found |= self._external_members.get(file, {}).get(symbol, set())
+            self._inherited[key] = frozenset(found)
+        return self._inherited[key]
 
     def decorators(self, path: Path, name: str) -> frozenset[str]:
         """
@@ -128,6 +161,12 @@ class ClassHierarchy:
                 imported = self._imported(path, self._bindings[path][symbol])
                 if imported is not None:
                     found |= self._follow(imported, seen)
+            else:
+                # A name that the module may star import.
+                for source, level in self._stars[path]:
+                    star_module = self._names[path].resolve(source, level)
+                    if star_module is not None:
+                        found |= self._follow(f"{star_module}.{symbol}", seen)
         return found
 
     def _imported(self, path: Path, binding: Binding) -> str | None:
@@ -152,9 +191,15 @@ class ClassHierarchy:
         if path not in self._classes:
             self._names[path] = external.name
             self._bindings[path] = external.bindings
+            self._stars[path] = external.stars
             self._classes[path] = {
                 definition.qualified_name: definition.bases
                 for definition in external.definitions
                 if definition.kind in ("class", "function")
             }
+            members: dict[str, set[str]] = {}
+            for definition in external.definitions:
+                if definition.owner is not None:
+                    members.setdefault(definition.owner, set()).add(definition.name)
+            self._external_members[path] = members
         return [path]

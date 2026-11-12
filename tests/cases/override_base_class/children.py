@@ -11,42 +11,42 @@ from .... import Beyond
 
 # A base class is followed through the imports of the project.
 class FromImport(Direct):
-    model_config = {}
+    table_name = {}
 
 
 class FromModule(models.Child):
-    model_config = {}
+    table_name = {}
 
 
 class FromSubmodule(pkg.base.Base):
-    model_config = {}
+    table_name = {}
 
 
 # `pkg` imports `Base` from `pkg.base`.
 class FromReexport(Base):
-    model_config = {}
+    table_name = {}
 
 
 # A name that the module does not define, and an import that leads nowhere.
 class FromMissing(Missing):
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
 
 
 class FromUndefined(Undefined):
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
 
 
 class FromCycle(Cycle):
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
 
 
 class FromBeyond(Beyond):
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
 
 
 # `pkg` imports `TooFar` with more dots than there are packages.
 class FromTooFar(TooFar):
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
 
 
 print(FromImport, FromModule, FromSubmodule, FromReexport, FromMissing, FromUndefined, FromCycle, FromBeyond, FromTooFar)

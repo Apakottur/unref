@@ -9,40 +9,40 @@ from pydantic import BaseModel as Renamed
 
 
 class Direct(BaseModel):
-    model_config = {}
+    table_name = {}
     field: int  # expect: unused attribute
 
 
 class ThroughModule(pydantic.BaseModel):
-    model_config = {}
+    table_name = {}
 
 
 class ThroughRenamedImport(Renamed):
-    model_config = {}
+    table_name = {}
 
 
 class ThroughRenamedModule(renamed_module.BaseModel):
-    model_config = {}
+    table_name = {}
 
 
 # A subclass of a class of the project inherits from its base classes.
 class Child(Direct):
-    model_config = {}
+    table_name = {}
 
 
 class GrandChild(Child):
-    model_config = {}
+    table_name = {}
 
 
 # The type arguments of a base class are ignored.
 class Generic(Direct[int], typing.Generic[int]):
-    model_config = {}
+    table_name = {}
 
 
 # A nested class is a class like any other.
 class Outer:
     class Inner(BaseModel):
-        model_config = {}
+        table_name = {}
 
 
 # The override applies to everything in the class: attributes, methods and decorated methods.
@@ -65,11 +65,11 @@ class Table(collections.abc.Mapping):
 
 # Not a base class of the override.
 class Plain:
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
 
 
 class OtherBase(Exception):
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
     first: int  # expect: unused attribute
 
     @register
@@ -79,15 +79,15 @@ class OtherBase(Exception):
 
 # A base class that is not a dotted name is not resolved.
 class Computed(typing.cast("type", BaseModel)):
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
 
 
 class ThroughNested(Outer.Inner):
-    model_config = {}  # expect: unused attribute
+    table_name = {}  # expect: unused attribute
 
 
 # The override does not apply outside the class.
-model_config = {}  # expect: unused variable
+table_name = {}  # expect: unused variable
 
 print(
     Direct,
