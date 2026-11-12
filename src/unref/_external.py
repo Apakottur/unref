@@ -154,18 +154,27 @@ def lazy_imports(tree: ast.Module, references: References) -> dict[str, list[Bin
 
 def environment_paths(environment: Path) -> list[Path]:
     """
-    Get the directories that a virtual environment imports its installed modules from, without running
+    Get the directories that a Python environment imports its installed modules from, without running
     its interpreter.
 
     They are its `site-packages`, followed by the directories that the `.pth` files there add, in the
     order that Python's `site` module adds them. A line of a `.pth` file that imports code is not run.
 
     Args:
-        environment: The directory of the environment, such as `.venv`.
+        environment: The environment, as ty takes it: a virtual environment such as `.venv`, a
+            `sys.prefix` such as `/usr`, or an interpreter such as `.venv/bin/python`.
 
     Returns:
         The directories that exist, in order.
     """
+    if environment.is_file():
+        # An interpreter is in the `bin` or `Scripts` directory of its environment, or, for a system
+        # Python on Windows, directly in it. Its link is not followed: the interpreter of a virtual
+        # environment links to the one it was created from.
+        environment = environment.parent
+        if environment.name in ("bin", "Scripts"):
+            environment = environment.parent
+
     paths: list[Path] = []
     # `lib/python3.X/site-packages` on POSIX, and `Lib/site-packages` on Windows.
     for site_packages in sorted(

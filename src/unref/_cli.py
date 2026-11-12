@@ -49,8 +49,9 @@ def main(
         typer.Option(
             "--python",
             help=(
-                "Virtual environment that the project runs in, whose installed packages base classes are"
-                " looked for in. Defaults to the active one, or else to the .venv of the current directory."
+                "Path to the Python environment or interpreter of the project, whose installed packages"
+                " base classes are looked for in. Defaults to the active virtual environment, or else to"
+                " the .venv of the current directory."
             ),
             show_default=False,
         ),
@@ -70,8 +71,8 @@ def main(
     environment = python or options.python
     if environment is None:
         environment = _find_environment()
-    elif not environment.is_dir():
-        typer.echo(f"Error: The Python environment {environment} is not a directory", err=True)
+    elif not environment.exists():
+        typer.echo(f"Error: The Python environment {environment} does not exist", err=True)
         raise typer.Exit(code=2)
 
     # Parsing creates millions of objects, and the cyclic garbage collector would keep scanning them

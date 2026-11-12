@@ -1,3 +1,4 @@
+import shutil
 import sys
 from pathlib import Path
 
@@ -31,22 +32,45 @@ def _no_config(tmp_path: Path) -> Path:
     return config
 
 
-def test_option(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+# As with ty, the environment is given by its directory or by its interpreter.
+@pytest.mark.parametrize("python", [".venv", ".venv/bin/python"])
+def test_option(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, python: str) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
-    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), "--python", str(_CASE / ".venv"), str(_CASE)])
+    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), "--python", str(_CASE / python), str(_CASE)])
 
     assert result.stdout == _WITH_ENVIRONMENT
 
 
-def test_option_not_a_directory(tmp_path: Path) -> None:
+def test_option_windows_system_python(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # The interpreter of a system Python on Windows is directly in its `sys.prefix`, next to
+    # `Lib/site-packages`.
+    prefix = tmp_path / "Python314"
+    shutil.copytree(_CASE / ".venv" / "lib" / "python3.14" / "site-packages", prefix / "Lib" / "site-packages")
+    (prefix / "python.exe").touch()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+
+    result = _runner.invoke(
+        app, ["--config", str(_no_config(tmp_path)), "--python", str(prefix / "python.exe"), str(_CASE)]
+    )
+
+    # The `.pth` file of the copy lists a directory that is not next to it.
+    assert result.stdout == (
+        f"{_CASE}/main.py:15: unused method 'own_method'\n"
+        f"{_CASE}/main.py:21: unused method 'hook'\n"
+        f"{_CASE}/main.py:28: unused method 'command'\n"
+    )
+
+
+def test_option_missing(tmp_path: Path) -> None:
     missing = tmp_path / "missing"
 
     result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), "--python", str(missing), str(_CASE)])
 
     assert result.exit_code == 2
-    assert result.stderr == f"Error: The Python environment {missing} is not a directory\n"
+    assert result.stderr == f"Error: The Python environment {missing} does not exist\n"
 
 
 def test_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

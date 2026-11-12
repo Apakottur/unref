@@ -37,7 +37,7 @@ def find_unused(
         exclude: The files and directories that are not part of the project.
         overrides: The options that apply only to some of the files of the project.
         jobs: The number of processes that analyze the files, or None for one for each CPU.
-        python: The virtual environment that the project runs in, or None for the environment that the
+        python: The Python environment or interpreter of the project, or None for the environment that the
             check runs in.
 
     Returns:

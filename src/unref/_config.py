@@ -27,7 +27,7 @@ class Config:
         used_decorators: The decorators that make the definitions they decorate count as used.
         exclude: The files and directories that are not part of the project.
         overrides: The options that apply only to some of the files of the project.
-        python: The virtual environment that the project runs in, or None if it is not set.
+        python: The Python environment or interpreter of the project, or None if it is not set.
     """
 
     used_names: tuple[str, ...] = ()

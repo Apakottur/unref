@@ -81,14 +81,21 @@ A path is relative to the directory of the configuration file. Hidden directorie
 
 ### `python`
 
-Virtual environment that the project runs in. A base class from a package installed there, such as a
-`pydantic.BaseModel`, is followed through its source, so that the members it defines count
-as used. The modules of the environment are read, never imported, and its interpreter is not run.
+Path to the Python environment or interpreter that the project runs in. A base class from a package
+installed there, such as `pydantic.BaseModel`, is followed through its source, so that the members it
+defines count as used. The modules of the environment are read, never imported, and its interpreter is
+not run.
 
 ```toml
 [tool.unref]
 python = ".venv"
 ```
+
+As with [ty's `--python`](https://docs.astral.sh/ty/reference/cli/), the path can be:
+
+- A virtual environment, such as `.venv`.
+- A Python interpreter, such as `.venv/bin/python`.
+- A system Python `sys.prefix` directory, such as `/usr`.
 
 The path is relative to the directory of the configuration file. It can also be given with `--python`.
 Without either, the command uses the active virtual environment (`VIRTUAL_ENV`), or else the `.venv` of
