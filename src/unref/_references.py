@@ -1,7 +1,6 @@
 import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from functools import cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -457,7 +456,10 @@ _HANDLERS: dict[type[ast.AST], Callable[[_Walker, Any], None]] = {
 }
 
 
-@cache
+# The fields of each type of node that can hold other nodes, as they are found.
+_CHILD_FIELDS: dict[type[ast.AST], tuple[str, ...]] = {}
+
+
 def _child_fields(node_type: type[ast.AST]) -> tuple[str, ...]:
     """
     Get the fields of a type of node that can hold other nodes.
@@ -465,9 +467,11 @@ def _child_fields(node_type: type[ast.AST]) -> tuple[str, ...]:
     The context of a name or an attribute, such as `ast.Load`, is left out, and a constant has none,
     since they hold nothing.
     """
-    if node_type is ast.Constant:
-        return ()
-    return tuple(name for name in node_type._fields if name != "ctx")
+    fields = _CHILD_FIELDS.get(node_type)
+    if fields is None:
+        fields = () if node_type is ast.Constant else tuple(name for name in node_type._fields if name != "ctx")
+        _CHILD_FIELDS[node_type] = fields
+    return fields
 
 
 def _attribute_chain(attribute: ast.Attribute) -> tuple[ast.expr, tuple[str, ...]]:
