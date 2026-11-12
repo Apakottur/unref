@@ -26,6 +26,24 @@ The tests, fixtures and hooks that pytest and unittest find by themselves count 
 configuration. See the [configuration](https://unref.readthedocs.io/en/latest/configuration/) to change
 that, and for the other options.
 
+Or run it as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook, next to
+[Ruff](https://docs.astral.sh/ruff/), which covers unused imports and local variables:
+
+```yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.4
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+  - repo: https://github.com/Apakottur/unref
+    rev: "" # The latest release.
+    hooks:
+      - id: unref
+```
+
+See the [documentation](https://unref.readthedocs.io/en/latest/#pre-commit-and-prek) for how the hook works.
+
 ## Benchmark
 
 Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.0, about 2,100 files):
