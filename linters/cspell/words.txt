@@ -15,6 +15,7 @@ elif
 elts
 httpx
 ignorelist
+isenabled
 isort
 kwonlyargs
 lucide
