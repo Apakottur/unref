@@ -98,7 +98,9 @@ calls. The rest of a module runs when it is imported, including class bodies, de
 values, so a reference from there always counts.
 
 Dunders, such as `__init__` and `__all__`, are never reported, and neither is `_`, the name of a value
-that is not used, such as the `_: KW_ONLY` field of a data class.
+that is not used, such as the `_: KW_ONLY` field of a data class. A variable named like `_rest` is not
+reported where Python needs a name to bind, as in `key, _rest = pair()`, see
+[`dummy-variable-rgx`](configuration.md#dummy-variable-rgx).
 
 A method or attribute of a class that has the name of a member of a base class outside the project, such
 as `emit` in a subclass of `logging.Handler`, counts as used: the code of the base class uses it. Such a

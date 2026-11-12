@@ -1,0 +1,3 @@
+[tool.unref]
+# As in Ruff, the pattern is searched for anywhere in the name.
+dummy-variable-rgx = "^unused_|ignored"

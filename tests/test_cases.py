@@ -66,6 +66,7 @@ def _actual_findings(case: Path) -> list[_Finding]:
             exclude=config.exclude,
             overrides=config.overrides,
             python=config.python,
+            dummy_variable_rgx=config.dummy_variable_rgx,
         )
     )
 

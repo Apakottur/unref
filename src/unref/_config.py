@@ -1,9 +1,10 @@
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from unref._models import Override
+from unref._models import DEFAULT_DUMMY_VARIABLE_RGX, Override
 
 _PYPROJECT = "pyproject.toml"
 
@@ -28,6 +29,7 @@ class Config:
         exclude: The files and directories that are not part of the project.
         overrides: The options that apply only to some of the files of the project.
         python: The Python environment or interpreter of the project, or None if it is not set.
+        dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
     """
 
     used_names: tuple[str, ...] = ()
@@ -35,6 +37,7 @@ class Config:
     exclude: tuple[Path, ...] = ()
     overrides: tuple[Override, ...] = ()
     python: Path | None = None
+    dummy_variable_rgx: str = DEFAULT_DUMMY_VARIABLE_RGX
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -78,7 +81,9 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
     Build the configuration from the options of a configuration file.
     """
     where = f"the configuration file {path}"
-    _check_names(options, {"used-names", "used-decorators", "exclude", "overrides", "python"}, where)
+    _check_names(
+        options, {"used-names", "used-decorators", "exclude", "overrides", "python", "dummy-variable-rgx"}, where
+    )
 
     overrides = options.get("overrides", [])
     if not isinstance(overrides, list) or not all(isinstance(item, dict) for item in overrides):
@@ -88,6 +93,16 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
     if python is not None and not isinstance(python, str):
         raise UnrefConfigError(f"Option 'python' in {where} must be a string")
 
+    dummy_variable_rgx = options.get("dummy-variable-rgx", DEFAULT_DUMMY_VARIABLE_RGX)
+    if not isinstance(dummy_variable_rgx, str):
+        raise UnrefConfigError(f"Option 'dummy-variable-rgx' in {where} must be a string")
+    try:
+        re.compile(dummy_variable_rgx)
+    except re.error as error:
+        raise UnrefConfigError(
+            f"Option 'dummy-variable-rgx' in {where} is not a valid regular expression: {error}"
+        ) from error
+
     return Config(
         used_names=tuple(_string_list(options, "used-names", where)),
         used_decorators=tuple(_decorators(options, "used-decorators", where)),
@@ -96,6 +111,7 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
         overrides=tuple(_parse_override(item, path) for item in overrides),
         # The path is relative to the directory of the configuration file.
         python=None if python is None else path.parent / python,
+        dummy_variable_rgx=dummy_variable_rgx,
     )
 
 

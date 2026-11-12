@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import sysconfig
 from collections import defaultdict
@@ -26,6 +27,7 @@ def find_unused(
     overrides: Iterable[Override],
     jobs: int | None,
     python: str | os.PathLike[str] | None = None,
+    dummy_variable_rgx: str,
 ) -> list[Finding]:
     """
     Find the unused definitions of a Python project, which are those that nothing references.
@@ -39,6 +41,7 @@ def find_unused(
         jobs: The number of processes that analyze the files, or None for one for each CPU.
         python: The Python environment or interpreter of the project, or None for the environment that the
             check runs in.
+        dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
 
     Returns:
         A finding for each unused definition, and for each file that does not parse, sorted by file and
@@ -135,6 +138,7 @@ def find_unused(
         external=ExternalModules(search_path),
     )
 
+    dummy_variable = re.compile(dummy_variable_rgx)
     project_names = list(used_names)
     project_decorators = set(used_decorators)
     resolved_overrides = [([Path(path).resolve() for path in override.paths], override) for override in overrides]
@@ -174,6 +178,9 @@ def find_unused(
             if (
                 definition.name == "_"
                 or _is_dunder(definition.name)
+                # A variable that is not used on purpose, where Python needs a name to bind. Ruff
+                # searches for the pattern, rather than matching the whole name.
+                or (definition.unpacked and dummy_variable.search(definition.name) is not None)
                 # A member that a base class outside the project defines is used by its code.
                 or (
                     definition.owner is not None

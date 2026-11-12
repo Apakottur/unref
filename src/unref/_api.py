@@ -2,7 +2,7 @@ import os
 from collections.abc import Iterable
 
 from unref._engine import find_unused
-from unref._models import Finding, Override
+from unref._models import DEFAULT_DUMMY_VARIABLE_RGX, Finding, Override
 
 
 def check(
@@ -14,6 +14,7 @@ def check(
     overrides: Iterable[Override] = (),
     jobs: int | None = 1,
     python: str | os.PathLike[str] | None = None,
+    dummy_variable_rgx: str = DEFAULT_DUMMY_VARIABLE_RGX,
 ) -> list[Finding]:
     """
     Find the unused code in a Python project.
@@ -36,6 +37,11 @@ def check(
             ty takes it. A base class that is installed there is followed through its source, which is
             read without being imported. The site-packages of the environment replace those of the
             environment that runs the check. Defaults to the environment that runs the check.
+        dummy_variable_rgx: A regular expression for the names of the variables that are not used on
+            purpose, as Ruff takes it. Such a variable is not reported where Python needs a name to
+            bind: in an unpacking such as `key, _rest = pair()`. It is searched for in the name, so it
+            should be anchored with `^` and `$`. Defaults to Ruff's default, which matches a name that
+            starts with `_`, such as `_rest`.
 
     Returns:
         The findings, one for each unused definition, sorted by file and line.
@@ -48,4 +54,5 @@ def check(
         overrides=overrides,
         jobs=jobs,
         python=python,
+        dummy_variable_rgx=dummy_variable_rgx,
     )
