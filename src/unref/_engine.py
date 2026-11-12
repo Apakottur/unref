@@ -161,7 +161,8 @@ def find_unused(
                 decorators_of_definition |= set(override.used_decorators)
 
             if (
-                _is_dunder(definition.name)
+                definition.name == "_"
+                or _is_dunder(definition.name)
                 # A member that a base class outside the project defines is used by its code.
                 or (
                     definition.owner is not None
