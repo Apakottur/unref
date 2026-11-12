@@ -5,11 +5,17 @@ from dataclasses import dataclass, field
 # dots, and the imported name. The name is None for `import module`, which binds the module itself.
 Binding = tuple[str | None, int, str | None]
 
+# The code that a reference is made from: the line of the `def` of the function that the reference is
+# in, or None for code that runs when the module is imported.
+Owner = int | None
+
 
 @dataclass
 class References:
     """
     What a Python module refers to.
+
+    Each reference is made from an owner: the function that it is in, or the module itself.
 
     Attributes:
         names: The names that are read as a plain name (`name`), without the local variables and
@@ -26,10 +32,10 @@ class References:
         bindings: The names that the module imports at its top level, each with what it stands for.
     """
 
-    names: set[str] = field(default_factory=set)
-    attributes: set[str] = field(default_factory=set)
-    imported_attributes: set[tuple[Binding, tuple[str, ...]]] = field(default_factory=set)
-    imports: set[tuple[str | None, int, str]] = field(default_factory=set)
+    names: set[tuple[Owner, str]] = field(default_factory=set)
+    attributes: set[tuple[Owner, str]] = field(default_factory=set)
+    imported_attributes: set[tuple[Owner, Binding, tuple[str, ...]]] = field(default_factory=set)
+    imports: set[tuple[Owner, str | None, int, str]] = field(default_factory=set)
     has_all: bool = False
     bindings: dict[str, Binding] = field(default_factory=dict)
 
@@ -45,7 +51,7 @@ def find_references(module: ast.Module) -> References:
         The references.
     """
     references = References(bindings=_import_bindings([module]))
-    _visit(module, local_names=frozenset(), imports=references.bindings, references=references)
+    _visit(module, owner=None, local_names=frozenset(), imports=references.bindings, references=references)
     return references
 
 
@@ -81,6 +87,7 @@ def _import_bindings(nodes: list[ast.AST]) -> dict[str, Binding]:
 def _visit(
     node: ast.AST,
     *,
+    owner: Owner,
     local_names: frozenset[str],
     imports: dict[str, Binding],
     references: References,
@@ -90,13 +97,14 @@ def _visit(
 
     Args:
         node: The node.
+        owner: The function that the node is in, or None for code that runs when the module is imported.
         local_names: The local variables and parameters that are visible at the node.
         imports: The imported names that are visible at the node.
         references: The references to add to.
     """
     match node:
         case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.Lambda():
-            _visit_function(node, local_names=local_names, imports=imports, references=references)
+            _visit_function(node, owner=owner, local_names=local_names, imports=imports, references=references)
             return
         case ast.ListComp() | ast.SetComp() | ast.DictComp() | ast.GeneratorExp():
             # The variables of a comprehension are local to it.
@@ -105,32 +113,33 @@ def _visit(
             imports = {name: binding for name, binding in imports.items() if name not in bound}
         case ast.Name(id=name, ctx=ast.Load()):
             if name not in local_names:
-                references.names.add(name)
+                references.names.add((owner, name))
         case ast.Attribute(attr=name, ctx=ast.Load()):
             root, attributes = _attribute_chain(node)
             if root in imports:
                 # Attributes of an imported name, which are resolved once every module is known.
-                references.imported_attributes.add((imports[root], attributes))
+                references.imported_attributes.add((owner, imports[root], attributes))
                 return
-            references.attributes.add(name)
+            references.attributes.add((owner, name))
         case ast.ImportFrom(module=source, level=level, names=aliases):
-            references.imports.update((source, level, alias.name) for alias in aliases)
+            references.imports.update((owner, source, level, alias.name) for alias in aliases)
         case ast.Assign(targets=targets, value=value) if any(map(_is_all, targets)):
             references.has_all = True
-            references.names.update(_string_literals(value))
+            references.names.update((owner, name) for name in _string_literals(value))
         case ast.AnnAssign(target=target, value=value) | ast.AugAssign(target=target, value=value) if _is_all(target):
             references.has_all = True
-            references.names.update(_string_literals(value))
+            references.names.update((owner, name) for name in _string_literals(value))
         case _:
             pass
 
     for child in ast.iter_child_nodes(node):
-        _visit(child, local_names=local_names, imports=imports, references=references)
+        _visit(child, owner=owner, local_names=local_names, imports=imports, references=references)
 
 
 def _visit_function(
     function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
     *,
+    owner: Owner,
     local_names: frozenset[str],
     imports: dict[str, Binding],
     references: References,
@@ -140,6 +149,7 @@ def _visit_function(
 
     Args:
         function: The function or lambda.
+        owner: The function that the function is defined in, or None.
         local_names: The local variables and parameters that are visible where the function is defined.
         imports: The imported names that are visible where the function is defined.
         references: The references to add to.
@@ -164,14 +174,18 @@ def _visit_function(
         outside += [*function.decorator_list, function.returns]
     for node in outside:
         if node is not None:
-            _visit(node, local_names=local_names, imports=imports, references=references)
+            _visit(node, owner=owner, local_names=local_names, imports=imports, references=references)
 
     # A local variable hides an imported name, and the function sees its own imports.
     bound = {parameter.arg for parameter in parameters} | _bound_names(body)
     local_names |= bound
     imports = {name: binding for name, binding in imports.items() if name not in bound} | _import_bindings(body)
+    # The body runs only when the function is called. A lambda has no name, and is part of the code that
+    # it is in.
+    if not isinstance(function, ast.Lambda):
+        owner = function.lineno
     for node in body:
-        _visit(node, local_names=local_names, imports=imports, references=references)
+        _visit(node, owner=owner, local_names=local_names, imports=imports, references=references)
 
 
 def _attribute_chain(attribute: ast.Attribute) -> tuple[str | None, tuple[str, ...]]:

@@ -1,0 +1,3 @@
+[tool.unref]
+used-names = ["by_name"]
+used-decorators = ["register"]

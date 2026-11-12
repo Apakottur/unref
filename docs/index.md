@@ -88,6 +88,11 @@ A definition counts as used when something references it:
 - A method or attribute is read as an attribute (`value.name`) anywhere in the project. It is matched by
   name, whatever the object is.
 
+Code in a function runs only when the function is called, so a reference from an unused function does not
+count. A function that only calls itself is unused, and so is a function that only an unused function
+calls. The rest of a module runs when it is imported, including class bodies, decorators and default
+values, so a reference from there always counts.
+
 Dunders, such as `__init__` and `__all__`, are never reported.
 
 ## Ignoring a finding
