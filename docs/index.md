@@ -146,4 +146,7 @@ Finding and removing dead code reduces bloat, speeds up AI code scanning and sim
 [astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` exists to fill the gap until
 Ruff supports it natively.
 
+`unref` follows [Vulture](https://github.com/jendrikseipp/vulture), the tool that has long filled this
+role, as a fast and modern package that follows the conventions of Ruff.
+
 The name is short for "unreferenced".
