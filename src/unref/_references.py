@@ -1,5 +1,7 @@
 import ast
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 # A name that a module imports: the module it is imported from, as it is written, the number of leading
 # dots, and the imported name. The name is None for `import module`, which binds the module itself.
@@ -44,203 +46,310 @@ def find_references(module: ast.Module) -> References:
     """
     Find what a Python module refers to.
 
+    The module is walked once. A read of a name is kept with the scope that it is in until the scope
+    ends, because a name that is bound anywhere in a function is local to all of it. It is then dropped
+    if the name is local, and otherwise passed to the enclosing scope, until it reaches the module.
+
     Args:
         module: The parsed module.
 
     Returns:
         The references.
     """
-    references = References(bindings=_import_bindings([module]))
-    _visit(module, owner=None, local_names=frozenset(), imports=references.bindings, references=references)
+    references = References()
+    walker = _Walker(references)
+    walker.visit(module)
+
+    # What reaches the module is read from the module itself, or from what it imports.
+    scope = walker.scope
+    references.bindings = scope.imports
+    references.names |= scope.names
+    for owner, root, attributes in scope.chains:
+        if root in scope.imports:
+            references.imported_attributes.add((owner, scope.imports[root], attributes))
+        else:
+            references.attributes.update((owner, attribute) for attribute in attributes)
+            references.names.add((owner, root))
     return references
 
 
-def _import_bindings(nodes: list[ast.AST]) -> dict[str, Binding]:
+@dataclass
+class _Scope:
     """
-    Get the names that the given nodes import, without those of the functions and classes that are
-    nested in them.
+    The module, a function, a lambda or a comprehension, while it is walked.
+
+    Attributes:
+        bound: The names that the scope binds, which are its local variables.
+        global_names: The names that the scope declares `global`.
+        imports: The names that the scope imports, each with what it stands for.
+        names: The names that are read in the scope, or in a scope nested in it, and that are not local
+            to the scopes in between, each with its owner.
+        chains: The chains of attributes, such as `package.module.name`, that start with a name and
+            that are read in the scope, or in a scope nested in it, as for `names`. Each has its owner,
+            the name and the attributes in order.
+        enclosing: The scope that also binds the names that the scope binds. A comprehension binds its
+            variables in the function that it is in as well.
     """
-    bindings: dict[str, Binding] = {}
-    stack = list(nodes)
-    while stack:
-        node = stack.pop()
-        match node:
-            case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.ClassDef() | ast.Lambda():
-                continue
-            case ast.Import(names=aliases):
-                for alias in aliases:
-                    if alias.asname is None:
-                        # `import package.module` binds `package`.
-                        package = alias.name.partition(".")[0]
-                        bindings[package] = (package, 0, None)
-                    else:
-                        bindings[alias.asname] = (alias.name, 0, None)
-            case ast.ImportFrom(module=source, level=level, names=aliases):
-                for alias in aliases:
-                    bindings[alias.asname or alias.name] = (source, level, alias.name)
-            case _:
-                pass
-        stack.extend(ast.iter_child_nodes(node))
-    return bindings
+
+    bound: set[str] = field(default_factory=set)
+    global_names: set[str] = field(default_factory=set)
+    imports: dict[str, Binding] = field(default_factory=dict)
+    names: set[tuple[Owner, str]] = field(default_factory=set)
+    chains: set[tuple[Owner, str, tuple[str, ...]]] = field(default_factory=set)
+    enclosing: "_Scope | None" = None
 
 
-def _visit(
-    node: ast.AST,
-    *,
-    owner: Owner,
-    local_names: frozenset[str],
-    imports: dict[str, Binding],
-    references: References,
-) -> None:
+class _Walker:
     """
-    Add what a node, and everything under it, refers to.
+    Walk a module once, and add what it refers to.
 
-    Args:
-        node: The node.
+    Attributes:
+        references: The references to add to.
+        scope: The scope that the node being walked is in.
+        binder: The scope that the names bound at the node belong to. In a class body, and in what a
+            function evaluates where it is defined, it is a scope of its own that is then dropped, since
+            what they bind is not tracked.
         owner: The function that the node is in, or None for code that runs when the module is imported.
-        local_names: The local variables and parameters that are visible at the node.
-        imports: The imported names that are visible at the node.
-        references: The references to add to.
     """
-    match node:
-        case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.Lambda():
-            _visit_function(node, owner=owner, local_names=local_names, imports=imports, references=references)
+
+    def __init__(self, references: References) -> None:
+        self.references = references
+        self.scope = _Scope()
+        self.binder = self.scope
+        self.owner: Owner = None
+
+    def visit(self, node: ast.AST) -> None:
+        """
+        Add what a node, and everything under it, refers to.
+        """
+        handler = _HANDLERS.get(type(node))
+        if handler is None:
+            self.visit_children(node)
+        else:
+            handler(self, node)
+
+    def visit_children(self, node: ast.AST) -> None:
+        """
+        Add what the children of a node, and everything under them, refer to.
+        """
+        for child in ast.iter_child_nodes(node):
+            self.visit(child)
+
+    def visit_name(self, node: ast.Name) -> None:
+        """
+        Add a read of a name, or bind it.
+        """
+        if isinstance(node.ctx, ast.Load):
+            self.scope.names.add((self.owner, node.id))
+        else:
+            self.bind(node.id)
+
+    def visit_attribute(self, node: ast.Attribute) -> None:
+        """
+        Add a read of an attribute, with the attributes that it is read from.
+        """
+        if not isinstance(node.ctx, ast.Load):
+            self.visit(node.value)
             return
-        case ast.ListComp() | ast.SetComp() | ast.DictComp() | ast.GeneratorExp():
-            # The variables of a comprehension are local to it.
-            bound = _bound_names([node])
-            local_names |= bound
-            imports = {name: binding for name, binding in imports.items() if name not in bound}
-        case ast.Name(id=name, ctx=ast.Load()):
-            if name not in local_names:
-                references.names.add((owner, name))
-        case ast.Attribute(attr=name, ctx=ast.Load()):
-            root, attributes = _attribute_chain(node)
-            if root in imports:
+        base, attributes = _attribute_chain(node)
+        if isinstance(base, ast.Name):
+            # Whether the chain starts with an imported name is known when the scope ends.
+            self.scope.chains.add((self.owner, base.id, attributes))
+        else:
+            self.references.attributes.update((self.owner, attribute) for attribute in attributes)
+            self.visit(base)
+
+    def visit_function(self, function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) -> None:
+        """
+        Add what a function or lambda refers to.
+        """
+        arguments = function.args
+        parameters = [
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+            *filter(None, [arguments.vararg, arguments.kwarg]),
+        ]
+
+        # The decorators, the default values and the annotations are evaluated where the function is
+        # defined, so they do not see its local variables, and what they bind is not tracked.
+        outside: list[ast.AST | None] = [
+            *arguments.defaults,
+            *arguments.kw_defaults,
+            *(parameter.annotation for parameter in parameters),
+        ]
+        if not isinstance(function, ast.Lambda):
+            outside += [*function.decorator_list, function.returns]
+        binder, self.binder = self.binder, _Scope()
+        for node in outside:
+            if node is not None:
+                self.visit(node)
+
+        # The body runs only when the function is called. A lambda has no name, and is part of the code
+        # that it is in.
+        scope, owner = self.scope, self.owner
+        self.scope = self.binder = _Scope()
+        if isinstance(function, ast.Lambda):
+            self.visit(function.body)
+        else:
+            self.owner = function.lineno
+            for node in function.body:
+                self.visit(node)
+        inner = self.scope
+        self.scope, self.binder, self.owner = scope, binder, owner
+        self.close(inner, {parameter.arg for parameter in parameters} | (inner.bound - inner.global_names))
+
+    def visit_class(self, node: ast.ClassDef) -> None:
+        """
+        Add what a class refers to.
+
+        The body of a class is not a scope that is tracked: it sees the names of the code that it is in,
+        and what it binds is an attribute of the class.
+        """
+        binder, self.binder = self.binder, _Scope()
+        self.visit_children(node)
+        self.binder = binder
+
+    def visit_comprehension(self, node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp) -> None:
+        """
+        Add what a comprehension refers to. Its variables are local to it.
+        """
+        scope, binder = self.scope, self.binder
+        self.scope = self.binder = _Scope(enclosing=binder)
+        self.visit_children(node)
+        inner = self.scope
+        self.scope, self.binder = scope, binder
+        self.close(inner, inner.bound)
+
+    def visit_import(self, node: ast.Import) -> None:
+        """
+        Bind the names that an `import` statement imports.
+        """
+        bindings: dict[str, Binding] = {}
+        for alias in node.names:
+            if alias.asname is None:
+                # `import package.module` binds `package`.
+                package = alias.name.partition(".")[0]
+                bindings[package] = (package, 0, None)
+            else:
+                bindings[alias.asname] = (alias.name, 0, None)
+        self.bind_imports(bindings)
+
+    def visit_import_from(self, node: ast.ImportFrom) -> None:
+        """
+        Add the names that a `from` import imports, and bind them.
+        """
+        self.references.imports.update((self.owner, node.module, node.level, alias.name) for alias in node.names)
+        self.bind_imports({alias.asname or alias.name: (node.module, node.level, alias.name) for alias in node.names})
+
+    def visit_global(self, node: ast.Global) -> None:
+        """
+        Note the names that a `global` statement declares, which are not local variables.
+        """
+        self.binder.global_names.update(node.names)
+
+    def visit_assign(self, node: ast.Assign | ast.AnnAssign | ast.AugAssign) -> None:
+        """
+        Add the names that an assignment to `__all__` lists, and what the assignment refers to.
+        """
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if any(map(_is_all, targets)):
+            self.references.has_all = True
+            self.references.names.update((self.owner, name) for name in _string_literals(node.value))
+        self.visit_children(node)
+
+    def visit_pattern_or_handler(
+        self, node: ast.ExceptHandler | ast.MatchAs | ast.MatchStar | ast.MatchMapping
+    ) -> None:
+        """
+        Bind the name that an `except` clause or a pattern captures, and add what it refers to.
+        """
+        name = node.rest if isinstance(node, ast.MatchMapping) else node.name
+        if name is not None:
+            self.bind(name)
+        self.visit_children(node)
+
+    def bind(self, name: str) -> None:
+        """
+        Bind a name in the current scope, and in the scopes that it binds names in as well.
+        """
+        scope: _Scope | None = self.binder
+        while scope is not None:
+            scope.bound.add(name)
+            scope = scope.enclosing
+
+    def bind_imports(self, bindings: dict[str, Binding]) -> None:
+        """
+        Bind the names that a statement imports.
+
+        When a name is imported more than once, as by an `import` in a `try` and a fallback in its
+        `except`, the first import is the one that counts.
+        """
+        for name, binding in bindings.items():
+            self.bind(name)
+            self.binder.imports.setdefault(name, binding)
+
+    def close(self, inner: _Scope, local_names: set[str]) -> None:
+        """
+        End a scope that is nested in the current one: drop the reads of its local variables, resolve
+        the chains of attributes that start with a name that it imports, and pass the rest to the
+        current scope.
+
+        Args:
+            inner: The scope that ends.
+            local_names: The local variables and parameters of the scope.
+        """
+        outer = self.scope
+        outer.names.update(read for read in inner.names if read[1] not in local_names)
+        for owner, root, attributes in inner.chains:
+            if root in inner.imports:
                 # Attributes of an imported name, which are resolved once every module is known.
-                references.imported_attributes.add((owner, imports[root], attributes))
-                return
-            references.attributes.add((owner, name))
-        case ast.ImportFrom(module=source, level=level, names=aliases):
-            references.imports.update((owner, source, level, alias.name) for alias in aliases)
-        case ast.Assign(targets=targets, value=value) if any(map(_is_all, targets)):
-            references.has_all = True
-            references.names.update((owner, name) for name in _string_literals(value))
-        case ast.AnnAssign(target=target, value=value) | ast.AugAssign(target=target, value=value) if _is_all(target):
-            references.has_all = True
-            references.names.update((owner, name) for name in _string_literals(value))
-        case _:
-            pass
-
-    for child in ast.iter_child_nodes(node):
-        _visit(child, owner=owner, local_names=local_names, imports=imports, references=references)
+                self.references.imported_attributes.add((owner, inner.imports[root], attributes))
+            elif root in local_names:
+                self.references.attributes.update((owner, attribute) for attribute in attributes)
+            else:
+                outer.chains.add((owner, root, attributes))
 
 
-def _visit_function(
-    function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
-    *,
-    owner: Owner,
-    local_names: frozenset[str],
-    imports: dict[str, Binding],
-    references: References,
-) -> None:
+# The nodes that are walked other than by visiting their children.
+_HANDLERS: dict[type[ast.AST], Callable[[_Walker, Any], None]] = {
+    ast.Name: _Walker.visit_name,
+    ast.Attribute: _Walker.visit_attribute,
+    ast.FunctionDef: _Walker.visit_function,
+    ast.AsyncFunctionDef: _Walker.visit_function,
+    ast.Lambda: _Walker.visit_function,
+    ast.ClassDef: _Walker.visit_class,
+    ast.ListComp: _Walker.visit_comprehension,
+    ast.SetComp: _Walker.visit_comprehension,
+    ast.DictComp: _Walker.visit_comprehension,
+    ast.GeneratorExp: _Walker.visit_comprehension,
+    ast.Import: _Walker.visit_import,
+    ast.ImportFrom: _Walker.visit_import_from,
+    ast.Global: _Walker.visit_global,
+    ast.Assign: _Walker.visit_assign,
+    ast.AnnAssign: _Walker.visit_assign,
+    ast.AugAssign: _Walker.visit_assign,
+    ast.ExceptHandler: _Walker.visit_pattern_or_handler,
+    ast.MatchAs: _Walker.visit_pattern_or_handler,
+    ast.MatchStar: _Walker.visit_pattern_or_handler,
+    ast.MatchMapping: _Walker.visit_pattern_or_handler,
+}
+
+
+def _attribute_chain(attribute: ast.Attribute) -> tuple[ast.expr, tuple[str, ...]]:
     """
-    Add what a function or lambda refers to.
-
-    Args:
-        function: The function or lambda.
-        owner: The function that the function is defined in, or None.
-        local_names: The local variables and parameters that are visible where the function is defined.
-        imports: The imported names that are visible where the function is defined.
-        references: The references to add to.
-    """
-    arguments = function.args
-    parameters = [
-        *arguments.posonlyargs,
-        *arguments.args,
-        *arguments.kwonlyargs,
-        *filter(None, [arguments.vararg, arguments.kwarg]),
-    ]
-    body: list[ast.AST] = [function.body] if isinstance(function, ast.Lambda) else [*function.body]
-
-    # The decorators, the default values and the annotations are evaluated where the function is
-    # defined, so they do not see its local variables.
-    outside: list[ast.AST | None] = [
-        *arguments.defaults,
-        *arguments.kw_defaults,
-        *(parameter.annotation for parameter in parameters),
-    ]
-    if not isinstance(function, ast.Lambda):
-        outside += [*function.decorator_list, function.returns]
-    for node in outside:
-        if node is not None:
-            _visit(node, owner=owner, local_names=local_names, imports=imports, references=references)
-
-    # A local variable hides an imported name, and the function sees its own imports.
-    bound = {parameter.arg for parameter in parameters} | _bound_names(body)
-    local_names |= bound
-    imports = {name: binding for name, binding in imports.items() if name not in bound} | _import_bindings(body)
-    # The body runs only when the function is called. A lambda has no name, and is part of the code that
-    # it is in.
-    if not isinstance(function, ast.Lambda):
-        owner = function.lineno
-    for node in body:
-        _visit(node, owner=owner, local_names=local_names, imports=imports, references=references)
-
-
-def _attribute_chain(attribute: ast.Attribute) -> tuple[str | None, tuple[str, ...]]:
-    """
-    Split a chain of attributes, such as `package.module.name`, into the name that it starts with and
-    its attributes.
+    Split a chain of attributes, such as `package.module.name`, into what it starts with and its
+    attributes.
 
     Returns:
-        The name, which is None if the chain starts with something else, such as a call, and the
-        attributes in order.
+        What the chain starts with, such as a name or a call, and the attributes in order.
     """
     attributes: list[str] = []
     node: ast.expr = attribute
     while isinstance(node, ast.Attribute):
-        attributes.insert(0, node.attr)
+        attributes.append(node.attr)
         node = node.value
-    return (node.id if isinstance(node, ast.Name) else None), tuple(attributes)
-
-
-def _bound_names(nodes: list[ast.AST]) -> frozenset[str]:
-    """
-    Get the names of the variables that the given nodes bind, without those of the functions and
-    classes that are nested in them.
-
-    A nested function or class is a definition and not a variable, so its name is left out, and a read
-    of it is a reference. A name that is declared `global` is left out as well.
-    """
-    bound: set[str] = set()
-    global_names: set[str] = set()
-
-    stack = list(nodes)
-    while stack:
-        node = stack.pop()
-        match node:
-            case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.ClassDef() | ast.Lambda():
-                continue
-            case ast.Name(id=name, ctx=ast.Store() | ast.Del()):
-                bound.add(name)
-            case ast.alias(name=name, asname=alias):
-                # `import package.module` binds `package`.
-                bound.add(alias or name.partition(".")[0])
-            case (
-                ast.ExceptHandler(name=str(name))
-                | ast.MatchAs(name=str(name))
-                | ast.MatchStar(name=str(name))
-                | ast.MatchMapping(rest=str(name))
-            ):
-                bound.add(name)
-            case ast.Global(names=declared):
-                global_names.update(declared)
-            case _:
-                pass
-        stack.extend(ast.iter_child_nodes(node))
-
-    return frozenset(bound - global_names)
+    return node, tuple(reversed(attributes))
 
 
 def _is_all(target: ast.expr) -> bool:
