@@ -17,6 +17,10 @@ from unref._models import Finding, Override
 from unref._modules import ModuleName, import_root, module_name
 from unref._references import Owner
 
+# The object reference of an entry point, as the entry points specification of the Python Packaging
+# User Guide gives it.
+_OBJECT_REFERENCE = re.compile(r"(?P<module>[\w.]+)\s*(:\s*(?P<attributes>[\w.]+)\s*)?(\[.*\]\s*)?")
+
 
 @dataclass
 class _Uses:
@@ -44,6 +48,7 @@ def find_unused(
     jobs: int | None,
     python: str | os.PathLike[str] | None = None,
     dummy_variable_rgx: str,
+    entry_points: Iterable[str] = (),
 ) -> list[Finding]:
     """
     Find the unused definitions of a Python project, which are those that nothing references.
@@ -58,6 +63,7 @@ def find_unused(
         python: The Python environment or interpreter of the project, or None for the environment that the
             check runs in.
         dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
+        entry_points: The object references of the entry points of the project.
 
     Returns:
         A finding for each unused definition, and for each file that does not parse, sorted by file and
@@ -82,6 +88,7 @@ def find_unused(
         used_decorators=set(used_decorators),
         overrides=overrides,
         dummy_variable_rgx=dummy_variable_rgx,
+        entry_objects=_entry_objects(entry_points, files_by_name=files_by_name),
     )
 
     graph = _Graph(
@@ -248,6 +255,7 @@ def _roots(
     used_decorators: set[str],
     overrides: Iterable[Override],
     dummy_variable_rgx: str,
+    entry_objects: dict[Path, set[str]],
 ) -> tuple[set[Definition], set[Definition]]:
     """
     Find the definitions that count as used whatever references them, and those that are ignored.
@@ -260,6 +268,7 @@ def _roots(
         used_decorators: The decorators that make the definitions they decorate count as used.
         overrides: The options that apply only to some of the files of the project.
         dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
+        entry_objects: The qualified names of the objects that the entry points name, in each file.
 
     Returns:
         The definitions that count as used by the options or as dunders, and the other definitions that
@@ -286,6 +295,8 @@ def _roots(
                     definition.owner is not None
                     and definition.name in hierarchy.external_members(path, definition.owner)
                 )
+                # The objects that the entry points name.
+                or definition.qualified_name in entry_objects.get(path, set())
                 # The options of a definition are those of the project, plus those of every override
                 # that covers it.
                 or _matches(definition, names=used_names, decorators=used_decorators)
@@ -478,6 +489,41 @@ class _Graph:
                 self._used.add(definition)
                 if definition.kind in ("function", "method"):
                     self._pending.append((definition.path, definition.line))
+
+
+def _entry_objects(entry_points: Iterable[str], *, files_by_name: dict[str, list[Path]]) -> dict[Path, set[str]]:
+    """
+    Find the objects that the entry points of a project name.
+
+    Args:
+        entry_points: The object references of the entry points.
+        files_by_name: The files of the project by their module names.
+
+    Returns:
+        The qualified names of the objects in each file. `module:Class.method` names the class, and the
+        method in it if there is one.
+    """
+    entry_objects: dict[Path, set[str]] = defaultdict(set)
+    for reference in entry_points:
+        module, attributes = _entry_point_object(reference)
+        for path in files_by_name.get(module, []):
+            entry_objects[path].update(".".join(attributes[:index]) for index in range(1, len(attributes) + 1))
+    return entry_objects
+
+
+def _entry_point_object(reference: str) -> tuple[str, list[str]]:
+    """
+    Split the object reference of an entry point, such as `package.module:Class.method [extra]`.
+
+    Returns:
+        The module, and the names of the object in it: none for a reference that names only a module or
+        that is not valid.
+    """
+    match = _OBJECT_REFERENCE.fullmatch(reference.strip())
+    if match is None:
+        return "", []
+    attributes = match["attributes"]
+    return match["module"], [] if attributes is None else attributes.split(".")
 
 
 def _is_dunder(name: str) -> bool:

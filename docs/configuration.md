@@ -166,6 +166,36 @@ the syntax of Python's [`re`](https://docs.python.org/3/library/re.html) module.
 
 `_` itself is never reported, whatever the expression.
 
+## Entry points
+
+The objects that the entry points of the project name count as used, and so does what they use. They
+are read from the `[project]` table of the configuration file, when it is a `pyproject.toml`, as
+[the entry points specification](https://packaging.python.org/en/latest/specifications/entry-points/)
+gives them:
+
+```toml
+[project.scripts]
+tool = "tool.cli:main"
+
+[project.gui-scripts]
+tool-gui = "tool.gui:start"
+
+[project.entry-points."tool.plugins"]
+plugin = "tool.plugins:Plugin.load"
+```
+
+Here, `main` in `tool/cli.py`, `start` in `tool/gui.py`, and the class `Plugin` with its method `load` in
+`tool/plugins.py` count as used.
+
+- The module is found among the files of the project the way an import is.
+- With a dotted object, such as `Plugin.load`, each name counts as used where it is found: the class
+  `Plugin` alone if it has no `load`.
+- The extras of an entry point, as in `"tool.gui:start [gui]"`, are ignored.
+- An entry point that names only a module, such as `"tool.plugins"`, makes nothing used.
+
+No other file is read: with `--config unref.toml`, there are no entry points. The library takes them as
+the `entry_points` argument of [`unref.check`](reference/api.md#unref.check).
+
 ## Overrides
 
 Options that apply only to some of the definitions of the project are given in `overrides` tables. An

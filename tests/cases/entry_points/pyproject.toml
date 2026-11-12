@@ -1,0 +1,16 @@
+[project]
+name = "tool"
+version = "0"
+
+[project.entry-points."tool.plugins"]
+method = "pkg.plugins:Plugin.load"
+missing = " pkg.plugins : Factory.missing "
+module = "pkg.gui"
+# A reference that is not valid uses nothing.
+invalid = "pkg.gui:start:stop"
+
+[project.gui-scripts]
+tool-gui = "pkg.gui:start [gui]"
+
+[project.scripts]
+tool = "main:run"

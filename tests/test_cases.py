@@ -16,7 +16,7 @@ The comment can follow another comment on the line:
 
 The findings must match exactly: a line without the comment must not have a finding.
 
-A case is configured with a `pyproject.toml` in its directory.
+A case is configured with a `pyproject.toml` in its directory, which also gives its entry points.
 """
 
 import tokenize
@@ -68,6 +68,7 @@ def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch) -> list[_Findi
             overrides=config.overrides,
             python=config.python,
             dummy_variable_rgx=config.dummy_variable_rgx,
+            entry_points=config.entry_points,
         )
     )
 

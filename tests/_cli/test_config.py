@@ -284,3 +284,60 @@ def test_config_dummy_variable_rgx_invalid(tmp_path: Path) -> None:
     assert result.stderr.startswith(
         f"Error: Option 'dummy-variable-rgx' in the configuration file {config} is not a valid regular expression: "
     )
+
+
+def test_entry_points_from_config_file(tmp_path: Path) -> None:
+    # A `pyproject.toml` given with `--config` gives the entry points.
+    config = tmp_path / "pyproject.toml"
+    config.write_text('[project.scripts]\ntool = "pkg.gui:stop"\n')
+
+    result = _runner.invoke(app, ["--config", str(config), str(_CASES_DIR / "entry_points" / "pkg" / "gui.py")])
+
+    assert result.exit_code == 1
+    assert result.stdout.endswith("gui.py:2: unused function 'start'\n")
+
+
+def test_entry_points_not_from_other_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # With another configuration file, the `pyproject.toml` of the current directory is not read.
+    config = tmp_path / "unref.toml"
+    config.write_text("")
+    monkeypatch.chdir(_CASES_DIR / "entry_points")
+
+    result = _runner.invoke(app, ["--config", str(config), "main.py"])
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        "main.py:2: unused function 'run'\nmain.py:6: unused function 'helper'\nmain.py:10: unused function 'unused'\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("content", "error"),
+    [
+        ('project = "tool"\n', "Table 'project' in the configuration file {config} must be a table"),
+        (
+            '[project]\nentry-points = "main:run"\n',
+            "Table 'project.entry-points' in the configuration file {config} must be a table",
+        ),
+        (
+            '[project]\nscripts = ["main:run"]\n',
+            "Table 'project.scripts' in the configuration file {config} must map names to strings",
+        ),
+        (
+            '[project.gui-scripts]\ntool = { reference = "main:run" }\n',
+            "Table 'project.gui-scripts' in the configuration file {config} must map names to strings",
+        ),
+        (
+            '[project.entry-points]\ngroup = "main:run"\n',
+            "Table 'project.entry-points.group' in the configuration file {config} must map names to strings",
+        ),
+    ],
+)
+def test_entry_points_invalid(tmp_path: Path, content: str, error: str) -> None:
+    config = tmp_path / "pyproject.toml"
+    config.write_text(content)
+
+    result = _runner.invoke(app, ["--config", str(config)])
+
+    assert result.exit_code == 2
+    assert result.stderr == f"Error: {error.format(config=config)}\n"
