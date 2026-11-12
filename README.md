@@ -7,8 +7,8 @@
 
 Find unreferenced Python code.
 
-`unref` reports the functions, classes, methods, variables and attributes of a Python project that
-nothing references.
+`unref` reports the unused functions, classes, methods, variables and attributes of a Python project:
+those that nothing references.
 
 **Documentation**: [unref.readthedocs.io](https://unref.readthedocs.io/)
 
