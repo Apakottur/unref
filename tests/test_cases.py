@@ -10,6 +10,10 @@ Several findings on one line are separated by commas:
 
     first, second = 1, 2  # expect: unused variable, unused variable
 
+The comment can follow another comment on the line:
+
+    unused = 1  # type: ignore[assignment]  # expect: unused variable
+
 The findings must match exactly: a line without the comment must not have a finding.
 
 A case is configured with a `pyproject.toml` in its directory.
@@ -40,8 +44,8 @@ def _expected_findings(case: Path) -> list[_Finding]:
             findings.extend(
                 (path.relative_to(case).as_posix(), token.start[0], kind.strip())
                 for token in tokenize.generate_tokens(file.readline)
-                if token.type == tokenize.COMMENT and token.string.startswith(_EXPECT_PREFIX)
-                for kind in token.string.removeprefix(_EXPECT_PREFIX).split(",")
+                if token.type == tokenize.COMMENT and _EXPECT_PREFIX in token.string
+                for kind in token.string.partition(_EXPECT_PREFIX)[2].split(",")
             )
     return sorted(findings)
 

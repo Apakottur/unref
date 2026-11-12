@@ -89,6 +89,19 @@ A definition counts as referenced when:
 
 Dunders, such as `__init__` and `__all__`, are never reported.
 
+## Ignoring a finding
+
+A definition with an `# unref: ignore` comment on its line is not reported:
+
+```python
+class Setup:
+    def __init__(self, name: str) -> None:
+        self.name = name  # unref: ignore
+```
+
+The comment goes on the line of the finding, which for a function or class is the line of its `def` or
+`class`. For names that a framework uses, prefer the [configuration](configuration.md).
+
 ## Why
 
 Unused code piles up in every codebase, and faster than ever now that AI tools write much of it and
