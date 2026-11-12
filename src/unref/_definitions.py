@@ -20,6 +20,8 @@ class Definition:
             nested class), or None if it is not in a class.
         bases: For a class, the dotted names of its base classes as they are written, without their
             type arguments. A base class that is not a dotted name is left out.
+        unpacked: For a variable or a class attribute, whether it is first assigned by its name in an
+            unpacking, such as `second` in `first, second = pair()`, where Python needs a name to bind.
     """
 
     path: Path
@@ -29,6 +31,7 @@ class Definition:
     decorators: tuple[str, ...] = ()
     owner: str | None = None
     bases: tuple[str, ...] = ()
+    unpacked: bool = False
 
     @property
     def qualified_name(self) -> str:
@@ -130,7 +133,14 @@ def _collect(node: ast.AST, *, path: Path, scope: _Scope, definitions: list[Defi
                 _collect(child, path=path, scope=scope, definitions=definitions)
 
 
-def _collect_target(target: ast.expr, *, path: Path, scope: _Scope, definitions: list[Definition]) -> None:
+def _collect_target(
+    target: ast.expr,
+    *,
+    path: Path,
+    scope: _Scope,
+    definitions: list[Definition],
+    in_unpacking: bool = False,
+) -> None:
     """
     Add the variables and attributes that an assignment target defines.
 
@@ -139,19 +149,22 @@ def _collect_target(target: ast.expr, *, path: Path, scope: _Scope, definitions:
         path: The file of the target.
         scope: The scope of the assignment.
         definitions: The definitions to add to.
+        in_unpacking: Whether the target is part of an unpacking.
     """
     kind: Literal["variable", "attribute"]
+    unpacked = False
     match target:
         case ast.Name(id=name) if scope.kind != "function":
             kind = "variable" if scope.kind == "module" else "attribute"
+            unpacked = in_unpacking
         case ast.Attribute(value=ast.Name(id=owner), attr=name) if owner == scope.instance:
             kind = "attribute"
         case ast.Tuple(elts=elements) | ast.List(elts=elements):
             for element in elements:
-                _collect_target(element, path=path, scope=scope, definitions=definitions)
+                _collect_target(element, path=path, scope=scope, definitions=definitions, in_unpacking=True)
             return
         case ast.Starred(value=value):
-            _collect_target(value, path=path, scope=scope, definitions=definitions)
+            _collect_target(value, path=path, scope=scope, definitions=definitions, in_unpacking=True)
             return
         case _:
             # A local variable, or an assignment into an object that is defined elsewhere.
@@ -160,7 +173,9 @@ def _collect_target(target: ast.expr, *, path: Path, scope: _Scope, definitions:
     # A variable or attribute is found once, where it is first assigned.
     if name not in scope.names:
         scope.names.add(name)
-        definitions.append(Definition(path=path, line=target.lineno, kind=kind, name=name, owner=scope.owner))
+        definitions.append(
+            Definition(path=path, line=target.lineno, kind=kind, name=name, owner=scope.owner, unpacked=unpacked)
+        )
 
 
 def _decorators(node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[str, ...]:

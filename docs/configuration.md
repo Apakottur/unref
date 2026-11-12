@@ -22,12 +22,13 @@ does not read a configuration file.
 
 ## Options
 
-| Option            | Library argument  | Description                                                              |
-| ----------------- | ----------------- | ------------------------------------------------------------------------ |
-| `used-names`      | `used_names`      | Names of the definitions that count as used.                             |
-| `used-decorators` | `used_decorators` | Decorators that make the definitions they decorate count as used.        |
-| `exclude`         | `exclude`         | Files and directories that are not part of the project.                  |
-| `python`          | `python`          | Virtual environment that the project runs in.                            |
+| Option               | Library argument     | Description                                                         |
+| -------------------- | -------------------- | ------------------------------------------------------------------- |
+| `used-names`         | `used_names`         | Names of the definitions that count as used.                        |
+| `used-decorators`    | `used_decorators`    | Decorators that make the definitions they decorate count as used.   |
+| `exclude`            | `exclude`            | Files and directories that are not part of the project.             |
+| `python`             | `python`             | Virtual environment that the project runs in.                       |
+| `dummy-variable-rgx` | `dummy_variable_rgx` | Names of the variables that are unused on purpose, in an unpacking. |
 
 ### `used-names`
 
@@ -104,6 +105,36 @@ is skipped. The library uses the environment that runs it, unless it is given `p
 
 The `site-packages` of this environment, and the directories that its `.pth` files list, replace the
 `site-packages` of the environment that runs `unref`.
+
+### `dummy-variable-rgx`
+
+A regular expression for the names of the variables that are unused on purpose. Such a variable is not
+reported where Python needs a name to bind, and only there:
+
+- A target of an unpacking: `key, _rest = pair()`, `head, *_tail = items`, or `_first, _second = pair()`.
+- A target of a `for` loop or a comprehension: `for _attempt in range(3):`. Unpacked or not, such a target
+  is not reported whatever its name.
+
+```python
+key, _public_key = make_pair()  # Not reported.
+_response = send()  # Reported: the assignment can be dropped, keeping the call.
+```
+
+Elsewhere, such as in a plain or annotated assignment, the binding can be dropped, so the variable is
+reported. Functions, classes, methods and attributes of an object, such as `self._cache`, are not
+covered: there, `_` marks a private name.
+
+```toml
+[tool.unref]
+dummy-variable-rgx = "^_$|^unused_"
+```
+
+The option is [the one of Ruff](https://docs.astral.sh/ruff/settings/#lint_dummy-variable-rgx), with the
+same default, `^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$`: `_`, `__`, `_rest` and `_rest_2` match, `_rest_`
+does not. As in Ruff, the expression is searched for in the name, so anchor it with `^` and `$`. It uses
+the syntax of Python's [`re`](https://docs.python.org/3/library/re.html) module.
+
+`_` itself is never reported, whatever the expression.
 
 ## Overrides
 

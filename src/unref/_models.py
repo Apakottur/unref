@@ -3,6 +3,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+# The default of the `dummy-variable-rgx` option, the same as Ruff's.
+DEFAULT_DUMMY_VARIABLE_RGX = r"^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
 
 @dataclass(frozen=True)
 class Finding:

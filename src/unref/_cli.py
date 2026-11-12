@@ -88,6 +88,7 @@ def main(
             overrides=options.overrides,
             jobs=jobs,
             python=environment,
+            dummy_variable_rgx=options.dummy_variable_rgx,
         )
 
     for finding in findings:
