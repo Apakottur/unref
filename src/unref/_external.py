@@ -152,6 +152,41 @@ def lazy_imports(tree: ast.Module, references: References) -> dict[str, list[Bin
     return lazy
 
 
+def environment_paths(environment: Path) -> list[Path]:
+    """
+    Get the directories that a virtual environment imports its installed modules from, without running
+    its interpreter.
+
+    They are its `site-packages`, followed by the directories that the `.pth` files there add, in the
+    order that Python's `site` module adds them. A line of a `.pth` file that imports code is not run.
+
+    Args:
+        environment: The directory of the environment, such as `.venv`.
+
+    Returns:
+        The directories that exist, in order.
+    """
+    paths: list[Path] = []
+    # `lib/python3.X/site-packages` on POSIX, and `Lib/site-packages` on Windows.
+    for site_packages in sorted(
+        {*environment.glob("lib*/python3*/site-packages/"), *environment.glob("Lib/site-packages/")}
+    ):
+        paths.append(site_packages)
+        for pth in sorted(site_packages.glob("*.pth")):
+            try:
+                lines = pth.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                if not line.strip() or line.startswith(("#", "import ", "import\t")):
+                    continue
+                directory = site_packages / line.rstrip()
+                if directory.is_dir():
+                    paths.append(directory)
+    # `lib64` is often a link to `lib`.
+    return list(dict.fromkeys(path.resolve() for path in paths))
+
+
 def _find(name: str, locations: list[Path]) -> tuple[Path | None, list[Path] | None] | None:
     """
     Find a module in the directories that it can be imported from, in the order that Python looks for

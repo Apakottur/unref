@@ -13,6 +13,7 @@ def check(
     exclude: Iterable[str | os.PathLike[str]] = (),
     overrides: Iterable[Override] = (),
     jobs: int | None = 1,
+    python: str | os.PathLike[str] | None = None,
 ) -> list[Finding]:
     """
     Find the unused code in a Python project.
@@ -30,6 +31,10 @@ def check(
             project is always analyzed in the current process. With more than one process, a script
             that calls this function must guard its code with `if __name__ == "__main__":`, as
             [`multiprocessing`](https://docs.python.org/3/library/multiprocessing.html) requires.
+        python: The virtual environment that the project runs in, such as `.venv`. A base class that is
+            installed there is followed through its source, which is read without being imported. The
+            site-packages of the environment replace those of the environment that runs the check.
+            Defaults to the environment that runs the check.
 
     Returns:
         The findings, one for each unused definition, sorted by file and line.
@@ -41,4 +46,5 @@ def check(
         exclude=exclude,
         overrides=overrides,
         jobs=jobs,
+        python=python,
     )

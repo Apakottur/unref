@@ -65,6 +65,7 @@ def _actual_findings(case: Path) -> list[_Finding]:
             used_decorators=config.used_decorators,
             exclude=config.exclude,
             overrides=config.overrides,
+            python=config.python,
         )
     )
 

@@ -27,6 +27,7 @@ does not read a configuration file.
 | `used-names`      | `used_names`      | Names of the definitions that count as used.                             |
 | `used-decorators` | `used_decorators` | Decorators that make the definitions they decorate count as used.        |
 | `exclude`         | `exclude`         | Files and directories that are not part of the project.                  |
+| `python`          | `python`          | Virtual environment that the project runs in.                            |
 
 ### `used-names`
 
@@ -78,6 +79,25 @@ exclude = ["generated", "scripts/legacy.py"]
 A path is relative to the directory of the configuration file. Hidden directories, such as `.venv` and
 `.git`, are always left out.
 
+### `python`
+
+Virtual environment that the project runs in. A base class from a package installed there, such as a
+`pydantic.BaseModel`, is followed through its source, so that the members it defines count
+as used. The modules of the environment are read, never imported, and its interpreter is not run.
+
+```toml
+[tool.unref]
+python = ".venv"
+```
+
+The path is relative to the directory of the configuration file. It can also be given with `--python`.
+Without either, the command uses the active virtual environment (`VIRTUAL_ENV`), or else the `.venv` of
+the current directory. An active environment that runs `unref` itself, as in a pre-commit or prek hook,
+is skipped. The library uses the environment that runs it, unless it is given `python`.
+
+The `site-packages` of this environment, and the directories that its `.pth` files list, replace the
+`site-packages` of the environment that runs `unref`.
+
 ## Overrides
 
 Options that apply only to some of the definitions of the project are given in `overrides` tables. An
@@ -124,8 +144,9 @@ its name. The override applies to what is defined in a class that inherits from 
 - Through other classes of the project, in any module.
 - Through classes from outside the project: with `enum.Enum`, a subclass of `enum.StrEnum` or
   `enum.IntEnum`. Their modules are read from their source, and never imported. They are looked for
-  in the directories that the project is imported from, and then in the environment that unref runs
-  in. A module without a Python source, such as a compiled module, is not followed.
+  in the directories that the project is imported from, and then in the
+  [environment of the project](#python). A module without a Python source, such as a compiled
+  module, is not followed.
 
 The name has to be the one that the project imports: `pydantic.BaseModel` does not cover
 `from pydantic.main import BaseModel`.

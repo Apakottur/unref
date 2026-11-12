@@ -2,6 +2,8 @@
 .idea
 venv
 .venv
+# The environment of a test case is part of the case.
+!/tests/cases/*/.venv
 .vscode
 .claude
 
