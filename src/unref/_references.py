@@ -1,6 +1,10 @@
 import ast
 from dataclasses import dataclass, field
 
+# A name that a module imports: the module it is imported from, as it is written, the number of leading
+# dots, and the imported name. The name is None for `import module`, which binds the module itself.
+Binding = tuple[str | None, int, str | None]
+
 
 @dataclass
 class References:
@@ -10,21 +14,24 @@ class References:
     Attributes:
         names: The names that are read as a plain name (`name`), without the local variables and
             parameters, and the names that are listed in `__all__`. They refer to the module itself.
-        attributes: The names that are read as an attribute (`value.name`).
+        attributes: The names that are read as an attribute (`value.name`), without those that are
+            read from an imported name.
+        imported_attributes: The attributes that are read from an imported name
+            (`module.name.attribute`), each with what the imported name stands for and the names of
+            the attributes, in order.
         imports: The names that are imported from another module (`from module import name`), each
             with the module, as it is written, and its number of leading dots. A star import has the
             name `*`.
         has_all: Whether the module defines `__all__`.
-        bindings: The names that the module imports at its top level, each with the module it is
-            imported from, as it is written, the number of leading dots, and the imported name. The
-            name is None for `import module`, which binds the module itself.
+        bindings: The names that the module imports at its top level, each with what it stands for.
     """
 
     names: set[str] = field(default_factory=set)
     attributes: set[str] = field(default_factory=set)
+    imported_attributes: set[tuple[Binding, tuple[str, ...]]] = field(default_factory=set)
     imports: set[tuple[str | None, int, str]] = field(default_factory=set)
     has_all: bool = False
-    bindings: dict[str, tuple[str | None, int, str | None]] = field(default_factory=dict)
+    bindings: dict[str, Binding] = field(default_factory=dict)
 
 
 def find_references(module: ast.Module) -> References:
@@ -37,17 +44,18 @@ def find_references(module: ast.Module) -> References:
     Returns:
         The references.
     """
-    references = References()
-    _visit(module, local_names=frozenset(), references=references)
-    _bind_imports(module, references)
+    references = References(bindings=_import_bindings([module]))
+    _visit(module, local_names=frozenset(), imports=references.bindings, references=references)
     return references
 
 
-def _bind_imports(module: ast.Module, references: References) -> None:
+def _import_bindings(nodes: list[ast.AST]) -> dict[str, Binding]:
     """
-    Add the names that a module imports at its top level, outside its functions and classes.
+    Get the names that the given nodes import, without those of the functions and classes that are
+    nested in them.
     """
-    stack: list[ast.AST] = [module]
+    bindings: dict[str, Binding] = {}
+    stack = list(nodes)
     while stack:
         node = stack.pop()
         match node:
@@ -58,37 +66,52 @@ def _bind_imports(module: ast.Module, references: References) -> None:
                     if alias.asname is None:
                         # `import package.module` binds `package`.
                         package = alias.name.partition(".")[0]
-                        references.bindings[package] = (package, 0, None)
+                        bindings[package] = (package, 0, None)
                     else:
-                        references.bindings[alias.asname] = (alias.name, 0, None)
+                        bindings[alias.asname] = (alias.name, 0, None)
             case ast.ImportFrom(module=source, level=level, names=aliases):
                 for alias in aliases:
-                    references.bindings[alias.asname or alias.name] = (source, level, alias.name)
+                    bindings[alias.asname or alias.name] = (source, level, alias.name)
             case _:
                 pass
         stack.extend(ast.iter_child_nodes(node))
+    return bindings
 
 
-def _visit(node: ast.AST, *, local_names: frozenset[str], references: References) -> None:
+def _visit(
+    node: ast.AST,
+    *,
+    local_names: frozenset[str],
+    imports: dict[str, Binding],
+    references: References,
+) -> None:
     """
     Add what a node, and everything under it, refers to.
 
     Args:
         node: The node.
         local_names: The local variables and parameters that are visible at the node.
+        imports: The imported names that are visible at the node.
         references: The references to add to.
     """
     match node:
         case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.Lambda():
-            _visit_function(node, local_names=local_names, references=references)
+            _visit_function(node, local_names=local_names, imports=imports, references=references)
             return
         case ast.ListComp() | ast.SetComp() | ast.DictComp() | ast.GeneratorExp():
             # The variables of a comprehension are local to it.
-            local_names |= _bound_names([node])
+            bound = _bound_names([node])
+            local_names |= bound
+            imports = {name: binding for name, binding in imports.items() if name not in bound}
         case ast.Name(id=name, ctx=ast.Load()):
             if name not in local_names:
                 references.names.add(name)
         case ast.Attribute(attr=name, ctx=ast.Load()):
+            root, attributes = _attribute_chain(node)
+            if root in imports:
+                # Attributes of an imported name, which are resolved once every module is known.
+                references.imported_attributes.add((imports[root], attributes))
+                return
             references.attributes.add(name)
         case ast.ImportFrom(module=source, level=level, names=aliases):
             references.imports.update((source, level, alias.name) for alias in aliases)
@@ -102,13 +125,14 @@ def _visit(node: ast.AST, *, local_names: frozenset[str], references: References
             pass
 
     for child in ast.iter_child_nodes(node):
-        _visit(child, local_names=local_names, references=references)
+        _visit(child, local_names=local_names, imports=imports, references=references)
 
 
 def _visit_function(
     function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
     *,
     local_names: frozenset[str],
+    imports: dict[str, Binding],
     references: References,
 ) -> None:
     """
@@ -117,6 +141,7 @@ def _visit_function(
     Args:
         function: The function or lambda.
         local_names: The local variables and parameters that are visible where the function is defined.
+        imports: The imported names that are visible where the function is defined.
         references: The references to add to.
     """
     arguments = function.args
@@ -139,11 +164,31 @@ def _visit_function(
         outside += [*function.decorator_list, function.returns]
     for node in outside:
         if node is not None:
-            _visit(node, local_names=local_names, references=references)
+            _visit(node, local_names=local_names, imports=imports, references=references)
 
-    local_names |= {parameter.arg for parameter in parameters} | _bound_names(body)
+    # A local variable hides an imported name, and the function sees its own imports.
+    bound = {parameter.arg for parameter in parameters} | _bound_names(body)
+    local_names |= bound
+    imports = {name: binding for name, binding in imports.items() if name not in bound} | _import_bindings(body)
     for node in body:
-        _visit(node, local_names=local_names, references=references)
+        _visit(node, local_names=local_names, imports=imports, references=references)
+
+
+def _attribute_chain(attribute: ast.Attribute) -> tuple[str | None, tuple[str, ...]]:
+    """
+    Split a chain of attributes, such as `package.module.name`, into the name that it starts with and
+    its attributes.
+
+    Returns:
+        The name, which is None if the chain starts with something else, such as a call, and the
+        attributes in order.
+    """
+    attributes: list[str] = []
+    node: ast.expr = attribute
+    while isinstance(node, ast.Attribute):
+        attributes.insert(0, node.attr)
+        node = node.value
+    return (node.id if isinstance(node, ast.Name) else None), tuple(attributes)
 
 
 def _bound_names(nodes: list[ast.AST]) -> frozenset[str]:

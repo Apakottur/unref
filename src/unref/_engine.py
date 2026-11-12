@@ -54,11 +54,28 @@ def find_unreferenced(
                 else:
                     module_references[imported].add(name)
 
-    # An attribute is matched by name only: a name that is read as an attribute anywhere in the project
-    # keeps every definition of that name alive.
+    # An attribute of an object is matched by name only: a name that is read as an attribute anywhere
+    # in the project keeps every method and attribute of that name alive.
     attribute_references: set[str] = set()
     for path in files:
         attribute_references |= references[path].attributes
+
+        # An attribute of an imported name is resolved: `package.module.name` refers to `name` in the
+        # module `package.module`.
+        for (source, level, name), attributes in references[path].imported_attributes:
+            module = names[path].resolve(source, level)
+            if module is None:
+                attribute_references.update(attributes)
+                continue
+            origin = [*module.split("."), *filter(None, [name])]
+            parts = [*origin, *attributes]
+            # What follows the last name that a module of the project holds is read from an object.
+            first_of_object = len(origin)
+            for index in range(1, len(parts)):
+                for imported in files_by_name.get(".".join(parts[:index]), []):
+                    module_references[imported].add(parts[index])
+                    first_of_object = max(first_of_object, index + 1)
+            attribute_references.update(parts[first_of_object:])
 
     definitions = {path: find_definitions(path, trees[path]) for path in files}
     hierarchy = ClassHierarchy(
@@ -121,7 +138,7 @@ def find_unreferenced(
 
             if (
                 definition.name not in module_references[path]
-                and definition.name not in attribute_references
+                and not (definition.owner is not None and definition.name in attribute_references)
                 and not (all_public and not definition.name.startswith("_"))
                 and not _is_dunder(definition.name)
                 and not any(fnmatchcase(definition.name, pattern) for pattern in names_of_definition)

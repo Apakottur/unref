@@ -1,4 +1,4 @@
-# References are matched by name only, so a reference to one definition keeps every definition of
+# Attributes are matched by name only, so a read of one attribute keeps every method and attribute of
 # that name alive.
 class First:
     def method(self):

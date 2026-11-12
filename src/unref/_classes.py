@@ -1,10 +1,7 @@
 from pathlib import Path
 
 from unref._modules import ModuleName
-
-# A name that a module imports: the module it is imported from, as it is written, the number of leading
-# dots, and the imported name. The name is None for `import module`, which binds the module itself.
-Binding = tuple[str | None, int, str | None]
+from unref._references import Binding
 
 
 class ClassHierarchy:
