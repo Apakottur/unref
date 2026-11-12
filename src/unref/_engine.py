@@ -7,6 +7,7 @@ from pathlib import Path
 from unref._classes import ClassHierarchy
 from unref._definitions import find_definitions
 from unref._discover import discover, is_under
+from unref._ignores import find_ignored_lines
 from unref._models import Finding, Override
 from unref._modules import module_name
 from unref._references import find_references
@@ -34,7 +35,8 @@ def find_unreferenced(
         A finding for each unreferenced definition, sorted by file and line.
     """
     files = discover(paths, exclude=exclude)
-    trees = {path: ast.parse(path.read_bytes(), filename=str(path)) for path in files}
+    sources = {path: path.read_bytes() for path in files}
+    trees = {path: ast.parse(source, filename=str(path)) for path, source in sources.items()}
     references = {path: find_references(tree) for path, tree in trees.items()}
     names = {path: module_name(path) for path in files}
 
@@ -113,6 +115,10 @@ def find_unreferenced(
         # or every public name if there is no `__all__`.
         all_public = path in star_imported and not references[path].has_all
 
+        ignored_lines = find_ignored_lines(sources[path])
+        unused_ignored_lines = set(ignored_lines)
+        file_findings: list[Finding] = []
+
         for definition in definitions[path]:
             # The options of a definition are those of the project, plus those of every override that
             # covers it.
@@ -144,7 +150,10 @@ def find_unreferenced(
                 and not any(fnmatchcase(definition.name, pattern) for pattern in names_of_definition)
                 and decorators_of_definition.isdisjoint(definition.decorators)
             ):
-                findings.append(
+                if definition.line in ignored_lines:
+                    unused_ignored_lines.discard(definition.line)
+                    continue
+                file_findings.append(
                     Finding(
                         path=definition.path,
                         line=definition.line,
@@ -152,6 +161,12 @@ def find_unreferenced(
                         name=definition.name,
                     )
                 )
+
+        # An ignore comment that ignores nothing is a finding itself.
+        file_findings.extend(
+            Finding(path=path, line=line, kind="unused comment", name="unref: ignore") for line in unused_ignored_lines
+        )
+        findings += sorted(file_findings, key=lambda finding: finding.line)
     return findings
 
 
