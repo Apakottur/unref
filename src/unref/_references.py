@@ -1,6 +1,7 @@
 import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -153,8 +154,14 @@ class _Walker:
         """
         Add what the children of a node, and everything under them, refer to.
         """
-        for child in ast.iter_child_nodes(node):
-            self.visit(child)
+        for name in _child_fields(type(node)):
+            value = getattr(node, name, None)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, ast.AST):
+                        self.visit(item)
+            elif isinstance(value, ast.AST):
+                self.visit(value)
 
     def visit_name(self, node: ast.Name) -> None:
         """
@@ -448,6 +455,19 @@ _HANDLERS: dict[type[ast.AST], Callable[[_Walker, Any], None]] = {
     ast.MatchMapping: _Walker.visit_pattern_or_handler,
     ast.MatchClass: _Walker.visit_match_class,
 }
+
+
+@cache
+def _child_fields(node_type: type[ast.AST]) -> tuple[str, ...]:
+    """
+    Get the fields of a type of node that can hold other nodes.
+
+    The context of a name or an attribute, such as `ast.Load`, is left out, and a constant has none,
+    since they hold nothing.
+    """
+    if node_type is ast.Constant:
+        return ()
+    return tuple(name for name in node_type._fields if name != "ctx")
 
 
 def _attribute_chain(attribute: ast.Attribute) -> tuple[ast.expr, tuple[str, ...]]:
