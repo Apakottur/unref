@@ -5,7 +5,7 @@ directory:
 
 ```toml
 [tool.unref]
-used-decorators = ["app.command", "pytest.fixture"]
+used-decorators = ["app.command", "app.route"]
 exclude = ["generated"]
 ```
 
@@ -13,7 +13,7 @@ Another file can be given with `--config`. A file that is not named `pyproject.t
 the top level:
 
 ```toml
-used-decorators = ["app.command", "pytest.fixture"]
+used-decorators = ["app.command", "app.route"]
 exclude = ["generated"]
 ```
 
@@ -32,6 +32,7 @@ does not read a configuration file.
 | `exclude`            | `exclude`            | Files and directories that are not part of the project.             |
 | `python`             | `python`             | Virtual environment that the project runs in.                       |
 | `dummy-variable-rgx` | `dummy_variable_rgx` | Names of the variables that are unused on purpose, in an unpacking. |
+| `frameworks`         | `frameworks`         | Test frameworks whose tests, fixtures and hooks count as used.      |
 
 ### `used-names`
 
@@ -168,6 +169,64 @@ the syntax of Python's [`re`](https://docs.python.org/3/library/re.html) module.
 
 `_` itself is never reported, whatever the expression.
 
+### `frameworks`
+
+Test frameworks whose tests, fixtures and hooks count as used: the framework finds and calls them by
+itself. Both known frameworks are on by default:
+
+```toml
+[tool.unref]
+frameworks = ["pytest", "unittest"]
+```
+
+`frameworks = []` turns them off, and `frameworks = ["unittest"]` keeps only unittest.
+
+The rules follow what each framework does with its default settings. A test file is found by its name,
+as the framework finds it, wherever it is: there is no `tests` directory to configure.
+
+pytest:
+
+- In a test file, a file named `test_*.py` or `*_test.py` (the default of pytest's `python_files`):
+    - The functions whose name starts with `test`, and the classes whose name starts with `Test` (the
+      defaults of `python_functions` and `python_classes`).
+    - In such a class, or in a class whose name starts with `Test` that it holds: the methods whose name
+      starts with `test`, `setup_class`, `teardown_class`, `setup_method`, `teardown_method`, and the
+      attribute `pytestmark`.
+    - The functions `setup_module`, `teardown_module`, `setUpModule`, `tearDownModule`,
+      `setup_function` and `teardown_function`, and the variables `pytestmark` and `pytest_plugins`.
+- In a `conftest.py`: the variables `pytestmark`, `pytest_plugins`, `collect_ignore` and
+  `collect_ignore_glob`.
+- Anywhere, as a plugin can be any module: the hooks, which are the functions and methods whose name
+  starts with `pytest_`, and the fixtures, decorated with `pytest.fixture`. The decorator is followed
+  through its imports, as `from pytest import fixture`, and its arguments are ignored.
+
+unittest:
+
+- Anywhere: the subclasses of `unittest.TestCase`, and their methods whose name starts with `test`,
+  `setUp`, `tearDown`, `setUpClass`, `tearDownClass`, `asyncSetUp` and `asyncTearDown`. The base
+  class is followed as with [the `base-classes` of an override](#by-base-class): through the classes of
+  the project, and through those outside it, such as `unittest.IsolatedAsyncioTestCase`, or
+  `django.test.TestCase` when Django is in [the environment of the project](#python).
+- In a file whose name starts with `test` (the default pattern of `python -m unittest discover`): the
+  functions `setUpModule`, `tearDownModule` and `load_tests`.
+
+As in both frameworks, the methods above count as used in a class that a test class inherits from too,
+wherever it is defined.
+
+Everything else in a test file, such as a helper function, is reported when it is unused.
+
+A project that sets `python_files`, `python_classes` or `python_functions` for pytest can add what these
+rules miss with an [override](#overrides):
+
+```toml
+[[tool.unref.overrides]]
+paths = ["testing/python"]
+used-names = ["test*", "Test*"]
+```
+
+The library takes the option as the `frameworks` argument of [`unref.check`](reference/api.md#unref.check),
+with the same default.
+
 ## Entry points
 
 The objects that the entry points of the project name count as used, and so does what they use. They
@@ -212,12 +271,11 @@ In a file that is not named `pyproject.toml`, the table is `[[overrides]]`.
 used-decorators = ["app.command"]
 
 [[tool.unref.overrides]]
-paths = ["tests"]
-used-names = ["test_*", "Test*"]
-used-decorators = ["pytest.fixture"]
+paths = ["migrations"]
+used-names = ["Migration"]
 ```
 
-Here, a function named `test_connection` counts as used in `tests`, and is reported anywhere else.
+Here, a class named `Migration` counts as used in `migrations`, and is reported anywhere else.
 
 `paths` lists files and directories, relative to the current directory.
 
@@ -270,7 +328,8 @@ A subclass does not take the decorators of its base classes.
 
 ### Rules
 
-- An override takes the `used-names` and `used-decorators` options.
+- An override takes the `used-names` and `used-decorators` options. `frameworks` applies to the whole
+  project.
 - An override needs `paths`, `base-classes` or `class-decorators`. With several of them, it applies to
   what matches all of them: with `paths` and `base-classes`, to the classes under the paths that inherit
   from one of the base classes.

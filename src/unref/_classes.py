@@ -45,6 +45,7 @@ class ClassHierarchy:
         """
         self._decorators = decorators
         self._resolved_decorators: dict[tuple[Path, str], frozenset[str]] = {}
+        self._resolved: dict[tuple[Path, str], frozenset[str]] = {}
         # The external modules that are read are added to these, so they are copies.
         self._names = dict(names)
         self._files_by_name = files_by_name
@@ -118,11 +119,27 @@ class ClassHierarchy:
         """
         key = (path, name)
         if key not in self._resolved_decorators:
-            found: set[str] = set()
-            for decorator in self._decorators[path][name]:
-                found |= self._resolve(path, decorator, set())
-            self._resolved_decorators[key] = frozenset(found)
+            self._resolved_decorators[key] = frozenset().union(
+                *(self.resolve(path, decorator) for decorator in self._decorators[path][name])
+            )
         return self._resolved_decorators[key]
+
+    def resolve(self, path: Path, written: str) -> frozenset[str]:
+        """
+        Get the dotted names of a name as it is written in a module, such as the decorator of a function.
+
+        Args:
+            path: The file of the module.
+            written: The dotted name as it is written, such as `fixture` after `from pytest import fixture`.
+
+        Returns:
+            The dotted names, such as `pytest.fixture`. A name that is imported through several modules
+            has the name of each.
+        """
+        key = (path, written)
+        if key not in self._resolved:
+            self._resolved[key] = frozenset(self._resolve(path, written, set()))
+        return self._resolved[key]
 
     def _resolve(self, path: Path, written: str, seen: set[str]) -> set[str]:
         """

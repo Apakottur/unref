@@ -22,6 +22,10 @@ src/project/models.py:12: unused class 'Account'
 src/project/utils.py:40: unused function 'parse_date'
 ```
 
+The tests, fixtures and hooks that pytest and unittest find by themselves count as used, without any
+configuration. See the [configuration](https://unref.readthedocs.io/en/latest/configuration/) to change
+that, and for the other options.
+
 ## Why
 
 Unused code piles up in every codebase, and faster than ever now that AI tools write much of it and

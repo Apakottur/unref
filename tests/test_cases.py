@@ -69,6 +69,7 @@ def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch) -> list[_Findi
             python=config.python,
             dummy_variable_rgx=config.dummy_variable_rgx,
             entry_points=config.entry_points,
+            frameworks=config.frameworks,
         )
     )
 

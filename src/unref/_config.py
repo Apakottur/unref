@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from unref._models import DEFAULT_DUMMY_VARIABLE_RGX, Override
+from unref._models import DEFAULT_DUMMY_VARIABLE_RGX, FRAMEWORKS, Override
 
 _PYPROJECT = "pyproject.toml"
 
@@ -32,6 +32,7 @@ class Config:
         dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
         entry_points: The object references of the entry points of the project, such as
             `package.module:function`.
+        frameworks: The test frameworks whose tests, fixtures and hooks count as used.
     """
 
     used_names: tuple[str, ...] = ()
@@ -41,6 +42,7 @@ class Config:
     python: Path | None = None
     dummy_variable_rgx: str = DEFAULT_DUMMY_VARIABLE_RGX
     entry_points: tuple[str, ...] = ()
+    frameworks: tuple[str, ...] = FRAMEWORKS
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -109,7 +111,9 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
     """
     where = f"the configuration file {path}"
     _check_names(
-        options, {"used-names", "used-decorators", "exclude", "overrides", "python", "dummy-variable-rgx"}, where
+        options,
+        {"used-names", "used-decorators", "exclude", "overrides", "python", "dummy-variable-rgx", "frameworks"},
+        where,
     )
 
     overrides = options.get("overrides", [])
@@ -130,6 +134,14 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
             f"Option 'dummy-variable-rgx' in {where} is not a valid regular expression: {error}"
         ) from error
 
+    frameworks = _string_list(options, "frameworks", where) if "frameworks" in options else list(FRAMEWORKS)
+    for framework in frameworks:
+        if framework not in FRAMEWORKS:
+            raise UnrefConfigError(
+                f"Option 'frameworks' in {where} has an unknown framework {framework!r}, "
+                f"expected one of {', '.join(map(repr, FRAMEWORKS))}"
+            )
+
     return Config(
         used_names=tuple(_string_list(options, "used-names", where)),
         used_decorators=tuple(_decorators(options, "used-decorators", where)),
@@ -138,6 +150,7 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
         overrides=tuple(_parse_override(item, path) for item in overrides),
         python=None if python is None else Path(python),
         dummy_variable_rgx=dummy_variable_rgx,
+        frameworks=tuple(frameworks),
     )
 
 
