@@ -220,3 +220,13 @@ def test_config_overrides_invalid(tmp_path: Path, content: str, error: str) -> N
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: {error.format(config=config)}\n"
+
+
+def test_config_python_wrong_type(tmp_path: Path) -> None:
+    config = tmp_path / "unref.toml"
+    config.write_text('python = [".venv"]\n')
+
+    result = _runner.invoke(app, ["--config", str(config)])
+
+    assert result.exit_code == 2
+    assert result.stderr == f"Error: Option 'python' in the configuration file {config} must be a string\n"

@@ -103,15 +103,15 @@ that is not used, such as the `_: KW_ONLY` field of a data class.
 A method or attribute of a class that has the name of a member of a base class outside the project, such
 as `emit` in a subclass of `logging.Handler`, counts as used: the code of the base class uses it. Such a
 base class is read from the source of its module, which is never imported, and found in the directories
-that the project is imported from, and then in the environment that `unref` runs in. A module without a
-Python source, such as a builtin or a compiled module, is not followed.
+that the project is imported from, and then in the [environment of the project](configuration.md#python).
+A module without a Python source, such as a builtin or a compiled module, is not followed.
 A class that a module gives out from its `__getattr__`, such as `concurrent.futures.ThreadPoolExecutor`,
 is followed through the `from module import name` of the same name in the function, whatever the
 condition it is under.
 
-The pre-commit and prek hook runs in its own environment, which has the standard library but not the
-packages of the project. To follow the base classes of these packages, run `unref` in the environment of
-the project instead, for example with `uv run unref`.
+The pre-commit and prek hook runs in its own environment, which does not have the packages of the
+project. It finds them in the `.venv` of the project, or in the environment that the `python` option
+names.
 
 ## Ignoring a finding
 

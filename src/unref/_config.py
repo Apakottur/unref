@@ -27,12 +27,14 @@ class Config:
         used_decorators: The decorators that make the definitions they decorate count as used.
         exclude: The files and directories that are not part of the project.
         overrides: The options that apply only to some of the files of the project.
+        python: The Python environment or interpreter of the project, or None if it is not set.
     """
 
     used_names: tuple[str, ...] = ()
     used_decorators: tuple[str, ...] = ()
     exclude: tuple[Path, ...] = ()
     overrides: tuple[Override, ...] = ()
+    python: Path | None = None
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -76,11 +78,15 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
     Build the configuration from the options of a configuration file.
     """
     where = f"the configuration file {path}"
-    _check_names(options, {"used-names", "used-decorators", "exclude", "overrides"}, where)
+    _check_names(options, {"used-names", "used-decorators", "exclude", "overrides", "python"}, where)
 
     overrides = options.get("overrides", [])
     if not isinstance(overrides, list) or not all(isinstance(item, dict) for item in overrides):
         raise UnrefConfigError(f"Option 'overrides' in {where} must be a list of tables")
+
+    python = options.get("python")
+    if python is not None and not isinstance(python, str):
+        raise UnrefConfigError(f"Option 'python' in {where} must be a string")
 
     return Config(
         used_names=tuple(_string_list(options, "used-names", where)),
@@ -88,6 +94,8 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
         # The paths are relative to the directory of the configuration file.
         exclude=tuple(path.parent / item for item in _string_list(options, "exclude", where)),
         overrides=tuple(_parse_override(item, path) for item in overrides),
+        # The path is relative to the directory of the configuration file.
+        python=None if python is None else path.parent / python,
     )
 
 

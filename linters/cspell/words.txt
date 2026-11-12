@@ -9,6 +9,7 @@ conftest
 contextlib
 dataclass
 dataclasses
+delenv
 docstrings
 dunder
 dunders
@@ -25,8 +26,10 @@ maxfail
 mkdocstrings
 mypy
 pathlib
+platlib
 posonlyargs
 prek
+purelib
 pycache
 Pydantic
 Pydocstyle

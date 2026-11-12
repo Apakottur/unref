@@ -17,7 +17,12 @@ def _large_project(directory: Path) -> Path:
     """
     Make a project large enough to be analyzed by several processes, from copies of the test cases.
     """
-    size = sum(path.stat().st_size for path in _CASES_DIR.rglob("*.py"))
+    # A file in a hidden directory, such as the `.venv` of a case, is not part of the project.
+    size = sum(
+        path.stat().st_size
+        for path in _CASES_DIR.rglob("*.py")
+        if not any(part.startswith(".") for part in path.relative_to(_CASES_DIR).parts)
+    )
     for index in range(MIN_PARALLEL_BYTES // size + 1):
         shutil.copytree(_CASES_DIR, directory / f"copy_{index}")
     return directory

@@ -1,4 +1,6 @@
 import gc
+import os
+import sys
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -42,6 +44,18 @@ def main(
             show_default=False,
         ),
     ] = None,
+    python: Annotated[
+        Path | None,
+        typer.Option(
+            "--python",
+            help=(
+                "Path to the Python environment or interpreter of the project, whose installed packages"
+                " base classes are looked for in. Defaults to the active virtual environment, or else to"
+                " the .venv of the current directory."
+            ),
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """
     Find unreferenced Python code.
@@ -53,6 +67,13 @@ def main(
     except UnrefConfigError as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=2) from error
+
+    environment = python or options.python
+    if environment is None:
+        environment = _find_environment()
+    elif not environment.exists():
+        typer.echo(f"Error: The Python environment {environment} does not exist", err=True)
+        raise typer.Exit(code=2)
 
     # Parsing creates millions of objects, and the cyclic garbage collector would keep scanning them
     # although none of them is freed before the check ends. Turning it off almost halves the time it
@@ -66,6 +87,7 @@ def main(
             exclude=options.exclude,
             overrides=options.overrides,
             jobs=jobs,
+            python=environment,
         )
 
     for finding in findings:
@@ -73,6 +95,25 @@ def main(
 
     if findings:
         raise typer.Exit(code=1)
+
+
+def _find_environment() -> Path | None:
+    """
+    Find the virtual environment that the project runs in: the active one, or else the `.venv` of the
+    current directory.
+
+    A hook of prek or pre-commit runs in an environment of its own, which it activates, so an active
+    environment that runs the command is not the one of the project.
+
+    Returns:
+        The directory of the environment, or None if there is none.
+    """
+    active = os.environ.get("VIRTUAL_ENV", "")
+    if active and Path(active).resolve() != Path(sys.prefix).resolve():
+        return Path(active)
+    if Path(".venv").is_dir():
+        return Path(".venv")
+    return None
 
 
 @contextmanager
