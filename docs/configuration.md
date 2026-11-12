@@ -81,7 +81,7 @@ A path is relative to the directory of the configuration file. Hidden directorie
 ## Overrides
 
 Options that apply only to some of the definitions of the project are given in `overrides` tables. An
-override selects by path, by base class, or by both.
+override selects by path, by base class, by class decorator, or by several of them.
 
 In a file that is not named `pyproject.toml`, the table is `[[overrides]]`.
 
@@ -126,10 +126,28 @@ its name. The override applies to what is defined in a class that inherits from 
 The name has to be the one that the project imports: `pydantic.BaseModel` does not cover
 `from pydantic.main import BaseModel`.
 
+### By class decorator
+
+```toml
+[[tool.unref.overrides]]
+class-decorators = ["dataclasses.dataclass"]
+used-names = ["*"]
+```
+
+Here, every field of a data class counts as used.
+
+`class-decorators` lists decorators by their dotted name, without the `@`: the module that the decorator
+is imported from, and its name. The override applies to what is defined in a class that has one of them,
+however the decorator is imported and with any arguments: `@dataclass`, `@dataclasses.dataclass` or
+`@dataclass(frozen=True)`.
+
+A subclass does not take the decorators of its base classes.
+
 ### Rules
 
 - An override takes the `used-names` and `used-decorators` options.
-- An override needs `paths` or `base-classes`. With both, it applies to the classes under the paths that
-  inherit from one of the base classes.
+- An override needs `paths`, `base-classes` or `class-decorators`. With several of them, it applies to
+  what matches all of them: with `paths` and `base-classes`, to the classes under the paths that inherit
+  from one of the base classes.
 - The options of an override add to those of the project, they do not replace them.
 - A definition that several overrides cover gets the options of all of them.

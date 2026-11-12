@@ -7,6 +7,9 @@ from unref._models import Override
 
 _PYPROJECT = "pyproject.toml"
 
+# The options of an override that select what it applies to.
+_SELECTORS = ("paths", "base-classes", "class-decorators")
+
 
 class UnrefConfigError(Exception):
     """
@@ -81,7 +84,7 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
 
     return Config(
         used_names=tuple(_string_list(options, "used-names", where)),
-        used_decorators=tuple(_decorators(options, where)),
+        used_decorators=tuple(_decorators(options, "used-decorators", where)),
         # The paths are relative to the directory of the configuration file.
         exclude=tuple(path.parent / item for item in _string_list(options, "exclude", where)),
         overrides=tuple(_parse_override(item, path) for item in overrides),
@@ -93,17 +96,20 @@ def _parse_override(options: dict[str, Any], path: Path) -> Override:
     Build an override from one of the `overrides` tables of a configuration file.
     """
     where = f"an override in the configuration file {path}"
-    _check_names(options, {"paths", "base-classes", "used-names", "used-decorators"}, where)
+    _check_names(options, {"paths", "base-classes", "class-decorators", "used-names", "used-decorators"}, where)
 
-    if "paths" not in options and "base-classes" not in options:
-        raise UnrefConfigError(f"{where[0].upper()}{where[1:]} needs the 'paths' or the 'base-classes' option")
+    if options.keys().isdisjoint(_SELECTORS):
+        raise UnrefConfigError(
+            f"{where[0].upper()}{where[1:]} needs one of the options {', '.join(map(repr, _SELECTORS))}"
+        )
 
     return Override(
         # The paths are relative to the directory of the configuration file.
         paths=tuple(path.parent / item for item in _string_list(options, "paths", where)),
         base_classes=tuple(_string_list(options, "base-classes", where)),
+        class_decorators=tuple(_decorators(options, "class-decorators", where)),
         used_names=tuple(_string_list(options, "used-names", where)),
-        used_decorators=tuple(_decorators(options, where)),
+        used_decorators=tuple(_decorators(options, "used-decorators", where)),
     )
 
 
@@ -116,16 +122,14 @@ def _check_names(options: dict[str, Any], known: set[str], where: str) -> None:
             raise UnrefConfigError(f"Unknown option {name!r} in {where}")
 
 
-def _decorators(options: dict[str, Any], where: str) -> list[str]:
+def _decorators(options: dict[str, Any], name: str, where: str) -> list[str]:
     """
-    Get the `used-decorators` option, which lists dotted names without the `@`.
+    Get an option that lists decorators, as dotted names without the `@`.
     """
-    decorators = _string_list(options, "used-decorators", where)
+    decorators = _string_list(options, name, where)
     for decorator in decorators:
         if decorator.startswith("@"):
-            raise UnrefConfigError(
-                f"Option 'used-decorators' in {where} must list decorators without the '@': {decorator!r}"
-            )
+            raise UnrefConfigError(f"Option {name!r} in {where} must list decorators without the '@': {decorator!r}")
     return decorators
 
 

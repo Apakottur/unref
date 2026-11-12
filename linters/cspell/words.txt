@@ -6,6 +6,8 @@ capsys
 commitish
 conftest
 contextlib
+dataclass
+dataclasses
 docstrings
 dunder
 dunders

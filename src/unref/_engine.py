@@ -69,6 +69,14 @@ def find_unreferenced(
             path: {
                 definition.qualified_name: definition.bases
                 for definition in definitions[path]
+                if definition.kind in ("class", "function")
+            }
+            for path in files
+        },
+        decorators={
+            path: {
+                definition.qualified_name: definition.decorators
+                for definition in definitions[path]
                 if definition.kind == "class"
             }
             for path in files
@@ -99,6 +107,13 @@ def find_unreferenced(
                 if override.base_classes and (
                     definition.owner is None
                     or hierarchy.ancestors(path, definition.owner).isdisjoint(override.base_classes)
+                ):
+                    continue
+                # An override with class decorators applies to what is defined in a class that has
+                # one of them.
+                if override.class_decorators and (
+                    definition.owner is None
+                    or hierarchy.decorators(path, definition.owner).isdisjoint(override.class_decorators)
                 ):
                     continue
                 names_of_definition += override.used_names

@@ -9,10 +9,11 @@ Binding = tuple[str | None, int, str | None]
 
 class ClassHierarchy:
     """
-    The classes of a project, and the base classes that they inherit from.
+    The classes of a project, with the base classes that they inherit from and their decorators.
 
     A base class is followed through the imports of the project, so that a class is known to inherit
-    from the base classes of its base classes, wherever they are defined.
+    from the base classes of its base classes, wherever they are defined. A decorator is followed
+    through the imports as well, to where it is defined.
     """
 
     def __init__(
@@ -22,15 +23,21 @@ class ClassHierarchy:
         files_by_name: dict[str, list[Path]],
         bindings: dict[Path, dict[str, Binding]],
         classes: dict[Path, dict[str, tuple[str, ...]]],
+        decorators: dict[Path, dict[str, tuple[str, ...]]],
     ) -> None:
         """
         Args:
             names: The name of each module of the project.
             files_by_name: The files of the project by their module name.
             bindings: The names that each module imports at its top level.
-            classes: The classes of each module, by their name in the module (`Outer.Inner` for a
-                nested class), with their base classes as they are written.
+            classes: The classes and functions of each module, by their name in the module
+                (`Outer.Inner` for a nested class), with their base classes as they are written. A
+                function has none.
+            decorators: The classes of each module, by their name in the module, with their decorators
+                as they are written.
         """
+        self._decorators = decorators
+        self._resolved_decorators: dict[tuple[Path, str], frozenset[str]] = {}
         self._names = names
         self._files_by_name = files_by_name
         self._bindings = bindings
@@ -58,14 +65,35 @@ class ClassHierarchy:
             self._ancestors[key] = frozenset(found)
         return self._ancestors[key]
 
+    def decorators(self, path: Path, name: str) -> frozenset[str]:
+        """
+        Get the decorators of a class.
+
+        Args:
+            path: The file of the class.
+            name: The name of the class in its module.
+
+        Returns:
+            The dotted names of the decorators, such as `dataclasses.dataclass`. A decorator that is
+            imported through several modules has the name of each.
+        """
+        key = (path, name)
+        if key not in self._resolved_decorators:
+            found: set[str] = set()
+            for decorator in self._decorators[path][name]:
+                found |= self._resolve(path, decorator, set())
+            self._resolved_decorators[key] = frozenset(found)
+        return self._resolved_decorators[key]
+
     def _resolve(self, path: Path, written: str, seen: set[str]) -> set[str]:
         """
-        Get the dotted names of a base class, as it is written in a module, and of its base classes.
+        Get the dotted names of a base class or decorator, as it is written in a module, and of the
+        base classes of a base class.
         """
         first, _, rest = written.partition(".")
 
         if first in self._classes[path]:
-            # A class of the module itself.
+            # A class or function of the module itself.
             return self._follow(f"{self._names[path].name}.{written}", seen)
 
         if first in self._bindings[path]:

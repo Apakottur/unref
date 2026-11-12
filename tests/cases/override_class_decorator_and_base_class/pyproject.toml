@@ -1,0 +1,5 @@
+# With several selectors, the override applies to the classes that match all of them.
+[[tool.unref.overrides]]
+base-classes = ["models.Base"]
+class-decorators = ["dataclasses.dataclass"]
+used-names = ["*"]

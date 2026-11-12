@@ -1,0 +1,3 @@
+[[tool.unref.overrides]]
+class-decorators = ["dataclasses.dataclass", "decorators.record"]
+used-names = ["*"]
