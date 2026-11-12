@@ -1,0 +1,128 @@
+import ast
+import warnings
+from dataclasses import dataclass
+from importlib.machinery import BYTECODE_SUFFIXES, EXTENSION_SUFFIXES, SOURCE_SUFFIXES
+from pathlib import Path
+
+from unref._definitions import Definition, find_definitions
+from unref._modules import ModuleName
+from unref._references import Binding, find_references
+
+# The files that a module can be imported from, in the order that Python looks for them: a compiled
+# module, a source, and a bytecode file.
+_SUFFIXES = (*EXTENSION_SUFFIXES, *SOURCE_SUFFIXES, *BYTECODE_SUFFIXES)
+
+
+@dataclass(frozen=True)
+class ExternalModule:
+    """
+    A module that is imported from outside the project, such as a module of the standard library.
+
+    Attributes:
+        path: The source file of the module.
+        name: The name that the module is imported by.
+        definitions: What the module defines.
+        bindings: The names that the module imports at its top level.
+    """
+
+    path: Path
+    name: ModuleName
+    definitions: list[Definition]
+    bindings: dict[str, Binding]
+
+
+class ExternalModules:
+    """
+    The modules that are imported from outside the project.
+
+    A module is found on a search path the way Python finds it, and read from its source, but it is
+    never imported: its code does not run. A module without a Python source, such as a builtin or a
+    compiled module, is not read.
+    """
+
+    def __init__(self, search_path: list[Path]) -> None:
+        """
+        Args:
+            search_path: The directories that modules are imported from, in order.
+        """
+        self._search_path = search_path
+        self._modules: dict[str, ExternalModule | None] = {}
+
+    def get(self, name: str) -> ExternalModule | None:
+        """
+        Get a module by its dotted name.
+
+        Args:
+            name: The dotted name of the module, such as `logging.handlers`.
+
+        Returns:
+            The module, or None if it is not found or does not parse.
+        """
+        if name not in self._modules:
+            self._modules[name] = self._read(name)
+        return self._modules[name]
+
+    def _read(self, name: str) -> ExternalModule | None:
+        """
+        Find a module and read its source.
+        """
+        if not name:
+            return None
+
+        # Each package of the name is looked for in turn, in the directories of the package above it.
+        locations: list[Path] | None = self._search_path
+        file: Path | None = None
+        for part in name.split("."):
+            if locations is None:
+                # A module that is not a package has no submodules.
+                return None
+            found = _find(part, locations)
+            if found is None:
+                return None
+            file, locations = found
+
+        if file is None or file.suffix != ".py":
+            return None
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                tree = ast.parse(file.read_bytes(), filename=str(file))
+        except (OSError, SyntaxError, ValueError):
+            return None
+
+        return ExternalModule(
+            path=file,
+            name=ModuleName(name=name, is_package=locations is not None),
+            definitions=find_definitions(file, tree),
+            bindings=find_references(tree).bindings,
+        )
+
+
+def _find(name: str, locations: list[Path]) -> tuple[Path | None, list[Path] | None] | None:
+    """
+    Find a module in the directories that it can be imported from, in the order that Python looks for
+    it.
+
+    Args:
+        name: The name of the module in its package, without dots.
+        locations: The directories of the search path, or of the package of the module.
+
+    Returns:
+        The file of the module, and the directories of its submodules if it is a package. A namespace
+        package, which is a directory without an `__init__.py`, has no file, and is made of the
+        directories of its name in every location. None if the module is not found.
+    """
+    portions: list[Path] = []
+    for location in locations:
+        directory = location / name
+        if directory.is_dir():
+            for suffix in _SUFFIXES:
+                if (directory / f"__init__{suffix}").is_file():
+                    return directory / f"__init__{suffix}", [directory]
+            portions.append(directory)
+        for suffix in _SUFFIXES:
+            if (location / f"{name}{suffix}").is_file():
+                return location / f"{name}{suffix}", None
+    if portions:
+        return None, portions
+    return None

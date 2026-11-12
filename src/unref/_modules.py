@@ -58,3 +58,19 @@ def module_name(path: Path) -> ModuleName:
         directory = directory.parent
 
     return ModuleName(name=".".join(parts), is_package=is_package)
+
+
+def import_root(path: Path, name: ModuleName) -> Path:
+    """
+    Get the directory on the import path that a Python file is imported from.
+
+    Args:
+        path: The file.
+        name: The name that the file is imported by.
+
+    Returns:
+        The directory that holds the first package of the name, or the file itself if it is not in a
+        package.
+    """
+    depth = name.name.count(".") + (1 if name.is_package else 0)
+    return path.resolve().parents[depth]

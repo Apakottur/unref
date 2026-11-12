@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from unref._external import ExternalModules
 from unref._modules import ModuleName
 from unref._references import Binding
 
@@ -9,8 +10,9 @@ class ClassHierarchy:
     The classes of a project, with the base classes that they inherit from and their decorators.
 
     A base class is followed through the imports of the project, so that a class is known to inherit
-    from the base classes of its base classes, wherever they are defined. A decorator is followed
-    through the imports as well, to where it is defined.
+    from the base classes of its base classes, wherever they are defined. A base class that is imported
+    from outside the project is followed through the source of its module, such as `enum.StrEnum` to
+    `enum.Enum`. A decorator is followed through the imports as well, to where it is defined.
     """
 
     def __init__(
@@ -21,6 +23,7 @@ class ClassHierarchy:
         bindings: dict[Path, dict[str, Binding]],
         classes: dict[Path, dict[str, tuple[str, ...]]],
         decorators: dict[Path, dict[str, tuple[str, ...]]],
+        external: ExternalModules,
     ) -> None:
         """
         Args:
@@ -32,14 +35,17 @@ class ClassHierarchy:
                 function has none.
             decorators: The classes of each module, by their name in the module, with their decorators
                 as they are written.
+            external: The modules that are imported from outside the project.
         """
         self._decorators = decorators
         self._resolved_decorators: dict[tuple[Path, str], frozenset[str]] = {}
-        self._names = names
+        # The external modules that are read are added to these, so they are copies.
+        self._names = dict(names)
         self._files_by_name = files_by_name
-        self._bindings = bindings
-        self._classes = classes
+        self._bindings = dict(bindings)
+        self._classes = dict(classes)
         self._ancestors: dict[tuple[Path, str], frozenset[str]] = {}
+        self._external = external
 
     def ancestors(self, path: Path, name: str) -> frozenset[str]:
         """
@@ -114,7 +120,7 @@ class ClassHierarchy:
 
         found = {name}
         module, _, symbol = name.rpartition(".")
-        for path in self._files_by_name.get(module, []):
+        for path in self._files_by_name.get(module) or self._read_external(module):
             if symbol in self._classes[path]:
                 for base in self._classes[path][symbol]:
                     found |= self._resolve(path, base, seen)
@@ -133,3 +139,22 @@ class ClassHierarchy:
         if source is None:
             return None
         return ".".join(filter(None, [source, name]))
+
+    def _read_external(self, module: str) -> list[Path]:
+        """
+        Get the file of a module that is imported from outside the project, and add its classes and
+        imports to those of the project.
+        """
+        external = self._external.get(module)
+        if external is None:
+            return []
+        path = external.path
+        if path not in self._classes:
+            self._names[path] = external.name
+            self._bindings[path] = external.bindings
+            self._classes[path] = {
+                definition.qualified_name: definition.bases
+                for definition in external.definitions
+                if definition.kind in ("class", "function")
+            }
+        return [path]
