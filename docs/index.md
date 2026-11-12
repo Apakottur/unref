@@ -78,6 +78,7 @@ references it.
 | `unused variable`  | A module-level variable.                                                 |
 | `unused attribute` | A class attribute, or an instance attribute (`self.value = ...`).        |
 | `unused comment`   | An `# unref: ignore` comment that ignores nothing.                       |
+| `syntax error`     | A file that does not parse. It is skipped, the rest is still checked.    |
 
 Local variables and imports are not reported, [Ruff](https://docs.astral.sh/ruff/) covers them.
 

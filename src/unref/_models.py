@@ -7,13 +7,15 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Finding:
     """
-    An unused definition, or an ignore comment that ignores nothing.
+    An unused definition, an ignore comment that ignores nothing, or a file that does not parse.
 
     Attributes:
         path: The file that holds the definition.
-        line: The line of the definition in the file, starting at 1.
-        kind: What was found, for example "unused function".
-        name: The name of the definition, or `unref: ignore` for an ignore comment.
+        line: The line of the definition in the file, starting at 1. For a file that does not parse,
+            the line of the error, or 1 if it is unknown.
+        kind: What was found, for example "unused function", or "syntax error".
+        name: The name of the definition, `unref: ignore` for an ignore comment, or the message of the
+            error for a file that does not parse.
     """
 
     path: Path
