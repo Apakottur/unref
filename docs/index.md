@@ -105,6 +105,9 @@ as `emit` in a subclass of `logging.Handler`, counts as used: the code of the ba
 base class is read from the source of its module, which is never imported, and found in the directories
 that the project is imported from, and then in the environment that `unref` runs in. A module without a
 Python source, such as a builtin or a compiled module, is not followed.
+A class that a module gives out from its `__getattr__`, such as `concurrent.futures.ThreadPoolExecutor`,
+is followed through the `from module import name` of the same name in the function, whatever the
+condition it is under.
 
 The pre-commit and prek hook runs in its own environment, which has the standard library but not the
 packages of the project. To follow the base classes of these packages, run `unref` in the environment of
