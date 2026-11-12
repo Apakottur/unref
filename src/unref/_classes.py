@@ -200,7 +200,8 @@ class ClassHierarchy:
         module, such as `Outer.Inner` for a nested class.
 
         The longest start of the name that is a module of the project is taken, and otherwise the
-        longest one that is a module outside the project.
+        longest one that is a module outside the project. A module outside the project without a source,
+        such as a compiled module, has no file, and a shorter start is not taken in its place.
         """
         parts = name.split(".")
         starts = [(".".join(parts[:index]), ".".join(parts[index:])) for index in range(len(parts) - 1, 0, -1)]
@@ -208,9 +209,8 @@ class ClassHierarchy:
             if module in self._files_by_name:
                 return [(file, rest) for file in self._files_by_name[module]]
         for module, rest in starts:
-            files = self._read_external(module)
-            if files:
-                return [(file, rest) for file in files]
+            if self._external.exists(module):
+                return [(file, rest) for file in self._read_external(module)]
         return []
 
     def _imported(self, path: Path, binding: Binding) -> str | None:
