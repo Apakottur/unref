@@ -178,11 +178,20 @@ def test_config_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
         (
             '[[overrides]]\nused-names = ["test_*"]',
-            "An override in the configuration file {config} needs the 'paths' or the 'base-classes' option",
+            "An override in the configuration file {config} needs one of the options 'paths', 'base-classes', 'class-decorators'",
         ),
         (
             '[[overrides]]\nbase-classes = "pydantic.BaseModel"',
             "Option 'base-classes' in an override in the configuration file {config} must be a list of strings",
+        ),
+        (
+            '[[overrides]]\nclass-decorators = "dataclasses.dataclass"',
+            "Option 'class-decorators' in an override in the configuration file {config} must be a list of strings",
+        ),
+        (
+            '[[overrides]]\nclass-decorators = ["@dataclasses.dataclass"]',
+            "Option 'class-decorators' in an override in the configuration file {config} must list decorators "
+            "without the '@': '@dataclasses.dataclass'",
         ),
         (
             '[[overrides]]\npaths = "tests"',
