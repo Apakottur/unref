@@ -11,5 +11,5 @@ class TestFromParent(Parent):
 
 
 # A class that is not a test class does not run the tests that it inherits.
-class Other(Base):  # expect: unused class
+class Other(Base):  # expect: 7 [unused-class]
     pass

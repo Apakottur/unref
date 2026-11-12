@@ -110,13 +110,14 @@ class ExternalModules:
         if file is None or file.suffix != ".py":
             return None
         try:
+            source = file.read_bytes()
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                tree = ast.parse(file.read_bytes(), filename=str(file))
+                tree = ast.parse(source, filename=str(file))
         except (OSError, SyntaxError, ValueError):
             return None
 
-        definitions, references = walk_module(file, tree)
+        definitions, references = walk_module(file, tree, source)
         return ExternalModule(
             path=file,
             name=ModuleName(name=name, is_package=is_package),

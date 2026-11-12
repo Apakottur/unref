@@ -1,6 +1,6 @@
 # A name that is declared global is not local.
 counter = 0
-other = 1  # expect: unused variable
+other = 1  # expect: 1 [unused-variable]
 
 
 def function():

@@ -2,14 +2,14 @@
 __all__ = ["CONSTANT", "Exported", "exported"]
 
 CONSTANT = 1
-INTERNAL = 2  # expect: unused variable
+INTERNAL = 2  # expect: 1 [unused-variable]
 
 
 def exported():
     return 3
 
 
-def internal():  # expect: unused function
+def internal():  # expect: 5 [unused-function]
     return 4
 
 
@@ -17,5 +17,5 @@ class Exported:
     pass
 
 
-class Internal:  # expect: unused class
+class Internal:  # expect: 7 [unused-class]
     pass

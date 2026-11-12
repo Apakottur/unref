@@ -15,22 +15,33 @@ class Finding:
     """
     An unused definition, an ignore comment that ignores nothing, or a file that does not parse.
 
+    Each finding has the code of its rule, a kebab-case name as ty gives its rules:
+
+    - `unused-function`, `unused-class`, `unused-method`, `unused-variable` and `unused-attribute`
+      for an unused definition.
+    - `unused-ignore-comment` for an ignore comment that ignores nothing.
+    - `invalid-syntax` for a file that does not parse.
+
     Attributes:
         path: The file that holds the definition.
-        line: The line of the definition in the file, starting at 1. For a file that does not parse,
-            the line of the error, or 1 if it is unknown.
-        kind: What was found, for example "unused function", or "syntax error".
+        line: The line of the name of the definition in the file, starting at 1. For an ignore comment,
+            the line of the comment. For a file that does not parse, the line of the error, or 1 if it
+            is unknown.
+        column: The column of the name of the definition, of the ignore comment, or of the error, in
+            characters, starting at 1, as ruff and ty count them.
+        code: The code of the rule, for example `unused-function`.
         name: The name of the definition, `unref: ignore` for an ignore comment, or the message of the
             error for a file that does not parse.
     """
 
     path: Path
     line: int
-    kind: str
+    column: int
+    code: str
     name: str
 
     def __str__(self) -> str:
-        return f"{self.path}:{self.line}: {self.kind} '{self.name}'"
+        return f"{self.path}:{self.line}:{self.column}: {self.code} '{self.name}'"
 
 
 @dataclass(frozen=True)

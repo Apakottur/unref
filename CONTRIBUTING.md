@@ -34,10 +34,11 @@ uv run pytest -c tests/pytest.ini tests
 The behavior of the check is tested with case projects. Each directory under `tests/cases` is a small
 Python project, and `tests/test_cases.py` runs the check on each of them.
 
-A finding is expected with a comment on the line it is reported on:
+A finding is expected with a comment on the line it is reported on, which gives its column and its code,
+as the assertions of ty's tests do:
 
 ```python
-def unused():  # expect: unused function
+def unused():  # expect: 5 [unused-function]
     return 1
 ```
 

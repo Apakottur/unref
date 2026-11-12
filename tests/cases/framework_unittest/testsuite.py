@@ -11,5 +11,5 @@ def load_tests(loader, tests, pattern):
     return tests
 
 
-def helper():  # expect: unused function
+def helper():  # expect: 5 [unused-function]
     pass

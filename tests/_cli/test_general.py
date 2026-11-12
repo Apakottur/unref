@@ -26,9 +26,9 @@ def test_findings() -> None:
 
     assert result.exit_code == 1
     assert result.stdout == (
-        f"{case}/main.py:1: unused class 'Class'\n"
-        f"{case}/main.py:2: unused method 'method'\n"
-        f"{case}/main.py:5: unused method 'async_method'\n"
+        f"{case}/main.py:1:7: unused-class 'Class'\n"
+        f"{case}/main.py:2:9: unused-method 'method'\n"
+        f"{case}/main.py:5:15: unused-method 'async_method'\n"
     )
 
 
@@ -39,7 +39,7 @@ def test_file_path() -> None:
     result = _runner.invoke(app, [str(case / "module.py")])
 
     assert result.exit_code == 1
-    assert result.stdout == f"{case}/module.py:1: unused function 'function'\n"
+    assert result.stdout == f"{case}/module.py:1:5: unused-function 'function'\n"
 
 
 def test_default_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,7 +49,9 @@ def test_default_path(monkeypatch: pytest.MonkeyPatch) -> None:
     result = _runner.invoke(app, [])
 
     assert result.exit_code == 1
-    assert result.stdout == "pkg/module.py:1: unused function 'function'\npkg/sub/module.py:1: unused class 'Class'\n"
+    assert (
+        result.stdout == "pkg/module.py:1:5: unused-function 'function'\npkg/sub/module.py:1:7: unused-class 'Class'\n"
+    )
 
 
 def test_gitignored_given_directory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,7 +62,9 @@ def test_gitignored_given_directory(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # `used_by_ignored` is used by the ignored file.
     assert result.exit_code == 1
-    assert result.stdout == "main.py:5: unused function 'used_by_kept'\nmain.py:9: unused function 'used_by_nested'\n"
+    assert (
+        result.stdout == "main.py:5:5: unused-function 'used_by_kept'\nmain.py:9:5: unused-function 'used_by_nested'\n"
+    )
 
 
 def test_gitignored_given_directory_parent(tmp_path: Path) -> None:
@@ -72,7 +76,7 @@ def test_gitignored_given_directory_parent(tmp_path: Path) -> None:
     result = _runner.invoke(app, [str(tmp_path / "ignored" / "function")])
 
     assert result.exit_code == 1
-    assert result.stdout == f"{tmp_path}/ignored/function/main.py:1: unused function 'function'\n"
+    assert result.stdout == f"{tmp_path}/ignored/function/main.py:1:5: unused-function 'function'\n"
 
 
 def test_default_excluded_given_directory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,8 +97,8 @@ def test_syntax_error() -> None:
 
     assert result.exit_code == 1
     assert result.stdout == (
-        f"{case}/bad.py:5: syntax error 'Missing parentheses in call to 'print'. Did you mean print(...)?'\n"
-        f"{case}/good.py:1: unused function 'unused'\n"
+        f"{case}/bad.py:5:1: invalid-syntax 'Missing parentheses in call to 'print'. Did you mean print(...)?'\n"
+        f"{case}/good.py:1:5: unused-function 'unused'\n"
     )
 
 
@@ -108,7 +112,7 @@ def test_syntax_warning() -> None:
         result = _runner.invoke(app, [str(case)])
 
     assert result.exit_code == 1
-    assert result.stdout == f"{case}/main.py:1: unused variable 'PATTERN'\n"
+    assert result.stdout == f"{case}/main.py:1:1: unused-variable 'PATTERN'\n"
     assert result.stderr == ""
     assert caught == []
 
@@ -120,7 +124,7 @@ def test_jobs(option: str) -> None:
     result = _runner.invoke(app, [option, "1", str(case)])
 
     assert result.exit_code == 1
-    assert result.stdout == f"{case}/main.py:1: unused function 'function'\n"
+    assert result.stdout == f"{case}/main.py:1:5: unused-function 'function'\n"
 
 
 def test_invalid_jobs() -> None:

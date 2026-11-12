@@ -27,8 +27,8 @@ Check the project in the current directory:
 
 ```shell
 $ unref
-src/project/models.py:12: unused class 'Account'
-src/project/utils.py:40: unused function 'parse_date'
+src/project/models.py:12:7: unused-class 'Account'
+src/project/utils.py:40:5: unused-function 'parse_date'
 ```
 
 Or only some files and directories:
@@ -106,15 +106,18 @@ jobs:
 
 ## What is reported
 
-| Finding            | Definition                                                               |
-| ------------------ | ------------------------------------------------------------------------ |
-| `unused function`  | A function, including a nested one.                                      |
-| `unused class`     | A class.                                                                 |
-| `unused method`    | A function directly in a class.                                          |
-| `unused variable`  | A module-level variable.                                                 |
-| `unused attribute` | A class attribute, or an instance attribute (`self.value = ...`).        |
-| `unused comment`   | An `# unref: ignore` comment that ignores nothing.                       |
-| `syntax error`     | A file that does not parse. It is skipped, the rest is still checked.    |
+| Code                    | Finding                                                               |
+| ----------------------- | --------------------------------------------------------------------- |
+| `unused-function`       | A function, including a nested one.                                   |
+| `unused-class`          | A class.                                                              |
+| `unused-method`         | A function directly in a class.                                       |
+| `unused-variable`       | A module-level variable.                                              |
+| `unused-attribute`      | A class attribute, or an instance attribute (`self.value = ...`).     |
+| `unused-ignore-comment` | An `# unref: ignore` comment that ignores nothing.                    |
+| `invalid-syntax`        | A file that does not parse. It is skipped, the rest is still checked. |
+
+The codes are named as [ty](https://docs.astral.sh/ty/) names its rules. A finding points to the name
+of the definition, to the ignore comment, or to the syntax error, with its line and column.
 
 Local variables and imports are not reported, [Ruff](https://docs.astral.sh/ruff/) covers them.
 
@@ -162,11 +165,12 @@ class Setup:
         self.name = name  # unref: ignore
 ```
 
-The comment goes on the line of the finding, which for a function or class is the line of its `def` or
-`class`. For names that a framework uses, prefer the [configuration](configuration.md).
+The comment goes on the line of the finding, which for a function or class is the line of its name,
+usually that of its `def` or `class`. For names that a framework uses, prefer the
+[configuration](configuration.md).
 
-A comment that ignores nothing is reported as an `unused comment`, for example once the definition is
-referenced, or covered by the configuration.
+A comment that ignores nothing is reported as an `unused-ignore-comment`, for example once the definition
+is referenced, or covered by the configuration.
 
 ## Why
 

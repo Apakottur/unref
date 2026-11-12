@@ -1,1 +1,1 @@
-PATTERN = "\d"  # expect: unused variable
+PATTERN = "\d"  # expect: 1 [unused-variable]

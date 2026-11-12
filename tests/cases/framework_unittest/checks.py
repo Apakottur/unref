@@ -12,7 +12,7 @@ class Direct(unittest.TestCase):
     def testMethod(self):
         pass
 
-    def helper(self):  # expect: unused method
+    def helper(self):  # expect: 9 [unused-method]
         pass
 
     def setUp(self):
@@ -63,6 +63,6 @@ class Async(unittest.IsolatedAsyncioTestCase):
 
 
 # Not a test case.
-class Plain:  # expect: unused class
-    def test_method(self):  # expect: unused method
+class Plain:  # expect: 7 [unused-class]
+    def test_method(self):  # expect: 9 [unused-method]
         pass

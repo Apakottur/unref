@@ -37,24 +37,24 @@ class FromReexport(Base):
 
 # A name that the module does not define, and an import that leads nowhere.
 class FromMissing(Missing):
-    table_name = {}  # expect: unused attribute
+    table_name = {}  # expect: 5 [unused-attribute]
 
 
 class FromUndefined(Undefined):
-    table_name = {}  # expect: unused attribute
+    table_name = {}  # expect: 5 [unused-attribute]
 
 
 class FromCycle(Cycle):
-    table_name = {}  # expect: unused attribute
+    table_name = {}  # expect: 5 [unused-attribute]
 
 
 class FromBeyond(Beyond):
-    table_name = {}  # expect: unused attribute
+    table_name = {}  # expect: 5 [unused-attribute]
 
 
 # `pkg` imports `TooFar` with more dots than there are packages.
 class FromTooFar(TooFar):
-    table_name = {}  # expect: unused attribute
+    table_name = {}  # expect: 5 [unused-attribute]
 
 
 print(FromImport, FromModule, FromNested, FromNestedModule, FromSubmodule, FromReexport, FromMissing, FromUndefined, FromCycle, FromBeyond, FromTooFar)

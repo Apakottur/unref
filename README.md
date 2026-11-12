@@ -18,8 +18,8 @@ Check the project in the current directory, using [`uvx`](https://docs.astral.sh
 
 ```shell
 $ uvx unref
-src/project/models.py:12: unused class 'Account'
-src/project/utils.py:40: unused function 'parse_date'
+src/project/models.py:12:7: unused-class 'Account'
+src/project/utils.py:40:5: unused-function 'parse_date'
 ```
 
 The tests, fixtures and hooks that pytest and unittest find by themselves count as used, without any

@@ -29,30 +29,30 @@ class Holder:
 
     def __init__(self):
         # An attribute of an object is not a dummy variable: `self._kept` can be read elsewhere.
-        self.kept, self._kept = pair()  # expect: unused attribute, unused attribute
+        self.kept, self._kept = pair()  # expect: 14 [unused-attribute], 25 [unused-attribute]
 
 
 print(Holder().left)
 
 
 # Where the binding can be dropped, the name is reported.
-_unused = 12  # expect: unused variable
-_response = pair()  # expect: unused variable
-_annotated: int = 13  # expect: unused variable
-_chained = _chained_too = 14  # expect: unused variable, unused variable
+_unused = 12  # expect: 1 [unused-variable]
+_response = pair()  # expect: 1 [unused-variable]
+_annotated: int = 13  # expect: 1 [unused-variable]
+_chained = _chained_too = 14  # expect: 1 [unused-variable], 12 [unused-variable]
 
 
-class Settings:  # expect: unused class
-    _private = 15  # expect: unused attribute
+class Settings:  # expect: 7 [unused-class]
+    _private = 15  # expect: 5 [unused-attribute]
 
 
 # A name that does not match the pattern is reported in an unpacking.
-used, _trailing_ = pair()  # expect: unused variable
+used, _trailing_ = pair()  # expect: 7 [unused-variable]
 print(used)
 
 
 # In a function, every shape is the same: local variables are not reported.
-async def function(items, stream):  # expect: unused function
+async def function(items, stream):  # expect: 11 [unused-function]
     used, _unused = pair()
     _a, _b = pair()
     for _attempt in range(3):

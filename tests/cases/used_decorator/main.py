@@ -35,39 +35,39 @@ def stacked():
     return 5
 
 
-class Class:  # expect: unused class
+class Class:  # expect: 7 [unused-class]
     @app.command()
     def method(self):
         return 6
 
 
 @other
-def not_listed():  # expect: unused function
+def not_listed():  # expect: 5 [unused-function]
     return 7
 
 
 # The whole dotted name has to match.
 @app.commands()
-def other_name():  # expect: unused function
+def other_name():  # expect: 5 [unused-function]
     return 8
 
 
 @registry.app.command()
-def longer_name():  # expect: unused function
+def longer_name():  # expect: 5 [unused-function]
     return 9
 
 
 @command()
-def shorter_name():  # expect: unused function
+def shorter_name():  # expect: 5 [unused-function]
     return 10
 
 
 # A decorator that is not a dotted name cannot be listed.
 @decorators[0]
-def subscript():  # expect: unused function
+def subscript():  # expect: 5 [unused-function]
     return 11
 
 
 @decorators[0].command
-def attribute_of_subscript():  # expect: unused function
+def attribute_of_subscript():  # expect: 5 [unused-function]
     return 12

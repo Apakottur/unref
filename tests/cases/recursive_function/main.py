@@ -1,15 +1,15 @@
 # A function that only calls itself is unused: its body runs only if something else calls it.
-def countdown(value):  # expect: unused function
+def countdown(value):  # expect: 5 [unused-function]
     if value:
         countdown(value - 1)
 
 
 # The same goes for functions that only call each other.
-def ping(value):  # expect: unused function
+def ping(value):  # expect: 5 [unused-function]
     return pong(value - 1) if value else 0
 
 
-def pong(value):  # expect: unused function
+def pong(value):  # expect: 5 [unused-function]
     return ping(value - 1) if value else 0
 
 

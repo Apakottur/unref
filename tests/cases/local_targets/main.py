@@ -1,11 +1,11 @@
 # Every way of binding a name in a function makes it local.
-index = 1  # expect: unused variable
-handle = 2  # expect: unused variable
-error = 3  # expect: unused variable
-matched = 4  # expect: unused variable
-first = 5  # expect: unused variable
-second = 6  # expect: unused variable
-deleted = 7  # expect: unused variable
+index = 1  # expect: 1 [unused-variable]
+handle = 2  # expect: 1 [unused-variable]
+error = 3  # expect: 1 [unused-variable]
+matched = 4  # expect: 1 [unused-variable]
+first = 5  # expect: 1 [unused-variable]
+second = 6  # expect: 1 [unused-variable]
+deleted = 7  # expect: 1 [unused-variable]
 
 
 def function(items):

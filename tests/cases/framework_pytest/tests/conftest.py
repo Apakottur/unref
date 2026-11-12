@@ -4,7 +4,7 @@ import pytest
 collect_ignore = ["setup.py"]
 collect_ignore_glob = ["*_ignore.py"]
 
-OTHER = 1  # expect: unused variable
+OTHER = 1  # expect: 1 [unused-variable]
 
 
 def pytest_configure(config):
@@ -16,10 +16,10 @@ def database():
     pass
 
 
-def helper():  # expect: unused function
+def helper():  # expect: 5 [unused-function]
     pass
 
 
 # A `conftest.py` holds no tests.
-def test_in_conftest():  # expect: unused function
+def test_in_conftest():  # expect: 5 [unused-function]
     pass

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 class Point:
     x: int
     y: int
-    label: str  # expect: unused attribute
+    label: str  # expect: 5 [unused-attribute]
 
 
 @dataclass

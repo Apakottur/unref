@@ -16,9 +16,9 @@ class LogHandler(logging.Handler):
         super().__init__()
         # An attribute that the base class sets on its instances.
         self.formatter = None
-        self.own_attribute = None  # expect: unused attribute
+        self.own_attribute = None  # expect: 14 [unused-attribute]
 
-    def own_method(self):  # expect: unused method
+    def own_method(self):  # expect: 9 [unused-method]
         return self
 
 
@@ -56,23 +56,23 @@ class Child(LogHandler):
     def emit(self, record):
         return record
 
-    def handle_error(self, record):  # expect: unused method
+    def handle_error(self, record):  # expect: 9 [unused-method]
         return record
 
 
 # A base class that is not found leaves its subclass as it is.
 class FromMissing(not_installed.Handler):
-    def emit(self, record):  # expect: unused method
+    def emit(self, record):  # expect: 9 [unused-method]
         return record
 
 
 # Not a subclass of the base class.
 class Plain:
-    def emit(self, record):  # expect: unused method
+    def emit(self, record):  # expect: 9 [unused-method]
         return record
 
 
-def emit(record):  # expect: unused function
+def emit(record):  # expect: 5 [unused-function]
     return record
 
 
@@ -81,7 +81,7 @@ print(LogHandler, Encoder, Rotating, Renamed, Child, FromMissing, Plain)
 
 # `json.encoder` is a module, not a package, so it has no `JSONEncoder` submodule.
 class FromAttribute(json.encoder.JSONEncoder.Missing):
-    def default(self, o):  # expect: unused method
+    def default(self, o):  # expect: 9 [unused-method]
         return o
 
 

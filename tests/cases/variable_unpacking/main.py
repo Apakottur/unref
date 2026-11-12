@@ -1,5 +1,5 @@
-first, second = 1, 2  # expect: unused variable, unused variable
-[third, fourth] = 3, 4  # expect: unused variable, unused variable
-head, *rest = [5, 6, 7]  # expect: unused variable, unused variable
-(nested, (deep, deeper)) = 8, (9, 10)  # expect: unused variable, unused variable, unused variable
-chained = also_chained = 11  # expect: unused variable, unused variable
+first, second = 1, 2  # expect: 1 [unused-variable], 8 [unused-variable]
+[third, fourth] = 3, 4  # expect: 2 [unused-variable], 9 [unused-variable]
+head, *rest = [5, 6, 7]  # expect: 1 [unused-variable], 8 [unused-variable]
+(nested, (deep, deeper)) = 8, (9, 10)  # expect: 2 [unused-variable], 11 [unused-variable], 17 [unused-variable]
+chained = also_chained = 11  # expect: 1 [unused-variable], 11 [unused-variable]

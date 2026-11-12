@@ -1,5 +1,5 @@
-class Class:  # expect: unused class
-    plain = 1  # expect: unused attribute
-    annotated: int = 2  # expect: unused attribute
-    declared: int  # expect: unused attribute
-    first, second = 3, 4  # expect: unused attribute, unused attribute
+class Class:  # expect: 7 [unused-class]
+    plain = 1  # expect: 5 [unused-attribute]
+    annotated: int = 2  # expect: 5 [unused-attribute]
+    declared: int  # expect: 5 [unused-attribute]
+    first, second = 3, 4  # expect: 5 [unused-attribute], 12 [unused-attribute]

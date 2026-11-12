@@ -1,9 +1,9 @@
 # A read of a local variable is not a reference to something of the same name.
-def helper():  # expect: unused function
+def helper():  # expect: 5 [unused-function]
     return 1
 
 
-total: int = 2  # expect: unused variable
+total: int = 2  # expect: 1 [unused-variable]
 
 
 def function():

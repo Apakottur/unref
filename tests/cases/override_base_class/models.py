@@ -10,7 +10,7 @@ from pydantic import BaseModel as Renamed
 
 class Direct(BaseModel):
     table_name = {}
-    field: int  # expect: unused attribute
+    field: int  # expect: 5 [unused-attribute]
 
 
 class ThroughModule(pydantic.BaseModel):
@@ -69,27 +69,27 @@ class Table(collections.abc.Mapping):
 
 # Not a base class of the override.
 class Plain:
-    table_name = {}  # expect: unused attribute
+    table_name = {}  # expect: 5 [unused-attribute]
 
 
 class OtherBase(Exception):
-    table_name = {}  # expect: unused attribute
-    first: int  # expect: unused attribute
+    table_name = {}  # expect: 5 [unused-attribute]
+    first: int  # expect: 5 [unused-attribute]
 
     @register
-    def decorated(self):  # expect: unused method
+    def decorated(self):  # expect: 9 [unused-method]
         return self
 
 
 # A base class that is not a dotted name is not resolved.
 class Computed(typing.cast("type", BaseModel)):
-    table_name = {}  # expect: unused attribute
+    table_name = {}  # expect: 5 [unused-attribute]
 
 
 
 
 # The override does not apply outside the class.
-table_name = {}  # expect: unused variable
+table_name = {}  # expect: 1 [unused-variable]
 
 print(
     Direct,

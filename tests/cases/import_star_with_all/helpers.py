@@ -6,5 +6,5 @@ def listed():
     return 1
 
 
-def unlisted():  # expect: unused function
+def unlisted():  # expect: 5 [unused-function]
     return 2

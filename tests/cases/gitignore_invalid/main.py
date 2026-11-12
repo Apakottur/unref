@@ -1,4 +1,4 @@
-def used_by_ignored():  # expect: unused function
+def used_by_ignored():  # expect: 5 [unused-function]
     return 1
 
 

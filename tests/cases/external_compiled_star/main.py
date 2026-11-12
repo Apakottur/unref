@@ -7,13 +7,13 @@ class Handler(Base):
     def emit(self, record):
         return record
 
-    def own_method(self):  # expect: unused method
+    def own_method(self):  # expect: 9 [unused-method]
         return self
 
 
 # A base class from the compiled module is not followed.
 class FromCompiled(Compiled):
-    def emit(self, record):  # expect: unused method
+    def emit(self, record):  # expect: 9 [unused-method]
         return record
 
 

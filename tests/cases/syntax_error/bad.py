@@ -2,4 +2,4 @@ def function():  # unref: ignore
     pass
 
 
-print "Python 2"  # expect: syntax error
+print "Python 2"  # expect: 1 [invalid-syntax]

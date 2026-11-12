@@ -13,13 +13,13 @@ _CASE = Path(__file__).parent.parent / "cases" / "external_environment"
 
 # The findings with the environment of the case, and without it, which is when the check only looks in
 # its own environment.
-_WITH_ENVIRONMENT = f"{_CASE}/main.py:15: unused method 'own_method'\n{_CASE}/main.py:28: unused method 'command'\n"
+_WITH_ENVIRONMENT = f"{_CASE}/main.py:15:9: unused-method 'own_method'\n{_CASE}/main.py:28:9: unused-method 'command'\n"
 _WITHOUT_ENVIRONMENT = (
-    f"{_CASE}/main.py:9: unused attribute 'impl'\n"
-    f"{_CASE}/main.py:10: unused attribute 'cache_ok'\n"
-    f"{_CASE}/main.py:12: unused method 'process_bind_param'\n"
-    f"{_CASE}/main.py:15: unused method 'own_method'\n"
-    f"{_CASE}/main.py:21: unused method 'hook'\n"
+    f"{_CASE}/main.py:9:5: unused-attribute 'impl'\n"
+    f"{_CASE}/main.py:10:5: unused-attribute 'cache_ok'\n"
+    f"{_CASE}/main.py:12:9: unused-method 'process_bind_param'\n"
+    f"{_CASE}/main.py:15:9: unused-method 'own_method'\n"
+    f"{_CASE}/main.py:21:9: unused-method 'hook'\n"
 )
 
 
@@ -58,9 +58,9 @@ def test_option_windows_system_python(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     # The `.pth` file of the copy lists a directory that is not next to it.
     assert result.stdout == (
-        f"{_CASE}/main.py:15: unused method 'own_method'\n"
-        f"{_CASE}/main.py:21: unused method 'hook'\n"
-        f"{_CASE}/main.py:28: unused method 'command'\n"
+        f"{_CASE}/main.py:15:9: unused-method 'own_method'\n"
+        f"{_CASE}/main.py:21:9: unused-method 'hook'\n"
+        f"{_CASE}/main.py:28:9: unused-method 'command'\n"
     )
 
 

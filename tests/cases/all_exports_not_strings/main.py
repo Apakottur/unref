@@ -5,5 +5,5 @@ __all__ = [os.name, 1, *os.sys.path]
 __all__ = os.listdir()
 
 
-def function():  # expect: unused function
+def function():  # expect: 5 [unused-function]
     return 1

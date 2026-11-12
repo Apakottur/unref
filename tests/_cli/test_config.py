@@ -19,13 +19,13 @@ def test_config_in_current_directory(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 1
     assert result.stdout == (
-        "main.py:38: unused class 'Class'\n"
-        "main.py:45: unused function 'not_listed'\n"
-        "main.py:51: unused function 'other_name'\n"
-        "main.py:56: unused function 'longer_name'\n"
-        "main.py:61: unused function 'shorter_name'\n"
-        "main.py:67: unused function 'subscript'\n"
-        "main.py:72: unused function 'attribute_of_subscript'\n"
+        "main.py:38:7: unused-class 'Class'\n"
+        "main.py:45:5: unused-function 'not_listed'\n"
+        "main.py:51:5: unused-function 'other_name'\n"
+        "main.py:56:5: unused-function 'longer_name'\n"
+        "main.py:61:5: unused-function 'shorter_name'\n"
+        "main.py:67:5: unused-function 'subscript'\n"
+        "main.py:72:5: unused-function 'attribute_of_subscript'\n"
     )
 
 
@@ -58,7 +58,7 @@ def test_config_file_pyproject_without_table(tmp_path: Path) -> None:
     result = _runner.invoke(app, ["--config", str(config), str(case)])
 
     assert result.exit_code == 1
-    assert result.stdout == f"{case}/main.py:5: unused function 'function'\n"
+    assert result.stdout == f"{case}/main.py:5:5: unused-function 'function'\n"
 
 
 def test_config_file_missing(tmp_path: Path) -> None:
@@ -126,10 +126,10 @@ def test_config_exclude_is_relative_to_current_directory(monkeypatch: pytest.Mon
 
     assert result.exit_code == 1
     assert result.stdout == (
-        f"{case}/generated/deep/module.py:1: unused function 'function'\n"
-        f"{case}/generated/module.py:4: unused function 'function'\n"
-        f"{case}/main.py:1: unused function 'function'\n"
-        f"{case}/single.py:1: unused function 'function'\n"
+        f"{case}/generated/deep/module.py:1:5: unused-function 'function'\n"
+        f"{case}/generated/module.py:4:5: unused-function 'function'\n"
+        f"{case}/main.py:1:5: unused-function 'function'\n"
+        f"{case}/single.py:1:5: unused-function 'function'\n"
     )
 
 
@@ -140,7 +140,7 @@ def test_config_exclude_given_file() -> None:
     result = _runner.invoke(app, ["--config", str(case / "pyproject.toml"), str(case / "single.py")])
 
     assert result.exit_code == 1
-    assert result.stdout == f"{case}/single.py:1: unused function 'function'\n"
+    assert result.stdout == f"{case}/single.py:1:5: unused-function 'function'\n"
 
 
 def test_config_exclude_given_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -154,7 +154,7 @@ def test_config_exclude_given_directory(monkeypatch: pytest.MonkeyPatch, tmp_pat
     result = _runner.invoke(app, ["--config", str(config), "generated"])
 
     assert result.exit_code == 1
-    assert result.stdout == "generated/module.py:4: unused function 'function'\n"
+    assert result.stdout == "generated/module.py:4:5: unused-function 'function'\n"
 
 
 def test_config_exclude_under_given_directory_parent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -164,7 +164,7 @@ def test_config_exclude_under_given_directory_parent(monkeypatch: pytest.MonkeyP
     result = _runner.invoke(app, ["--config", "linters/unref.toml", "tests/cases/function"])
 
     assert result.exit_code == 1
-    assert result.stdout == "tests/cases/function/main.py:1: unused function 'function'\n"
+    assert result.stdout == "tests/cases/function/main.py:1:5: unused-function 'function'\n"
 
 
 def test_config_used_names(tmp_path: Path) -> None:
@@ -189,9 +189,9 @@ def test_config_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
     assert result.exit_code == 1
     assert result.stdout == (
-        f"{case}/tests/test_module.py:13: unused function 'helper_in_tests'\n"
-        f"{case}/tests/test_module.py:23: unused class 'TestInTests'\n"
-        f"{case}/tests/unit/test_unit.py:6: unused method 'helper'\n"
+        f"{case}/tests/test_module.py:13:5: unused-function 'helper_in_tests'\n"
+        f"{case}/tests/test_module.py:23:7: unused-class 'TestInTests'\n"
+        f"{case}/tests/unit/test_unit.py:6:9: unused-method 'helper'\n"
     )
 
 
@@ -294,7 +294,7 @@ def test_entry_points_from_config_file(tmp_path: Path) -> None:
     result = _runner.invoke(app, ["--config", str(config), str(_CASES_DIR / "entry_points" / "pkg" / "gui.py")])
 
     assert result.exit_code == 1
-    assert result.stdout.endswith("gui.py:2: unused function 'start'\n")
+    assert result.stdout.endswith("gui.py:2:5: unused-function 'start'\n")
 
 
 def test_entry_points_not_from_other_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -307,7 +307,7 @@ def test_entry_points_not_from_other_file(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     assert result.exit_code == 1
     assert result.stdout == (
-        "main.py:2: unused function 'run'\nmain.py:6: unused function 'helper'\nmain.py:10: unused function 'unused'\n"
+        "main.py:2:5: unused-function 'run'\nmain.py:6:5: unused-function 'helper'\nmain.py:10:5: unused-function 'unused'\n"
     )
 
 

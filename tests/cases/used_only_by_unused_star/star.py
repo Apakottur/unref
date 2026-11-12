@@ -1,2 +1,2 @@
-def public():  # expect: unused function
+def public():  # expect: 5 [unused-function]
     return 1

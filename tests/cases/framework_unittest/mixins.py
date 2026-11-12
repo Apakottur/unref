@@ -9,7 +9,7 @@ class Mixin:
     def setUp(self):
         pass
 
-    def helper(self):  # expect: unused method
+    def helper(self):  # expect: 9 [unused-method]
         pass
 
 
@@ -18,6 +18,6 @@ class WithMixin(Mixin, unittest.TestCase):
 
 
 # Not a base class of a test case.
-class Unrelated:  # expect: unused class
-    def test_method(self):  # expect: unused method
+class Unrelated:  # expect: 7 [unused-class]
+    def test_method(self):  # expect: 9 [unused-method]
         pass

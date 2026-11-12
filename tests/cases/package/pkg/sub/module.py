@@ -1,2 +1,2 @@
-class Class:  # expect: unused class
+class Class:  # expect: 7 [unused-class]
     pass

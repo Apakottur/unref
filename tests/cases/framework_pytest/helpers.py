@@ -2,16 +2,16 @@ import pytest
 
 
 # A file that is not a test file holds no tests.
-def test_function():  # expect: unused function
+def test_function():  # expect: 5 [unused-function]
     pass
 
 
-class TestClass:  # expect: unused class
-    def test_method(self):  # expect: unused method
+class TestClass:  # expect: 7 [unused-class]
+    def test_method(self):  # expect: 9 [unused-method]
         pass
 
 
-def setup_module():  # expect: unused function
+def setup_module():  # expect: 5 [unused-function]
     pass
 
 
@@ -25,7 +25,7 @@ def pytest_addoption(parser):
     pass
 
 
-class Plugin:  # expect: unused class
+class Plugin:  # expect: 7 [unused-class]
     def pytest_collection_modifyitems(self, items):
         pass
 
@@ -36,5 +36,5 @@ def fixture(function):
 
 
 @fixture
-def not_a_fixture():  # expect: unused function
+def not_a_fixture():  # expect: 5 [unused-function]
     pass

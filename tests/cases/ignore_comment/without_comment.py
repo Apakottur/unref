@@ -1,1 +1,1 @@
-variable = 1  # expect: unused variable
+variable = 1  # expect: 1 [unused-variable]
