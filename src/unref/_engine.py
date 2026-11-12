@@ -1,8 +1,10 @@
 import ast
+import gc
 import os
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Generator, Iterable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -38,6 +40,27 @@ def find_unused(
         A finding for each unused definition, and for each file that does not parse, sorted by file and
         line.
     """
+    # Parsing creates millions of objects, and the cyclic garbage collector would keep scanning them
+    # although none of them is freed before the check ends. Turning it off almost halves the time it
+    # takes to parse a large project.
+    with _gc_disabled():
+        return _find_unused(
+            paths,
+            used_names=used_names,
+            used_decorators=used_decorators,
+            exclude=exclude,
+            overrides=overrides,
+        )
+
+
+def _find_unused(
+    paths: Iterable[str | os.PathLike[str]],
+    *,
+    used_names: Iterable[str],
+    used_decorators: Iterable[str],
+    exclude: Iterable[str | os.PathLike[str]],
+    overrides: Iterable[Override],
+) -> list[Finding]:
     discovered = discover(paths, exclude=exclude)
     sources = {path: path.read_bytes() for path in discovered}
 
@@ -328,3 +351,20 @@ def _is_dunder(name: str) -> bool:
     Python and tools refer to dunders implicitly, so they always count as used.
     """
     return len(name) > 4 and name.startswith("__") and name.endswith("__")
+
+
+@contextmanager
+def _gc_disabled() -> Generator[None]:
+    """
+    Turn off the cyclic garbage collector, and turn it back on afterwards if it was on before.
+
+    Returns:
+        A context manager that the collector is off inside of.
+    """
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if enabled:
+            gc.enable()
