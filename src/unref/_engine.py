@@ -1,5 +1,6 @@
 import ast
 import os
+import warnings
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -34,11 +35,22 @@ def find_unused(
         overrides: The options that apply only to some of the files of the project.
 
     Returns:
-        A finding for each unused definition, sorted by file and line.
+        A finding for each unused definition, and for each file that does not parse, sorted by file and
+        line.
     """
-    files = discover(paths, exclude=exclude)
-    sources = {path: path.read_bytes() for path in files}
-    trees = {path: ast.parse(source, filename=str(path)) for path, source in sources.items()}
+    discovered = discover(paths, exclude=exclude)
+    sources = {path: path.read_bytes() for path in discovered}
+
+    # A file that does not parse is a finding itself, and is left out of the project.
+    trees: dict[Path, ast.Module] = {}
+    syntax_errors: dict[Path, Finding] = {}
+    for path, source in sources.items():
+        try:
+            trees[path] = _parse(source, path)
+        except SyntaxError as error:
+            syntax_errors[path] = Finding(path=path, line=error.lineno or 1, kind="syntax error", name=error.msg)
+    files = [path for path in discovered if path in trees]
+
     references = {path: find_references(tree) for path, tree in trees.items()}
     names = {path: module_name(path) for path in files}
 
@@ -162,7 +174,11 @@ def find_unused(
     used = graph.used(kept | needed)
 
     findings: list[Finding] = []
-    for path in files:
+    for path in discovered:
+        if path in syntax_errors:
+            findings.append(syntax_errors[path])
+            continue
+
         file_findings = [
             Finding(
                 path=definition.path,
@@ -281,6 +297,28 @@ class _Graph:
                 seen_stars.add(star)
                 use(self._public.get(star, []))
         return used
+
+
+def _parse(source: bytes, path: Path) -> ast.Module:
+    """
+    Parse a Python module.
+
+    The warnings that parsing emits, such as `SyntaxWarning` for an invalid escape sequence, are about
+    the code of the project, not about the check, so they are not shown.
+
+    Args:
+        source: The content of the module.
+        path: The file of the module.
+
+    Returns:
+        The syntax tree of the module.
+
+    Raises:
+        SyntaxError: The module does not parse.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return ast.parse(source, filename=str(path))
 
 
 def _is_dunder(name: str) -> bool:
