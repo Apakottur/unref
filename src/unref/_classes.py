@@ -98,10 +98,9 @@ class ClassHierarchy:
         if key not in self._inherited:
             found: set[str] = set()
             for ancestor in self.ancestors(path, name):
-                module, _, symbol = ancestor.rpartition(".")
-                if module not in self._files_by_name:
-                    for file in self._read_external(module):
-                        found |= self._external_members.get(file, {}).get(symbol, set())
+                for file, symbol in self._locate(ancestor):
+                    # The members of the modules of the project are not collected.
+                    found |= self._external_members.get(file, {}).get(symbol, set())
             self._inherited[key] = frozenset(found)
         return self._inherited[key]
 
@@ -156,27 +155,43 @@ class ClassHierarchy:
         seen.add(name)
 
         found = {name}
-        module, _, symbol = name.rpartition(".")
-        for path in self._files_by_name.get(module) or self._read_external(module):
+        for path, symbol in self._locate(name):
+            first, _, rest = symbol.partition(".")
             if symbol in self._classes[path]:
                 for base in self._classes[path][symbol]:
                     found |= self._resolve(path, base, seen)
-            elif symbol in self._bindings[path]:
-                imported = self._imported(path, self._bindings[path][symbol])
+            elif first in self._bindings[path]:
+                imported = self._imported(path, self._bindings[path][first])
                 if imported is not None:
-                    found |= self._follow(imported, seen)
-            else:
+                    found |= self._follow(".".join(filter(None, [imported, rest])), seen)
+            elif first not in self._classes[path]:
                 # A name that the module may star import.
                 for source, level in self._stars[path]:
                     star_module = self._names[path].resolve(source, level)
                     if star_module is not None:
                         found |= self._follow(f"{star_module}.{symbol}", seen)
                 # A name that the `__getattr__` of the module imports, which it gives out.
-                for binding in self._lazy[path].get(symbol, []):
+                for binding in self._lazy[path].get(first, []):
                     imported = self._imported(path, binding)
                     if imported is not None:
-                        found |= self._follow(imported, seen)
+                        found |= self._follow(".".join(filter(None, [imported, rest])), seen)
         return found
+
+    def _locate(self, name: str) -> list[tuple[Path, str]]:
+        """
+        Get the files of the module that a dotted name is in, each with the rest of the name in the
+        module, such as `Outer.Inner` for a nested class.
+
+        The longest start of the name that is a module of the project is taken, and otherwise the
+        longest one that is a module outside the project.
+        """
+        parts = name.split(".")
+        for find in (self._files_by_name.get, self._read_external):
+            for index in range(len(parts) - 1, 0, -1):
+                files = find(".".join(parts[:index]))
+                if files:
+                    return [(file, ".".join(parts[index:])) for file in files]
+        return []
 
     def _imported(self, path: Path, binding: Binding) -> str | None:
         """

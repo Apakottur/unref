@@ -45,6 +45,10 @@ class Outer:
         table_name = {}
 
 
+class ThroughNested(Outer.Inner):
+    table_name = {}
+
+
 # The override applies to everything in the class: attributes, methods and decorated methods.
 class Row(NamedTuple):
     first: int
@@ -82,8 +86,6 @@ class Computed(typing.cast("type", BaseModel)):
     table_name = {}  # expect: unused attribute
 
 
-class ThroughNested(Outer.Inner):
-    table_name = {}  # expect: unused attribute
 
 
 # The override does not apply outside the class.

@@ -71,9 +71,6 @@ class ExternalModules:
         """
         Find a module and read its source.
         """
-        if not name:
-            return None
-
         # Each package of the name is looked for in turn, in the directories of the package above it.
         locations: list[Path] | None = self._search_path
         file: Path | None = None
