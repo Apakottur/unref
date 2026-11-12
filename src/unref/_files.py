@@ -8,9 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from unref._definitions import Definition, find_definitions
+from unref._external import lazy_imports
 from unref._ignores import find_ignored_lines
 from unref._models import Finding
-from unref._references import References, find_references
+from unref._references import Binding, References, find_references
 
 # Below this much source code, the work of a check is shorter than starting the processes.
 MIN_PARALLEL_BYTES = 1_000_000
@@ -28,11 +29,13 @@ class FileFacts:
         definitions: The definitions of the file.
         references: What the file refers to.
         ignored_lines: The lines that have an ignore comment.
+        lazy: The names that the file gives out from its `__getattr__`, each with the imports of it.
     """
 
     definitions: list[Definition]
     references: References
     ignored_lines: set[int]
+    lazy: dict[str, list[Binding]]
 
 
 def analyze_files(paths: Sequence[Path], *, jobs: int | None) -> dict[Path, FileFacts | Finding]:
@@ -81,10 +84,12 @@ def analyze_file(path: Path) -> FileFacts | Finding:
     except SyntaxError as error:
         return Finding(path=path, line=error.lineno or 1, kind="syntax error", name=error.msg)
 
+    references = find_references(tree)
     return FileFacts(
         definitions=find_definitions(path, tree),
-        references=find_references(tree),
+        references=references,
         ignored_lines=find_ignored_lines(source),
+        lazy=lazy_imports(tree, references),
     )
 
 

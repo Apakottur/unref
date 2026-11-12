@@ -25,6 +25,7 @@ class ExternalModule:
         bindings: The names that the module imports at its top level.
         stars: The modules that the module star imports at its top level, each as it is written and
             with its number of leading dots.
+        lazy: The names that the module gives out from its `__getattr__`, each with the imports of it.
     """
 
     path: Path
@@ -32,6 +33,7 @@ class ExternalModule:
     definitions: list[Definition]
     bindings: dict[str, Binding]
     stars: list[tuple[str | None, int]]
+    lazy: dict[str, list[Binding]]
 
 
 class ExternalModules:
@@ -100,6 +102,7 @@ class ExternalModules:
             definitions=find_definitions(file, tree),
             bindings=references.bindings,
             stars=star_imports(references),
+            lazy=lazy_imports(tree, references),
         )
 
 
@@ -117,6 +120,36 @@ def star_imports(references: References) -> list[tuple[str | None, int]]:
         ((source, level) for owner, source, level, name in references.imports if owner is None and name == "*"),
         key=str,
     )
+
+
+def lazy_imports(tree: ast.Module, references: References) -> dict[str, list[Binding]]:
+    """
+    Get the names that a module gives out from its `__getattr__` (PEP 562), which imports them when they
+    are first read, such as `ThreadPoolExecutor` in `concurrent.futures`.
+
+    A name is given out when the `__getattr__` of the module imports it with `from module import name`.
+    The code of the function is not run, so the condition that the import is under is not checked.
+
+    Args:
+        tree: The parsed module.
+        references: What the module refers to.
+
+    Returns:
+        The names, each with the imports of it in `__getattr__`, as the module imports them.
+    """
+    # The last definition of `__getattr__` at the top level of the module is the one that counts.
+    lines = [
+        node.lineno
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "__getattr__"
+    ]
+    if not lines:
+        return {}
+    lazy: dict[str, list[Binding]] = {}
+    for owner, source, level, name in sorted(references.imports, key=str):
+        if owner == lines[-1] and name != "*":
+            lazy.setdefault(name, []).append((source, level, name))
+    return lazy
 
 
 def _find(name: str, locations: list[Path]) -> tuple[Path | None, list[Path] | None] | None:

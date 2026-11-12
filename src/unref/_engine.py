@@ -103,6 +103,7 @@ def find_unused(
         files_by_name=files_by_name,
         bindings={path: references[path].bindings for path in files},
         stars={path: star_imports(references[path]) for path in files},
+        lazy={path: facts[path].lazy for path in files},
         classes={
             path: {
                 definition.qualified_name: definition.bases

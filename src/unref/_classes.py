@@ -22,6 +22,7 @@ class ClassHierarchy:
         files_by_name: dict[str, list[Path]],
         bindings: dict[Path, dict[str, Binding]],
         stars: dict[Path, list[tuple[str | None, int]]],
+        lazy: dict[Path, dict[str, list[Binding]]],
         classes: dict[Path, dict[str, tuple[str, ...]]],
         decorators: dict[Path, dict[str, tuple[str, ...]]],
         external: ExternalModules,
@@ -33,6 +34,8 @@ class ClassHierarchy:
             bindings: The names that each module imports at its top level.
             stars: The modules that each module star imports at its top level, each as it is written
                 and with its number of leading dots.
+            lazy: The names that each module gives out from its `__getattr__`, each with the imports of
+                it in the function.
             classes: The classes and functions of each module, by their name in the module
                 (`Outer.Inner` for a nested class), with their base classes as they are written. A
                 function has none.
@@ -47,6 +50,7 @@ class ClassHierarchy:
         self._files_by_name = files_by_name
         self._bindings = dict(bindings)
         self._stars = dict(stars)
+        self._lazy = dict(lazy)
         self._classes = dict(classes)
         self._ancestors: dict[tuple[Path, str], frozenset[str]] = {}
         self._external = external
@@ -167,6 +171,11 @@ class ClassHierarchy:
                     star_module = self._names[path].resolve(source, level)
                     if star_module is not None:
                         found |= self._follow(f"{star_module}.{symbol}", seen)
+                # A name that the `__getattr__` of the module imports, which it gives out.
+                for binding in self._lazy[path].get(symbol, []):
+                    imported = self._imported(path, binding)
+                    if imported is not None:
+                        found |= self._follow(imported, seen)
         return found
 
     def _imported(self, path: Path, binding: Binding) -> str | None:
@@ -192,6 +201,7 @@ class ClassHierarchy:
             self._names[path] = external.name
             self._bindings[path] = external.bindings
             self._stars[path] = external.stars
+            self._lazy[path] = external.lazy
             self._classes[path] = {
                 definition.qualified_name: definition.bases
                 for definition in external.definitions
