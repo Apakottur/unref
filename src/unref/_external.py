@@ -105,10 +105,8 @@ class ExternalModules:
         """
         Find a module and read its source.
         """
-        located = self._locate(name)
-        if located is None:
-            return None
-        file, is_package = located
+        # A module that is not found has no file, as a namespace package.
+        file, is_package = self._locate(name) or (None, False)
         if file is None or file.suffix != ".py":
             return None
         try:
