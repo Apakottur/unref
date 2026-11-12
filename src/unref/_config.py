@@ -1,6 +1,7 @@
 import re
 import tomllib
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,18 @@ _PYPROJECT = "pyproject.toml"
 
 # The options of an override that select what it applies to.
 _SELECTORS = ("paths", "base-classes", "class-decorators")
+
+
+class OutputFormat(StrEnum):
+    """
+    How the findings are printed, named as ruff's `output-format` option names them.
+    """
+
+    CONCISE = "concise"
+    """One line for each finding: `path:line: kind 'name'`."""
+
+    GITHUB = "github"
+    """A GitHub Actions workflow command for each finding, which shows it as an annotation."""
 
 
 class UnrefConfigError(Exception):
@@ -33,6 +46,7 @@ class Config:
         entry_points: The object references of the entry points of the project, such as
             `package.module:function`.
         frameworks: The test frameworks whose tests, fixtures and hooks count as used.
+        output_format: How the findings are printed.
     """
 
     used_names: tuple[str, ...] = ()
@@ -43,6 +57,7 @@ class Config:
     dummy_variable_rgx: str = DEFAULT_DUMMY_VARIABLE_RGX
     entry_points: tuple[str, ...] = ()
     frameworks: tuple[str, ...] = FRAMEWORKS
+    output_format: OutputFormat = OutputFormat.CONCISE
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -112,7 +127,16 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
     where = f"the configuration file {path}"
     _check_names(
         options,
-        {"used-names", "used-decorators", "exclude", "overrides", "python", "dummy-variable-rgx", "frameworks"},
+        {
+            "used-names",
+            "used-decorators",
+            "exclude",
+            "overrides",
+            "python",
+            "dummy-variable-rgx",
+            "frameworks",
+            "output-format",
+        },
         where,
     )
 
@@ -142,6 +166,12 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
                 f"expected one of {', '.join(map(repr, FRAMEWORKS))}"
             )
 
+    output_format = options.get("output-format", OutputFormat.CONCISE)
+    if output_format not in list(OutputFormat):
+        raise UnrefConfigError(
+            f"Option 'output-format' in {where} must be one of {', '.join(repr(str(item)) for item in OutputFormat)}"
+        )
+
     return Config(
         used_names=tuple(_string_list(options, "used-names", where)),
         used_decorators=tuple(_decorators(options, "used-decorators", where)),
@@ -151,6 +181,7 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
         python=None if python is None else Path(python),
         dummy_variable_rgx=dummy_variable_rgx,
         frameworks=tuple(frameworks),
+        output_format=OutputFormat(output_format),
     )
 
 

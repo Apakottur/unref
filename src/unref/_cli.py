@@ -1,4 +1,5 @@
 import gc
+import importlib.metadata
 import os
 import sys
 from collections.abc import Generator
@@ -9,12 +10,22 @@ from typing import Annotated
 import typer
 
 from unref._api import check
-from unref._config import UnrefConfigError, load_config
+from unref._config import OutputFormat, UnrefConfigError, load_config
+from unref._models import Finding
 
 app = typer.Typer(
     add_completion=False,
     pretty_exceptions_enable=False,
 )
+
+
+def _show_version(value: bool) -> None:  # noqa: FBT001
+    """
+    Print the version and exit, if `--version` is given.
+    """
+    if value:
+        typer.echo(f"unref {importlib.metadata.version('unref')}")
+        raise typer.Exit
 
 
 @app.command()
@@ -52,6 +63,23 @@ def main(
             show_default=False,
         ),
     ] = None,
+    output_format: Annotated[
+        OutputFormat | None,
+        typer.Option(
+            "--output-format",
+            help="Output format of the findings. Defaults to concise.",
+            show_default=False,
+        ),
+    ] = None,
+    version: Annotated[  # noqa: ARG001, FBT002
+        bool,
+        typer.Option(
+            "--version",
+            help="Print the version and exit.",
+            callback=_show_version,
+            is_eager=True,
+        ),
+    ] = False,
 ) -> None:
     """
     Find unreferenced Python code.
@@ -89,11 +117,46 @@ def main(
             frameworks=options.frameworks,
         )
 
+    output_format = output_format or options.output_format
     for finding in findings:
-        typer.echo(finding)
+        typer.echo(_github(finding) if output_format == OutputFormat.GITHUB else finding)
 
     if findings:
         raise typer.Exit(code=1)
+
+
+def _github(finding: Finding) -> str:
+    """
+    Format a finding as a GitHub Actions workflow command, which shows it as an annotation, laid out as
+    ruff's `github` output format lays out its diagnostics. A finding has no column, so the command has
+    none.
+
+    Returns:
+        The workflow command.
+    """
+    title = _escape_property(f"unref ({finding.kind})")
+    file = _escape_property(str(finding.path))
+    return f"::error title={title},file={file},line={finding.line}::{_escape_data(str(finding))}"
+
+
+def _escape_data(text: str) -> str:
+    """
+    Escape the message of a workflow command, as the `@actions/core` toolkit of GitHub does.
+
+    Returns:
+        The escaped message.
+    """
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_property(text: str) -> str:
+    """
+    Escape a property of a workflow command, as the `@actions/core` toolkit of GitHub does.
+
+    Returns:
+        The escaped property.
+    """
+    return _escape_data(text).replace(":", "%3A").replace(",", "%2C")
 
 
 def _find_environment() -> Path | None:
