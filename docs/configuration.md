@@ -33,6 +33,7 @@ does not read a configuration file.
 | `python`             | `python`             | Virtual environment that the project runs in.                       |
 | `dummy-variable-rgx` | `dummy_variable_rgx` | Names of the variables that are unused on purpose, in an unpacking. |
 | `frameworks`         | `frameworks`         | Test frameworks whose tests, fixtures and hooks count as used.      |
+| `output-format`      | -                    | How the findings are printed.                                       |
 
 ### `used-names`
 
@@ -226,6 +227,23 @@ used-names = ["test*", "Test*"]
 
 The library takes the option as the `frameworks` argument of [`unref.check`](reference/api.md#unref.check),
 with the same default.
+
+### `output-format`
+
+How the command prints the findings, as [Ruff's option](https://docs.astral.sh/ruff/settings/#output-format)
+of the same name:
+
+- `concise` (the default): one line for each finding, `path:line: kind 'name'`.
+- `github`: a [GitHub Actions workflow command](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands)
+  for each finding, which shows it as an annotation on the file and line, for example on a pull request.
+
+```toml
+[tool.unref]
+output-format = "github"
+```
+
+The `--output-format` option of the command takes precedence over it. The library returns the findings
+and prints nothing, so it does not take the option.
 
 ## Entry points
 

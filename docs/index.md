@@ -41,6 +41,9 @@ unref src scripts
 
 A large project is analyzed with a process for each CPU, or as many as `--jobs` (`-j`) gives.
 
+`--output-format` sets how the findings are printed: `concise`, the default, or `github`, see
+[`output-format`](configuration.md#output-format). `--version` prints the version of `unref`.
+
 ### Python
 
 ```python
@@ -70,6 +73,21 @@ or `prek autoupdate` fill it in.
 
 The hook checks the whole project, not only the changed files: a definition is unused only if no file
 references it.
+
+### GitHub Actions
+
+With `--output-format github`, the findings show as annotations on the files of a pull request:
+
+```yaml
+jobs:
+  unref:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - run: uv sync # Optional: lets unref follow base classes from the dependencies, see `python`.
+      - run: uvx unref --output-format github
+```
 
 ## What is reported
 
