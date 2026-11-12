@@ -80,8 +80,14 @@ references it.
 
 Local variables and imports are not reported, [Ruff](https://docs.astral.sh/ruff/) covers them.
 
-A definition counts as referenced when its name is read or imported anywhere in the project, or listed in
-`__all__`. Dunders, such as `__init__` and `__all__`, are never reported.
+A definition counts as referenced when:
+
+- A function, class or variable is read in its own module, imported from it (`from module import name`),
+  read through it (`module.name`), or listed in its `__all__`.
+- A method or attribute is read as an attribute (`value.name`) anywhere in the project. It is matched by
+  name, whatever the object is.
+
+Dunders, such as `__init__` and `__all__`, are never reported.
 
 ## Why
 
