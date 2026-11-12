@@ -103,7 +103,9 @@ exclude = [
 So `exclude = ["!**/dist/"]` checks the `dist` directories.
 
 The files and directories that git ignores, by the `.gitignore` files of the git repository, are also
-left out. Other hidden directories, such as `.github`, are part of the project.
+left out. Other hidden directories, such as `.github`, are part of the project. An invalid line of a
+`.gitignore` file, such as a lone `!`, is skipped and the other lines of the file still apply, as with
+git.
 
 A file that is given to `unref` directly is always checked, even when it is excluded or ignored, as
 with ruff and ty. So is a directory: only the patterns that match the files and directories under it

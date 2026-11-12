@@ -182,7 +182,19 @@ def _read_ignore_file(directory: Path) -> list[_IgnoreFile]:
     if not path.is_file():
         return []
     with path.open(encoding="utf-8", errors="replace") as file:
-        return [(directory.resolve(), GitIgnoreSpec.from_lines(file))]
+        return [(directory.resolve(), GitIgnoreSpec.from_lines(filter(_is_valid_ignore_line, file)))]
+
+
+def _is_valid_ignore_line(line: str) -> bool:
+    """
+    Check whether a line of a `.gitignore` file is valid. An invalid line, such as a lone `!`, is skipped
+    and the other lines of the file still apply, as with git and ruff.
+    """
+    try:
+        GitIgnoreSpec.from_lines([line])
+    except ValueError:
+        return False
+    return True
 
 
 def _is_ignored(path: Path, ignore_files: list[_IgnoreFile], *, is_directory: bool, given: Path) -> bool:
