@@ -35,7 +35,6 @@ purelib
 pycache
 Pydantic
 Pydocstyle
-pyenv
 pypackages
 pyproject
 pytest

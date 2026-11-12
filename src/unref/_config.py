@@ -26,7 +26,7 @@ class Config:
     Attributes:
         used_names: The names, as patterns, of the definitions that count as used.
         used_decorators: The decorators that make the definitions they decorate count as used.
-        exclude: The files and directories that are not part of the project.
+        exclude: The patterns of the files and directories that are not part of the project.
         overrides: The options that apply only to some of the files of the project.
         python: The Python environment or interpreter of the project, or None if it is not set.
         dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
@@ -34,7 +34,7 @@ class Config:
 
     used_names: tuple[str, ...] = ()
     used_decorators: tuple[str, ...] = ()
-    exclude: tuple[Path, ...] = ()
+    exclude: tuple[str, ...] = ()
     overrides: tuple[Override, ...] = ()
     python: Path | None = None
     dummy_variable_rgx: str = DEFAULT_DUMMY_VARIABLE_RGX
@@ -106,11 +106,10 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
     return Config(
         used_names=tuple(_string_list(options, "used-names", where)),
         used_decorators=tuple(_decorators(options, "used-decorators", where)),
-        # The paths are relative to the directory of the configuration file.
-        exclude=tuple(path.parent / item for item in _string_list(options, "exclude", where)),
+        # As with ruff, the paths are relative to the current directory, not to the configuration file.
+        exclude=tuple(_string_list(options, "exclude", where)),
         overrides=tuple(_parse_override(item, path) for item in overrides),
-        # The path is relative to the directory of the configuration file.
-        python=None if python is None else path.parent / python,
+        python=None if python is None else Path(python),
         dummy_variable_rgx=dummy_variable_rgx,
     )
 
@@ -128,8 +127,8 @@ def _parse_override(options: dict[str, Any], path: Path) -> Override:
         )
 
     return Override(
-        # The paths are relative to the directory of the configuration file.
-        paths=tuple(path.parent / item for item in _string_list(options, "paths", where)),
+        # As with ruff, the paths are relative to the current directory, not to the configuration file.
+        paths=tuple(map(Path, _string_list(options, "paths", where))),
         base_classes=tuple(_string_list(options, "base-classes", where)),
         class_decorators=tuple(_decorators(options, "class-decorators", where)),
         used_names=tuple(_string_list(options, "used-names", where)),

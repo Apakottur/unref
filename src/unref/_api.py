@@ -10,7 +10,7 @@ def check(
     *,
     used_names: Iterable[str] = (),
     used_decorators: Iterable[str] = (),
-    exclude: Iterable[str | os.PathLike[str]] = (),
+    exclude: Iterable[str] = (),
     overrides: Iterable[Override] = (),
     jobs: int | None = 1,
     python: str | os.PathLike[str] | None = None,
@@ -24,8 +24,13 @@ def check(
         used_names: The names of the definitions that count as used, as glob patterns such as `test_*`.
         used_decorators: The decorators that make the definitions they decorate count as used, as
             dotted names. For example, `app.command` covers `@app.command` and `@app.command("name")`.
-        exclude: The files and directories that are not part of the project. They are not checked, and
-            a reference from them does not count.
+        exclude: The files and directories that are not part of the project, as patterns in the syntax
+            of `.gitignore`, such as `generated` or `**/fixtures/`. They are not checked, and a reference
+            from them does not count. A pattern is anchored at the current directory: `src` matches only the `src` there,
+            `**/src` matches one at any depth. They come after the default ones, such as `**/.venv/`,
+            and the last pattern that matches a path decides, so `!**/dist/` brings `dist` back. A file
+            or directory that git ignores is also left out. A file that is given in `paths` is always
+            checked.
         overrides: Options that apply only to some of the files of the project, on top of the options
             above. For example, `Override(paths=["tests"], used_names=["test_*"])`.
         jobs: The number of processes that analyze the files, or None for one for each CPU. A small

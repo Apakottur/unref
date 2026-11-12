@@ -4,35 +4,28 @@ from pathlib import Path
 
 from pathspec import GitIgnoreSpec
 
-# Directories that are never part of a project. The same as the ones that ruff and ty leave out by default.
-DEFAULT_EXCLUDED_DIRECTORIES = frozenset(
-    {
-        ".bzr",
-        ".direnv",
-        ".eggs",
-        ".git",
-        ".git-rewrite",
-        ".hg",
-        ".ipynb_checkpoints",
-        ".mypy_cache",
-        ".nox",
-        ".pants.d",
-        ".pyenv",
-        ".pytest_cache",
-        ".pytype",
-        ".ruff_cache",
-        ".svn",
-        ".tox",
-        ".venv",
-        ".vscode",
-        "__pypackages__",
-        "_build",
-        "buck-out",
-        "dist",
-        "node_modules",
-        "site-packages",
-        "venv",
-    }
+# The patterns that are excluded by default, before the `exclude` ones. The same as ty's defaults.
+DEFAULT_EXCLUDE = (
+    "**/.bzr/",
+    "**/.direnv/",
+    "**/.eggs/",
+    "**/.git/",
+    "**/.git-rewrite/",
+    "**/.hg/",
+    "**/.mypy_cache/",
+    "**/.nox/",
+    "**/.pants.d/",
+    "**/.pytype/",
+    "**/.ruff_cache/",
+    "**/.svn/",
+    "**/.tox/",
+    "**/.venv/",
+    "**/__pypackages__/",
+    "**/_build/",
+    "**/buck-out/",
+    "**/dist/",
+    "**/node_modules/",
+    "**/venv/",
 )
 
 # The patterns of a `.gitignore` file, with the absolute directory that they are relative to.
@@ -42,7 +35,7 @@ _IgnoreFile = tuple[Path, GitIgnoreSpec]
 def discover(
     paths: Iterable[str | os.PathLike[str]],
     *,
-    exclude: Iterable[str | os.PathLike[str]],
+    exclude: Iterable[str],
 ) -> list[Path]:
     """
     Find the Python files of a project.
@@ -50,27 +43,61 @@ def discover(
     Args:
         paths: The files and directories that make up the project. A file is taken as is, a directory
             is searched for Python files.
-        exclude: The files and directories that are not part of the project. A file that is excluded,
-            or is under an excluded directory, is left out.
+        exclude: The patterns of the files and directories that are not part of the project, on top of
+            the default ones, in the syntax of `.gitignore`. They are anchored at the current directory.
 
     Returns:
         The Python files, sorted.
     """
-    excluded = [Path(path).resolve() for path in exclude]
+    excluded = _Exclude(exclude)
 
     files: set[Path] = set()
     for path in map(Path, paths):
         if path.is_dir():
             files.update(_walk(path, excluded))
-        elif not is_under(path, excluded):
+        else:
+            # A file that is given directly is always checked, as with ruff and ty.
             files.add(path)
     return sorted(files)
 
 
-def _walk(directory: Path, excluded: list[Path]) -> Iterator[Path]:
+class _Exclude:
     """
-    Yield the Python files under a directory. Skips the directories that are excluded by default, such
-    as `.venv`, the files and directories that git ignores, and the excluded files and directories.
+    The `exclude` patterns, with the default ones before them.
+    """
+
+    def __init__(self, patterns: Iterable[str]) -> None:
+        self._spec = GitIgnoreSpec.from_lines([*DEFAULT_EXCLUDE, *map(_anchor, patterns)])
+        # The patterns are anchored at the current directory.
+        self._root = Path.cwd().resolve()
+
+    def __call__(self, path: Path, *, is_directory: bool) -> bool:
+        """
+        Check whether a file or directory is excluded. The last pattern that matches it decides.
+        """
+        absolute = path.resolve()
+        # A path outside of the current directory can still match the patterns that start with `**/`.
+        base = self._root if absolute.is_relative_to(self._root) else Path(absolute.anchor)
+        relative = absolute.relative_to(base).as_posix() + ("/" if is_directory else "")
+        return bool(self._spec.check_file(relative).include)
+
+
+def _anchor(pattern: str) -> str:
+    """
+    Anchor a pattern at the current directory, as ty anchors them at the project root: `src` matches
+    only the `src` there, `**/src` matches one at any depth.
+    """
+    negation, body = ("!", pattern[1:]) if pattern.startswith("!") else ("", pattern)
+    body = body.removeprefix("./")
+    if not body.startswith(("/", "**/")):
+        body = "/" + body
+    return negation + body
+
+
+def _walk(directory: Path, excluded: _Exclude) -> Iterator[Path]:
+    """
+    Yield the Python files under a directory. Skips the excluded files and directories, and the ones that
+    git ignores.
     """
     # The `.gitignore` files that apply to each directory still to be walked, except its own.
     inherited = {directory: _ignore_files_above(directory)}
@@ -81,16 +108,15 @@ def _walk(directory: Path, excluded: list[Path]) -> Iterator[Path]:
         directories[:] = [
             name
             for name in directories
-            if name not in DEFAULT_EXCLUDED_DIRECTORIES
+            if not excluded(current / name, is_directory=True)
             and not _is_ignored(current / name, ignore_files, is_directory=True)
-            and not is_under(current / name, excluded)
         ]
         inherited.update((current / name, ignore_files) for name in directories)
         for name in files:
             if (
                 name.endswith(".py")
+                and not excluded(current / name, is_directory=False)
                 and not _is_ignored(current / name, ignore_files, is_directory=False)
-                and not is_under(current / name, excluded)
             ):
                 yield current / name
 

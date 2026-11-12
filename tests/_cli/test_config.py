@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 import pytest
@@ -115,8 +116,9 @@ def test_config_wrong_type(tmp_path: Path, option: str, value: str) -> None:
     assert result.stderr == f"Error: Option '{option}' in the configuration file {config} must be a list of strings\n"
 
 
-def test_config_exclude_is_relative_to_config_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The excluded paths are relative to the directory of the configuration file, not the current directory.
+def test_config_exclude_is_relative_to_current_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    # As with ruff, the excluded paths are relative to the current directory, not to the configuration
+    # file: `generated` is the one under `pkg`, and the one at the top of the case is checked.
     case = _CASES_DIR / "exclude"
     monkeypatch.chdir(case / "pkg")
 
@@ -124,20 +126,21 @@ def test_config_exclude_is_relative_to_config_file(monkeypatch: pytest.MonkeyPat
 
     assert result.exit_code == 1
     assert result.stdout == (
+        f"{case}/generated/deep/module.py:1: unused function 'function'\n"
+        f"{case}/generated/module.py:4: unused function 'function'\n"
         f"{case}/main.py:1: unused function 'function'\n"
-        f"{case}/main.py:6: unused function 'used_by_excluded'\n"
-        f"{case}/pkg/generated/module.py:2: unused function 'nested'\n"
+        f"{case}/single.py:1: unused function 'function'\n"
     )
 
 
 def test_config_exclude_given_file() -> None:
-    # A file that is excluded is not checked, even when it is given directly.
+    # A file that is excluded is still checked when it is given directly, as with ruff and ty.
     case = _CASES_DIR / "exclude"
 
     result = _runner.invoke(app, ["--config", str(case / "pyproject.toml"), str(case / "single.py")])
 
-    assert result.exit_code == 0
-    assert result.stdout == ""
+    assert result.exit_code == 1
+    assert result.stdout == f"{case}/single.py:1: unused function 'function'\n"
 
 
 def test_config_used_names(tmp_path: Path) -> None:
@@ -150,12 +153,15 @@ def test_config_used_names(tmp_path: Path) -> None:
     assert result.stdout == ""
 
 
-def test_config_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The paths of an override are relative to the directory of the configuration file.
+def test_config_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # As with ruff, the paths of an override are relative to the current directory, not to the
+    # configuration file.
     case = _CASES_DIR / "override"
-    monkeypatch.chdir(case / "tests")
+    config = tmp_path / "pyproject.toml"
+    shutil.copy(case / "pyproject.toml", config)
+    monkeypatch.chdir(case)
 
-    result = _runner.invoke(app, ["--config", str(case / "pyproject.toml"), str(case / "tests")])
+    result = _runner.invoke(app, ["--config", str(config), str(case / "tests")])
 
     assert result.exit_code == 1
     assert result.stdout == (
