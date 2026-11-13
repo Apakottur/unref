@@ -10,5 +10,5 @@ def added():
     return 2
 
 
-def internal():  # expect: unused function
+def internal():  # expect: 5 [unused-function]
     return 3

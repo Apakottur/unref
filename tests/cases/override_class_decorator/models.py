@@ -56,28 +56,28 @@ class Everything:
 
 # The override does not apply to a subclass, which is not a data class itself.
 class Child(Direct):
-    field: int  # expect: unused attribute
+    field: int  # expect: 5 [unused-attribute]
 
 
 # Not a decorator of the override.
 @attrs.define
 class OtherDecorator:
-    field: int  # expect: unused attribute
+    field: int  # expect: 5 [unused-attribute]
 
 
 class Plain:
-    field: int  # expect: unused attribute
+    field: int  # expect: 5 [unused-attribute]
 
 
 # A nested class has its own decorators.
 @dataclass
 class Outer:
     class Inner:
-        field: int  # expect: unused attribute
+        field: int  # expect: 9 [unused-attribute]
 
 
 # The override does not apply outside the class.
-field: int = 1  # expect: unused variable
+field: int = 1  # expect: 1 [unused-variable]
 
 print(
     Direct,

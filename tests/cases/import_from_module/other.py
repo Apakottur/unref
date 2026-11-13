@@ -1,10 +1,10 @@
-def function():  # expect: unused function
+def function():  # expect: 5 [unused-function]
     return 1
 
 
-class Class:  # expect: unused class
+class Class:  # expect: 7 [unused-class]
     pass
 
 
-class Renamed:  # expect: unused class
+class Renamed:  # expect: 7 [unused-class]
     pass

@@ -11,7 +11,7 @@ class Executor(concurrent.futures.ThreadPoolExecutor):
     def submit(self, fn, /, *args, **kwargs):
         return super().submit(fn, *args, **kwargs)
 
-    def own_method(self):  # expect: unused method
+    def own_method(self):  # expect: 9 [unused-method]
         return self
 
 
@@ -28,19 +28,19 @@ class FromLazy(lazy.Handler):
 
 # A name that `__getattr__` gives out without importing it is not followed.
 class FromComputed(lazy.Encoder):
-    def default(self, o):  # expect: unused method
+    def default(self, o):  # expect: 9 [unused-method]
         return o
 
 
 # An import that leads nowhere is not followed.
 class FromTooFar(lazy.TooFar):
-    def emit(self, record):  # expect: unused method
+    def emit(self, record):  # expect: 9 [unused-method]
         return record
 
 
 # An import in another function is not given out.
 class FromOtherFunction(not_lazy.Handler):
-    def emit(self, record):  # expect: unused method
+    def emit(self, record):  # expect: 9 [unused-method]
         return record
 
 

@@ -2,15 +2,15 @@ import helpers
 
 
 # What an unused function uses is unused as well, unless something else uses it.
-def unused():  # expect: unused function
+def unused():  # expect: 5 [unused-function]
     return only_from_unused() + also_from_used() + helpers.only_from_unused() + Holder().only_from_unused()
 
 
-def only_from_unused():  # expect: unused function
+def only_from_unused():  # expect: 5 [unused-function]
     return chain()
 
 
-def chain():  # expect: unused function
+def chain():  # expect: 5 [unused-function]
     return 1
 
 
@@ -19,7 +19,7 @@ def also_from_used():
 
 
 class Holder:
-    def only_from_unused(self):  # expect: unused method
+    def only_from_unused(self):  # expect: 9 [unused-method]
         return self
 
     def from_used_method(self):
@@ -28,7 +28,7 @@ class Holder:
     def used(self):
         return self.from_used_method()
 
-    def unused(self):  # expect: unused method
+    def unused(self):  # expect: 9 [unused-method]
         return self.only_from_unused()
 
 
@@ -37,13 +37,13 @@ def outer():
     def called():
         return 3
 
-    def not_called():  # expect: unused function
+    def not_called():  # expect: 9 [unused-function]
         return from_not_called()
 
     return called()
 
 
-def from_not_called():  # expect: unused function
+def from_not_called():  # expect: 5 [unused-function]
     return 4
 
 
@@ -58,7 +58,7 @@ def in_decorator(function):
 
 
 @in_decorator
-def decorated(value=in_default()):  # expect: unused function
+def decorated(value=in_default()):  # expect: 5 [unused-function]
     return value
 
 
@@ -71,8 +71,8 @@ def in_lambda():
 
 
 # Code that runs when the module is imported uses what it refers to, in a class body as well.
-class Body:  # expect: unused class
-    value = from_class_body()  # expect: unused attribute
+class Body:  # expect: 7 [unused-class]
+    value = from_class_body()  # expect: 5 [unused-attribute]
 
 
 def from_class_body():

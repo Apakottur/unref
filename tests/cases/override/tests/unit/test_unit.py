@@ -3,5 +3,5 @@ class TestInUnit:
     def test_method(self):
         return 1
 
-    def helper(self):  # expect: unused method
+    def helper(self):  # expect: 9 [unused-method]
         return 2

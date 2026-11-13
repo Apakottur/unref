@@ -332,7 +332,7 @@ def _roots(
                 )
             ):
                 kept.add(definition)
-            elif definition.line in facts[path].ignored_lines:
+            elif definition.line in facts[path].ignore_comments:
                 ignored.add(definition)
     return kept, ignored
 
@@ -400,7 +400,7 @@ def _findings(
 
     Returns:
         A finding for each unused definition, for each ignore comment that ignores nothing, and for each
-        file that does not parse, sorted by file and line.
+        file that does not parse, sorted by file, line and column.
     """
     findings: list[Finding] = []
     for path in discovered:
@@ -412,7 +412,8 @@ def _findings(
             Finding(
                 path=definition.path,
                 line=definition.line,
-                kind=f"unused {definition.kind}",
+                column=definition.column,
+                code=f"unused-{definition.kind}",
                 name=definition.name,
             )
             for definition in facts[path].definitions
@@ -422,10 +423,11 @@ def _findings(
         # An ignore comment that ignores nothing is a finding itself.
         needed_lines = {definition.line for definition in needed if definition.path == path}
         file_findings.extend(
-            Finding(path=path, line=line, kind="unused comment", name="unref: ignore")
-            for line in facts[path].ignored_lines - needed_lines
+            Finding(path=path, line=line, column=column, code="unused-ignore-comment", name="unref: ignore")
+            for line, column in facts[path].ignore_comments.items()
+            if line not in needed_lines
         )
-        findings += sorted(file_findings, key=lambda finding: finding.line)
+        findings += sorted(file_findings, key=lambda finding: (finding.line, finding.column))
     return findings
 
 

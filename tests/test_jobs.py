@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import unref
+from unref._discover import discover
 from unref._files import MIN_PARALLEL_BYTES
 
 _CASES_DIR = Path(__file__).parent / "cases"
@@ -17,12 +18,9 @@ def _large_project(directory: Path) -> Path:
     """
     Make a project large enough to be analyzed by several processes, from copies of the test cases.
     """
-    # A file in a hidden directory, such as the `.venv` of a case, is not part of the project.
-    size = sum(
-        path.stat().st_size
-        for path in _CASES_DIR.rglob("*.py")
-        if not any(part.startswith(".") for part in path.relative_to(_CASES_DIR).parts)
-    )
+    # Only the files that the check finds count, not those it leaves out, such as the files in the
+    # `.venv` of a case or those that a `.gitignore` of a case ignores.
+    size = sum(path.stat().st_size for path in discover([_CASES_DIR], exclude=[]))
     for index in range(MIN_PARALLEL_BYTES // size + 1):
         shutil.copytree(_CASES_DIR, directory / f"copy_{index}")
     return directory

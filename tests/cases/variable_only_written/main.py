@@ -1,6 +1,6 @@
 class Class:
     def __init__(self):
-        self.count = 0  # expect: unused attribute
+        self.count = 0  # expect: 14 [unused-attribute]
 
     def increment(self):
         # Writing is not a reference.
@@ -8,6 +8,6 @@ class Class:
         self.count = 2
 
 
-COUNT = 0  # expect: unused variable
+COUNT = 0  # expect: 1 [unused-variable]
 COUNT += 1
 Class().increment()

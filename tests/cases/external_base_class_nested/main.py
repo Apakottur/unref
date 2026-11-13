@@ -16,7 +16,7 @@ class Handler(Outer.Base):
     def emit(self, record):
         return record
 
-    def own_method(self):  # expect: unused method
+    def own_method(self):  # expect: 9 [unused-method]
         return self
 
 
@@ -47,7 +47,7 @@ class FromLazy(lazy.Outer.Base):
 
 # A name that the nested class does not define is not followed.
 class FromMissing(Outer.Missing):
-    def emit(self, record):  # expect: unused method
+    def emit(self, record):  # expect: 9 [unused-method]
         return record
 
 

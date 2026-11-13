@@ -7,5 +7,5 @@ def fixture_in_conftest():
     return 1
 
 
-def helper_in_conftest():  # expect: unused function
+def helper_in_conftest():  # expect: 5 [unused-function]
     return 2

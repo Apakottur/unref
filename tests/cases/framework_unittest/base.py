@@ -6,10 +6,10 @@ class Base(unittest.TestCase):
     def test_in_base(self):
         pass
 
-    def helper(self):  # expect: unused method
+    def helper(self):  # expect: 9 [unused-method]
         pass
 
 
 # Module setup and teardown run only in a test file.
-def setUpModule():  # expect: unused function
+def setUpModule():  # expect: 5 [unused-function]
     pass

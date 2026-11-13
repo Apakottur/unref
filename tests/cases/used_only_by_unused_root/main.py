@@ -16,9 +16,9 @@ def from_by_decorator():
     return 2
 
 
-class Class:  # expect: unused class
+class Class:  # expect: 7 [unused-class]
     def __init__(self):
-        self.value = from_dunder()  # expect: unused attribute
+        self.value = from_dunder()  # expect: 14 [unused-attribute]
 
 
 def from_dunder():

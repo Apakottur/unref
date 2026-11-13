@@ -12,11 +12,11 @@ class Both(Base):
 
 @dataclass
 class OnlyDecorator:
-    field: int  # expect: unused attribute
+    field: int  # expect: 5 [unused-attribute]
 
 
 class OnlyBase(Base):
-    field: int  # expect: unused attribute
+    field: int  # expect: 5 [unused-attribute]
 
 
 print(Both, OnlyDecorator, OnlyBase)

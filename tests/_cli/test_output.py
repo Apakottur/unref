@@ -26,7 +26,7 @@ def test_output_format_concise() -> None:
     result = _runner.invoke(app, ["--output-format", "concise", str(case)])
 
     assert result.exit_code == 1
-    assert result.stdout == f"{case}/main.py:1: unused function 'function'\n"
+    assert result.stdout == f"{case}/main.py:1:5: unused-function 'function'\n"
 
 
 def test_output_format_github() -> None:
@@ -36,10 +36,10 @@ def test_output_format_github() -> None:
 
     assert result.exit_code == 1
     assert result.stdout == (
-        f"::error title=unref (syntax error),file={case}/bad.py,line=5::{case}/bad.py:5: "
-        "syntax error 'Missing parentheses in call to 'print'. Did you mean print(...)?'\n"
-        f"::error title=unref (unused function),file={case}/good.py,line=1::{case}/good.py:1: "
-        "unused function 'unused'\n"
+        f"::error title=unref (invalid-syntax),file={case}/bad.py,line=5,col=1::{case}/bad.py:5:1: "
+        "invalid-syntax 'Missing parentheses in call to 'print'. Did you mean print(...)?'\n"
+        f"::error title=unref (unused-function),file={case}/good.py,line=1,col=5::{case}/good.py:1:5: "
+        "unused-function 'unused'\n"
     )
 
 
@@ -54,8 +54,8 @@ def test_output_format_github_escaped(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert result.stdout == (
-        f"::error title=unref (unused function),file={escaped}/main.py,line=1::"
-        f"{str(case).replace('%', '%25')}/main.py:1: unused function 'function'\n"
+        f"::error title=unref (unused-function),file={escaped}/main.py,line=1,col=5::"
+        f"{str(case).replace('%', '%25')}/main.py:1:5: unused-function 'function'\n"
     )
 
 
@@ -77,8 +77,8 @@ def test_output_format_config(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert result.stdout == (
-        f"::error title=unref (unused function),file={case}/main.py,line=1::"
-        f"{case}/main.py:1: unused function 'function'\n"
+        f"::error title=unref (unused-function),file={case}/main.py,line=1,col=5::"
+        f"{case}/main.py:1:5: unused-function 'function'\n"
     )
 
 
@@ -91,7 +91,7 @@ def test_output_format_option_over_config(tmp_path: Path) -> None:
     result = _runner.invoke(app, ["--config", str(config), "--output-format", "concise", str(case)])
 
     assert result.exit_code == 1
-    assert result.stdout == f"{case}/main.py:1: unused function 'function'\n"
+    assert result.stdout == f"{case}/main.py:1:5: unused-function 'function'\n"
 
 
 @pytest.mark.parametrize("value", ['"json"', '["github"]'])

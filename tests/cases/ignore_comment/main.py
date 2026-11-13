@@ -23,33 +23,33 @@ def decorated():  # unref: ignore
     return 7
 
 
-@decorator  # unref: ignore  # expect: unused comment
-def comment_on_decorator():  # expect: unused function
+@decorator  # unref: ignore  # expect: 13 [unused-ignore-comment]
+def comment_on_decorator():  # expect: 5 [unused-function]
     return 8
 
 
 # A comment that ignores nothing is reported.
-# unref: ignore  # expect: unused comment
-on_next_line = 9  # expect: unused variable
+# unref: ignore  # expect: 1 [unused-ignore-comment]
+on_next_line = 9  # expect: 1 [unused-variable]
 
 
-def referenced():  # unref: ignore  # expect: unused comment
+def referenced():  # unref: ignore  # expect: 20 [unused-ignore-comment]
     return 10
 
 
 class Referenced:
-    def referenced_method(self):  # unref: ignore  # expect: unused comment
+    def referenced_method(self):  # unref: ignore  # expect: 35 [unused-ignore-comment]
         return 11
 
 
-print(referenced(), Referenced().referenced_method())  # unref: ignore  # expect: unused comment
-visit_name = 12  # unref: ignore  # expect: unused comment
-__version__ = 13  # unref: ignore  # expect: unused comment
+print(referenced(), Referenced().referenced_method())  # unref: ignore  # expect: 56 [unused-ignore-comment]
+visit_name = 12  # unref: ignore  # expect: 18 [unused-ignore-comment]
+__version__ = 13  # unref: ignore  # expect: 19 [unused-ignore-comment]
 
 # One comment covers every finding of its line.
 first, second = 14, 15  # unref: ignore
 
 # The comment has to be a comment, and spelled this way.
-in_string = "# unref: ignore"  # expect: unused variable
-other_tool = 17  # other: ignore  # expect: unused variable
-other_word = 16  # unref: ignored  # expect: unused variable
+in_string = "# unref: ignore"  # expect: 1 [unused-variable]
+other_tool = 17  # other: ignore  # expect: 1 [unused-variable]
+other_word = 16  # unref: ignored  # expect: 1 [unused-variable]

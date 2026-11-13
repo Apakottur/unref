@@ -3,5 +3,5 @@ def start():
     return 1
 
 
-def stop():  # expect: unused function
+def stop():  # expect: 5 [unused-function]
     return 2

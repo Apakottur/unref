@@ -128,15 +128,15 @@ def main(
 def _github(finding: Finding) -> str:
     """
     Format a finding as a GitHub Actions workflow command, which shows it as an annotation, laid out as
-    ruff's `github` output format lays out its diagnostics. A finding has no column, so the command has
-    none.
+    ruff's `github` output format lays out its diagnostics. A finding has no end, so the command has no
+    `endLine` and `endColumn`.
 
     Returns:
         The workflow command.
     """
-    title = _escape_property(f"unref ({finding.kind})")
+    title = _escape_property(f"unref ({finding.code})")
     file = _escape_property(str(finding.path))
-    return f"::error title={title},file={file},line={finding.line}::{_escape_data(str(finding))}"
+    return f"::error title={title},file={file},line={finding.line},col={finding.column}::{_escape_data(str(finding))}"
 
 
 def _escape_data(text: str) -> str:

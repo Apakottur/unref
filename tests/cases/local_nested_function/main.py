@@ -3,7 +3,7 @@ def function():
     def used():
         return 1
 
-    def unused():  # expect: unused function
+    def unused():  # expect: 9 [unused-function]
         return 2
 
     class Used:

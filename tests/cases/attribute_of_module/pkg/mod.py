@@ -5,5 +5,5 @@ def in_submodule():
     return sibling.relative()
 
 
-def in_package():  # expect: unused function
+def in_package():  # expect: 5 [unused-function]
     return 2

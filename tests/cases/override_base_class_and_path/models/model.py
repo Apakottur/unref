@@ -6,7 +6,7 @@ class Model(BaseModel):
 
 
 class Plain:
-    table_name = {}  # expect: unused attribute
+    table_name = {}  # expect: 5 [unused-attribute]
 
 
 print(Model, Plain)

@@ -11,7 +11,8 @@ class Definition:
 
     Attributes:
         path: The file that holds the definition.
-        line: The line of the definition in the file, starting at 1.
+        line: The line of the name of the definition in the file, starting at 1.
+        column: The column of the name of the definition in its line, in characters, starting at 1.
         kind: What is defined.
         name: The name of the definition.
         decorators: The dotted names of the decorators of the definition, such as `app.command`,
@@ -26,6 +27,7 @@ class Definition:
 
     path: Path
     line: int
+    column: int
     kind: Literal["function", "class", "method", "variable", "attribute"]
     name: str
     decorators: tuple[str, ...] = ()

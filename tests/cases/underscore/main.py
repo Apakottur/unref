@@ -4,8 +4,8 @@ from functools import singledispatch
 # `_` is the name for a value that is not used, however it is bound.
 _ = print("side effect")
 _: int = len("annotated")
-first, _ = 1, 2  # expect: unused variable
-*_, last = 1, 2, 3  # expect: unused variable
+first, _ = 1, 2  # expect: 1 [unused-variable]
+*_, last = 1, 2, 3  # expect: 5 [unused-variable]
 for _ in range(2):
     print("loop")
 with open(__file__) as _:
@@ -15,7 +15,7 @@ with open(__file__) as _:
 @dataclass
 class Point:
     _: KW_ONLY
-    x: int  # expect: unused attribute
+    x: int  # expect: 5 [unused-attribute]
 
 
 class Holder:

@@ -10,5 +10,5 @@ def by_attribute():
     return 2
 
 
-def unused():  # expect: unused function
+def unused():  # expect: 5 [unused-function]
     return 3

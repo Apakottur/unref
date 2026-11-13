@@ -4,5 +4,5 @@ def by_name():
     return 1
 
 
-def by_dotted_name():  # expect: unused function
+def by_dotted_name():  # expect: 5 [unused-function]
     return 2

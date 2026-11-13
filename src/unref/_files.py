@@ -9,7 +9,7 @@ from pathlib import Path
 
 from unref._definitions import Definition
 from unref._external import lazy_imports
-from unref._ignores import find_ignored_lines
+from unref._ignores import find_ignore_comments
 from unref._models import Finding
 from unref._references import Binding, References, walk_module
 
@@ -28,13 +28,13 @@ class FileFacts:
     Attributes:
         definitions: The definitions of the file.
         references: What the file refers to.
-        ignored_lines: The lines that have an ignore comment.
+        ignore_comments: The column of the ignore comment of each line that has one, by its line.
         lazy: The names that the file gives out from its `__getattr__`, each with the imports of it.
     """
 
     definitions: list[Definition]
     references: References
-    ignored_lines: set[int]
+    ignore_comments: dict[int, int]
     lazy: dict[str, list[Binding]]
 
 
@@ -82,13 +82,19 @@ def analyze_file(path: Path) -> FileFacts | Finding:
     try:
         tree = _parse(source, path)
     except SyntaxError as error:
-        return Finding(path=path, line=error.lineno or 1, kind="syntax error", name=error.msg)
+        return Finding(
+            path=path,
+            line=error.lineno or 1,
+            column=error.offset or 1,
+            code="invalid-syntax",
+            name=error.msg,
+        )
 
-    definitions, references = walk_module(path, tree)
+    definitions, references = walk_module(path, tree, source)
     return FileFacts(
         definitions=definitions,
         references=references,
-        ignored_lines=find_ignored_lines(source),
+        ignore_comments=find_ignore_comments(source),
         lazy=lazy_imports(tree, references),
     )
 

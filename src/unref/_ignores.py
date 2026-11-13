@@ -6,22 +6,24 @@ _MARKER = b"unref:"
 _IGNORE = re.compile(r"#\s*unref:\s*ignore\b")
 
 
-def find_ignored_lines(source: bytes) -> set[int]:
+def find_ignore_comments(source: bytes) -> dict[int, int]:
     """
-    Find the lines of a Python module that have an `# unref: ignore` comment.
+    Find the `# unref: ignore` comments of a Python module.
 
     Args:
         source: The content of the module.
 
     Returns:
-        The lines, starting at 1.
+        The column of the first such comment of each line that has one, by its line. Both start at 1,
+        and the column counts characters.
     """
     # Most modules have no such comment, and are not tokenized.
     if _MARKER not in source:
-        return set()
+        return {}
 
-    return {
-        token.start[0]
-        for token in tokenize.tokenize(io.BytesIO(source).readline)
-        if token.type == tokenize.COMMENT and _IGNORE.search(token.string)
-    }
+    comments: dict[int, int] = {}
+    for token in tokenize.tokenize(io.BytesIO(source).readline):
+        if token.type == tokenize.COMMENT and (match := _IGNORE.search(token.string)):
+            line, column = token.start
+            comments.setdefault(line, column + match.start() + 1)
+    return comments

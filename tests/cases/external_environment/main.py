@@ -12,7 +12,7 @@ class Upper(TypeDecorator):
     def process_bind_param(self, value, dialect):
         return value.upper()
 
-    def own_method(self):  # expect: unused method
+    def own_method(self):  # expect: 9 [unused-method]
         return self
 
 
@@ -25,7 +25,7 @@ class FromEditable(editable_module.Base):
 # The environment of the project replaces the site-packages of the check: `typer` is installed with the
 # check, but not in the environment of the project.
 class App(typer.Typer):
-    def command(self):  # expect: unused method
+    def command(self):  # expect: 9 [unused-method]
         return self
 
 

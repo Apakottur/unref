@@ -1,8 +1,8 @@
 # A name that is imported in a function is local to it.
-operating_system = 1  # expect: unused variable
-separator = 2  # expect: unused variable
-os = 3  # expect: unused variable
-join = 4  # expect: unused variable
+operating_system = 1  # expect: 1 [unused-variable]
+separator = 2  # expect: 1 [unused-variable]
+os = 3  # expect: 1 [unused-variable]
+join = 4  # expect: 1 [unused-variable]
 # `import os.path` binds `os`, not `path`.
 path = 5
 

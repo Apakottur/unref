@@ -10,7 +10,7 @@ def fixture_in_tests():
     return 2
 
 
-def helper_in_tests():  # expect: unused function
+def helper_in_tests():  # expect: 5 [unused-function]
     return 3
 
 
@@ -20,6 +20,6 @@ def everywhere_in_tests():
 
 
 # Only the override of `tests/unit` covers `Test*`.
-class TestInTests:  # expect: unused class
+class TestInTests:  # expect: 7 [unused-class]
     def test_method(self):
         return 5

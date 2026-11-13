@@ -1,0 +1,2 @@
+# -*- coding: latin-1 -*-
+"יי"; latin = 1  # expect: 7 [unused-variable]

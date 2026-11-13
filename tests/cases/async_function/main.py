@@ -1,2 +1,2 @@
-async def function():  # expect: unused function
+async def function():  # expect: 11 [unused-function]
     return 1

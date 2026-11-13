@@ -5,12 +5,13 @@ from pathlib import Path
 from typing import Any, Literal
 
 from unref._definitions import Definition, base_name, decorator_names
+from unref._positions import SourcePositions
 
 # A name that a module imports: the module it is imported from, as it is written, the number of leading
 # dots, and the imported name. The name is None for `import module`, which binds the module itself.
 Binding = tuple[str | None, int, str | None]
 
-# The code that a reference is made from: the line of the `def` of the function that the reference is
+# The code that a reference is made from: the line of the name of the function that the reference is
 # in, or None for code that runs when the module is imported.
 Owner = int | None
 
@@ -45,7 +46,7 @@ class References:
     bindings: dict[str, Binding] = field(default_factory=dict)
 
 
-def walk_module(path: Path, module: ast.Module) -> tuple[list[Definition], References]:
+def walk_module(path: Path, module: ast.Module, source: bytes) -> tuple[list[Definition], References]:
     """
     Find what a Python module defines and refers to.
 
@@ -59,12 +60,13 @@ def walk_module(path: Path, module: ast.Module) -> tuple[list[Definition], Refer
     Args:
         path: The file of the module.
         module: The parsed module.
+        source: The content of the module, which the columns of the definitions are found in.
 
     Returns:
         The definitions, in the order of the file, and the references.
     """
     references = References()
-    walker = _Walker(path, references)
+    walker = _Walker(path, references, SourcePositions(source))
     walker.visit(module)
 
     # What reaches the module is read from the module itself, or from what it imports.
@@ -122,6 +124,7 @@ class _Walker:
 
     Attributes:
         path: The file of the module.
+        positions: The positions in the source of the module.
         definitions: The definitions to add to.
         references: The references to add to.
         scope: The scope that the node being walked is in.
@@ -131,8 +134,9 @@ class _Walker:
         owner: The function that the node is in, or None for code that runs when the module is imported.
     """
 
-    def __init__(self, path: Path, references: References) -> None:
+    def __init__(self, path: Path, references: References, positions: SourcePositions) -> None:
         self.path = path
+        self.positions = positions
         self.definitions: list[Definition] = []
         self.references = references
         self.scope = _Scope(kind="module")
@@ -206,9 +210,10 @@ class _Walker:
             *(parameter.annotation for parameter in parameters),
         ]
         body_scope = _Scope()
+        line = 0
         if not isinstance(function, ast.Lambda):
             outside += [*function.decorator_list, function.returns]
-            body_scope = self.define_function(function)
+            body_scope, line = self.define_function(function)
         binder, self.binder = self.binder, _Scope()
         for node in outside:
             if node is not None:
@@ -221,7 +226,7 @@ class _Walker:
         if isinstance(function, ast.Lambda):
             self.visit(function.body)
         else:
-            self.owner = function.lineno
+            self.owner = line
             for node in function.body:
                 self.visit(node)
         inner = self.scope
@@ -235,9 +240,11 @@ class _Walker:
         The body of a class is not a scope whose reads are tracked: it sees the names of the code that it
         is in, and what it binds is an attribute of the class.
         """
+        line, column = self.positions.name(node.lineno, node.col_offset)
         definition = Definition(
             path=self.path,
-            line=node.lineno,
+            line=line,
+            column=column,
             kind="class",
             name=node.name,
             decorators=decorator_names(node),
@@ -319,12 +326,12 @@ class _Walker:
         self.references.attributes.update((self.owner, name) for name in node.kwd_attrs)
         self.visit_children(node)
 
-    def define_function(self, function: ast.FunctionDef | ast.AsyncFunctionDef) -> _Scope:
+    def define_function(self, function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[_Scope, int]:
         """
         Add a function or a method.
 
         Returns:
-            The scope of its body.
+            The scope of its body, and the line of its name.
         """
         enclosing = self.binder
         kind: Literal["function", "method"] = "function"
@@ -334,17 +341,19 @@ class _Walker:
             parameters = [*function.args.posonlyargs, *function.args.args]
             instance = parameters[0].arg if parameters else None
             scope = _Scope(defined=enclosing.defined, instance=instance, class_name=enclosing.class_name)
+        line, column = self.positions.name(function.lineno, function.col_offset)
         self.definitions.append(
             Definition(
                 path=self.path,
-                line=function.lineno,
+                line=line,
+                column=column,
                 kind=kind,
                 name=function.name,
                 decorators=decorator_names(function),
                 owner=enclosing.class_name if enclosing.kind == "class" else None,
             )
         )
-        return scope
+        return scope, line
 
     def define_target(self, target: ast.expr, *, in_unpacking: bool = False) -> None:
         """
@@ -361,8 +370,12 @@ class _Walker:
             case ast.Name(id=name) if scope.kind != "function":
                 kind = "variable" if scope.kind == "module" else "attribute"
                 unpacked = in_unpacking
+                line, column = target.lineno, self.positions.column(target.lineno, target.col_offset)
             case ast.Attribute(value=ast.Name(id=owner), attr=name) if owner == scope.instance:
                 kind = "attribute"
+                # The name of the attribute ends the target.
+                line = target.end_lineno or target.lineno
+                column = self.positions.column(line, target.end_col_offset or 0) - len(name)
             case ast.Tuple(elts=elements) | ast.List(elts=elements):
                 for element in elements:
                     self.define_target(element, in_unpacking=True)
@@ -380,7 +393,8 @@ class _Walker:
             self.definitions.append(
                 Definition(
                     path=self.path,
-                    line=target.lineno,
+                    line=line,
+                    column=column,
                     kind=kind,
                     name=name,
                     owner=scope.class_name,

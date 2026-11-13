@@ -4,21 +4,21 @@ import pytest
 
 
 # The rules of pytest are turned off.
-def test_function():  # expect: unused function
+def test_function():  # expect: 5 [unused-function]
     pass
 
 
 @pytest.fixture
-def plain():  # expect: unused function
+def plain():  # expect: 5 [unused-function]
     pass
 
 
-def pytest_configure(config):  # expect: unused function
+def pytest_configure(config):  # expect: 5 [unused-function]
     pass
 
 
-class TestClass:  # expect: unused class
-    def test_method(self):  # expect: unused method
+class TestClass:  # expect: 7 [unused-class]
+    def test_method(self):  # expect: 9 [unused-method]
         pass
 
 

@@ -8,7 +8,7 @@ import pytest as renamed_module
 pytestmark = pytest.mark.slow
 pytest_plugins = ["plugin"]
 
-OTHER = 1  # expect: unused variable
+OTHER = 1  # expect: 1 [unused-variable]
 
 
 # A function whose name starts with `test` is a test.
@@ -20,7 +20,7 @@ def testFunction():
     pass
 
 
-def helper():  # expect: unused function
+def helper():  # expect: 5 [unused-function]
     pass
 
 
@@ -83,12 +83,12 @@ def pytest_generate_tests(metafunc):
 # A class whose name starts with `Test` holds tests.
 class TestClass:
     pytestmark = pytest.mark.slow
-    other = 1  # expect: unused attribute
+    other = 1  # expect: 5 [unused-attribute]
 
     def test_method(self):
         pass
 
-    def helper(self):  # expect: unused method
+    def helper(self):  # expect: 9 [unused-method]
         pass
 
     def setup_method(self):
@@ -110,12 +110,12 @@ class TestClass:
         def test_nested(self):
             pass
 
-    class Nested:  # expect: unused class
-        def test_nested(self):  # expect: unused method
+    class Nested:  # expect: 11 [unused-class]
+        def test_nested(self):  # expect: 13 [unused-method]
             pass
 
 
 # Other classes do not hold tests.
-class Helper:  # expect: unused class
-    def test_method(self):  # expect: unused method
+class Helper:  # expect: 7 [unused-class]
+    def test_method(self):  # expect: 9 [unused-method]
         pass

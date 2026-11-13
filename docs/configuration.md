@@ -233,9 +233,10 @@ with the same default.
 How the command prints the findings, as [Ruff's option](https://docs.astral.sh/ruff/settings/#output-format)
 of the same name:
 
-- `concise` (the default): one line for each finding, `path:line: kind 'name'`.
+- `concise` (the default): one line for each finding, `path:line:column: code 'name'`.
 - `github`: a [GitHub Actions workflow command](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands)
-  for each finding, which shows it as an annotation on the file and line, for example on a pull request.
+  for each finding, which shows it as an annotation on the file, line and column, for example on a pull
+  request.
 
 ```toml
 [tool.unref]
