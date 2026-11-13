@@ -164,12 +164,12 @@ The comment goes on the line of the finding, which for a function or class is th
 usually that of its `def` or `class`. For names that a framework uses, prefer the
 [configuration](configuration.md).
 
-<!-- cspell:ignore noqa -->
-
-The codes are separated by commas, and the comment can share its line with other comments:
+Several codes are separated by commas, as in `# unref: ignore[unused-function, unused-class]`. The
+comment can share its line with other comments:
 
 ```python
-class Plugin: hook = None  # noqa: E701  # fmt: skip  # unref: ignore[unused-class, unused-attribute]
+class Plugin:
+    hook = None  # type: ignore[assignment]  # unref: ignore[unused-attribute]
 ```
 
 The comment must name its codes. A bare `# unref: ignore` ignores nothing, and is reported as an
