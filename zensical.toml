@@ -10,6 +10,7 @@ site_dir = "site"
 strict = true
 nav = [
   { "Home" = "index.md" },
+  { "Rules" = "rules.md" },
   { "Configuration" = "configuration.md" },
   { "Recipes" = "recipes.md" },
   { "Reference" = [
