@@ -356,8 +356,9 @@ class _Walker:
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         if not isinstance(node, ast.AugAssign):
             annotation = annotation_name(node.annotation) if isinstance(node, ast.AnnAssign) else None
+            call = dotted_name(node.value.func, unwrap=ast.Call) if isinstance(node.value, ast.Call) else None
             for target in targets:
-                self.define_target(target, annotation=annotation)
+                self.define_target(target, annotation=annotation, call=call)
         if any(map(_is_all, targets)):
             self.references.has_all = True
             self.references.names.update((self.owner, name) for name in _string_literals(node.value))
@@ -416,7 +417,14 @@ class _Walker:
         )
         return scope, line
 
-    def define_target(self, target: ast.expr, *, in_unpacking: bool = False, annotation: str | None = None) -> None:
+    def define_target(
+        self,
+        target: ast.expr,
+        *,
+        in_unpacking: bool = False,
+        annotation: str | None = None,
+        call: str | None = None,
+    ) -> None:
         """
         Add the variables and attributes that an assignment target defines.
 
@@ -424,6 +432,7 @@ class _Walker:
             target: The assignment target.
             in_unpacking: Whether the target is part of an unpacking.
             annotation: The dotted name of the annotation of the target, see `Definition.annotation`.
+            call: The dotted name of what the value of the target calls, see `Definition.call`.
         """
         scope = self.binder
         kind: Literal["variable", "attribute"]
@@ -462,6 +471,7 @@ class _Walker:
                     owner=scope.class_name,
                     unpacked=unpacked,
                     annotation=annotation,
+                    call=call,
                 )
             )
 

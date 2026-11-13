@@ -8,7 +8,9 @@ from types import MappingProxyType
 DEFAULT_DUMMY_VARIABLE_RGX = r"^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 # The known frameworks, and whether each is enabled by default.
-FRAMEWORKS: Mapping[str, bool] = MappingProxyType({"pytest": True, "unittest": True, "pydantic": True})
+FRAMEWORKS: Mapping[str, bool] = MappingProxyType(
+    {"pytest": True, "unittest": True, "pydantic": True, "sqlalchemy": True}
+)
 
 # The codes of the findings, which an ignore comment can name.
 CODES = frozenset(
