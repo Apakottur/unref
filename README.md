@@ -70,11 +70,7 @@ Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.
 
 Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py).
 
-## Feedback
-
-`unref` is young. False positives, and anything else it gets wrong, are very welcome as
-[issues](https://github.com/Apakottur/unref/issues).
-
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md).
+False positives and other bugs are welcome as [issues](https://github.com/Apakottur/unref/issues). See
+[CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md) for more.
