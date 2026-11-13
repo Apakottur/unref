@@ -147,9 +147,21 @@ Here, `main`, `Plugin` and `Plugin.load` count as used.
 
 ## Overrides
 
-Options that apply only to some definitions: those under some paths, in subclasses of some base classes,
-or in classes with some decorators. In a file that is not `pyproject.toml`, the table is
-`[[overrides]]`.
+Options that apply only to some definitions. An override selects them with at least one selector:
+
+| Selector           | Selects                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------- |
+| `paths`            | Definitions in these files and directories.                                            |
+| `base-classes`     | Definitions in subclasses of these classes, such as `pydantic.BaseModel`.              |
+| `class-decorators` | Definitions in classes with these decorators, such as `dataclasses.dataclass`.         |
+
+With several selectors, an override applies to what matches all of them. It then takes these options,
+which add to those of the project:
+
+| Option            | Description                                                  |
+| ----------------- | ------------------------------------------------------------ |
+| `used-names`      | As [`used-names`](#used-names), for the selected definitions.      |
+| `used-decorators` | As [`used-decorators`](#used-decorators), for the selected definitions. |
 
 ```toml
 [[tool.unref.overrides]]
@@ -165,7 +177,6 @@ class-decorators = ["dataclasses.dataclass"]
 used-names = ["*"]
 ```
 
-- An override takes `used-names` and `used-decorators`, which add to those of the project.
-- With several selectors, an override applies to what matches all of them.
-- A base class or decorator is its dotted name as the project imports it, such as `pydantic.BaseModel`.
-  Subclasses count, including through classes from outside the project.
+A base class or decorator is its dotted name as the project imports it. Subclasses of subclasses count
+too, including through classes from outside the project. In a file that is not `pyproject.toml`, the
+table is `[[overrides]]`.
