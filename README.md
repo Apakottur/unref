@@ -33,14 +33,6 @@ src/project/models.py:12:7: unused-class 'Account'
 src/project/utils.py:40:5: unused-function 'parse_date'
 ```
 
-Code that is used in a way `unref` cannot see, such as by a framework, can be ignored with a comment or
-[configured](https://unref.readthedocs.io/en/latest/configuration/) once for the project:
-
-```python
-def parse_date(text):  # unref: ignore[unused-function]
-    ...
-```
-
 Or as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook, alongside
 [Ruff](https://docs.astral.sh/ruff/):
 
