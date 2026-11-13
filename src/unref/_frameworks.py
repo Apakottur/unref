@@ -34,7 +34,7 @@ from pathlib import Path
 from unref._classes import ClassHierarchy
 from unref._definitions import Definition
 from unref._models import Framework
-from unref._modules import ModuleName
+from unref._symbols import ModuleSymbols
 
 _PYTEST_FILES = ("test_*.py", "*_test.py")
 _PYTEST_CONFTEST = "conftest.py"
@@ -101,38 +101,34 @@ _PYDANTIC_CONFIG = "model_config"
 _PYDANTIC_V1_CONFIG = "Config"
 _CLASS_VARIABLES = frozenset({"typing.ClassVar", "typing_extensions.ClassVar"})
 
-# SQLAlchemy's names are matched anywhere under `sqlalchemy`, by their end, as it gives most of them out
-# from several modules, such as `sqlalchemy.Column` and `sqlalchemy.schema.Column`.
+# SQLAlchemy's names are matched anywhere under `sqlalchemy`, by their end from a dot, as it gives most of
+# them out from several modules, such as `sqlalchemy.Column` and `sqlalchemy.schema.Column`.
 # The base classes of declarative models.
-_SQLALCHEMY_BASES = frozenset({"DeclarativeBase", "DeclarativeBaseNoMeta", "MappedAsDataclass"})
+_SQLALCHEMY_BASES = (".DeclarativeBase", ".DeclarativeBaseNoMeta", ".MappedAsDataclass")
 # The function that makes a base class of declarative models, and the decorator that makes one.
-_SQLALCHEMY_BASE_FUNCTIONS = frozenset({"declarative_base"})
-_SQLALCHEMY_BASE_DECORATORS = frozenset({"as_declarative"})
+_SQLALCHEMY_BASE_FUNCTIONS = (".declarative_base",)
+_SQLALCHEMY_BASE_DECORATORS = (".as_declarative",)
 # The annotations and constructs of mapped attributes.
-_SQLALCHEMY_ANNOTATIONS = frozenset({"Mapped", "WriteOnlyMapped", "DynamicMapped"})
-_SQLALCHEMY_CONSTRUCTS = frozenset(
-    {
-        "Column",
-        "mapped_column",
-        "relationship",
-        "column_property",
-        "composite",
-        "synonym",
-        "deferred",
-        "query_expression",
-        "dynamic_loader",
-    }
+_SQLALCHEMY_ANNOTATIONS = (".Mapped", ".WriteOnlyMapped", ".DynamicMapped")
+_SQLALCHEMY_CONSTRUCTS = (
+    ".Column",
+    ".mapped_column",
+    ".relationship",
+    ".column_property",
+    ".composite",
+    ".synonym",
+    ".deferred",
+    ".query_expression",
+    ".dynamic_loader",
 )
 # The decorators that register a function with SQLAlchemy.
-_SQLALCHEMY_DECORATORS = frozenset(
-    {
-        "listens_for",
-        "validates",
-        "reconstructor",
-        "declared_attr",
-        "declared_attr.directive",
-        "declared_attr.cascading",
-    }
+_SQLALCHEMY_DECORATORS = (
+    ".listens_for",
+    ".validates",
+    ".reconstructor",
+    ".declared_attr",
+    ".declared_attr.directive",
+    ".declared_attr.cascading",
 )
 
 
@@ -142,42 +138,52 @@ class FrameworkRules:
     """
 
     def __init__(
-        self,
-        frameworks: Collection[Framework],
-        *,
-        definitions: dict[Path, list[Definition]],
-        names: dict[Path, ModuleName],
-        hierarchy: ClassHierarchy,
+        self, frameworks: Collection[Framework], *, modules: dict[Path, ModuleSymbols], hierarchy: ClassHierarchy
     ) -> None:
         """
         Args:
             frameworks: The frameworks whose rules apply.
-            definitions: The definitions of each file of the project.
-            names: The module name of each file.
+            modules: The symbols of each module of the project.
             hierarchy: The hierarchy of the classes of the project.
         """
         self._pytest = Framework.PYTEST in frameworks
         self._unittest = Framework.UNITTEST in frameworks
         self._pydantic = Framework.PYDANTIC in frameworks
         self._sqlalchemy = Framework.SQLALCHEMY in frameworks
-        self._names = names
+        self._modules = modules
         self._hierarchy = hierarchy
-
-        # The declarative models of SQLAlchemy, and the classes that they inherit from, such as mixins,
-        # by their dotted names.
-        self._mapped_classes = self._sqlalchemy_classes(definitions) if self._sqlalchemy else set()
 
         # The classes that the test classes inherit from, by their dotted names.
         self._pytest_bases: set[str] = set()
         self._unittest_bases: set[str] = set()
-        for path, file_definitions in definitions.items():
-            for definition in file_definitions:
-                if definition.kind != "class":
-                    continue
-                if self._pytest and _is_pytest_class(path, definition.qualified_name):
-                    self._pytest_bases |= hierarchy.ancestors(path, definition.qualified_name)
-                if self._unittest and self._is_test_case(path, definition.qualified_name):
-                    self._unittest_bases |= hierarchy.ancestors(path, definition.qualified_name)
+        # The classes of the project, and the base classes that it makes with SQLAlchemy's function or
+        # decorator, by their dotted names.
+        classes: list[tuple[Path, str]] = []
+        made: set[str] = set()
+        for path, module in modules.items():
+            for definition in module.definitions:
+                name = definition.qualified_name
+                if definition.kind == "class":
+                    classes.append((path, name))
+                    if self._pytest and _is_pytest_class(path, name):
+                        self._pytest_bases |= hierarchy.ancestors(path, name)
+                    if self._unittest and self._is_test_case(path, name):
+                        self._unittest_bases |= hierarchy.ancestors(path, name)
+                    if self._sqlalchemy and _is_sqlalchemy(
+                        hierarchy.decorators(path, name), _SQLALCHEMY_BASE_DECORATORS
+                    ):
+                        made.add(self._dotted_name(path, name))
+                elif (
+                    self._sqlalchemy
+                    and definition.kind == "variable"
+                    and definition.call is not None
+                    and _is_sqlalchemy(hierarchy.resolve(path, definition.call), _SQLALCHEMY_BASE_FUNCTIONS)
+                ):
+                    made.add(self._dotted_name(path, name))
+
+        # The declarative models of SQLAlchemy, and the classes that they inherit from, such as mixins,
+        # by their dotted names.
+        self._mapped_classes = self._sqlalchemy_classes(classes, made) if self._sqlalchemy else set()
 
     def uses(self, definition: Definition, path: Path) -> bool:
         """
@@ -307,28 +313,11 @@ class FrameworkRules:
             )
         )
 
-    def _sqlalchemy_classes(self, definitions: dict[Path, list[Definition]]) -> set[str]:
+    def _sqlalchemy_classes(self, classes: list[tuple[Path, str]], made: set[str]) -> set[str]:
         """
         Get the dotted names of the declarative models of SQLAlchemy, and of the classes that they
-        inherit from.
+        inherit from, given the classes of the project and the base classes that it makes.
         """
-        # The base classes that the project makes with SQLAlchemy's function or decorator.
-        made: set[str] = set()
-        classes: list[tuple[Path, str]] = []
-        for path, file_definitions in definitions.items():
-            for definition in file_definitions:
-                name = definition.qualified_name
-                if definition.kind == "class":
-                    classes.append((path, name))
-                    if _is_sqlalchemy(self._hierarchy.decorators(path, name), _SQLALCHEMY_BASE_DECORATORS):
-                        made.add(self._dotted_name(path, name))
-                elif (
-                    definition.kind == "variable"
-                    and definition.call is not None
-                    and _is_sqlalchemy(self._hierarchy.resolve(path, definition.call), _SQLALCHEMY_BASE_FUNCTIONS)
-                ):
-                    made.add(self._dotted_name(path, name))
-
         # A variable that a class inherits from in its own module is among its base classes by its name
         # alone.
         models = set(made)
@@ -356,7 +345,7 @@ class FrameworkRules:
         """
         Get the dotted name of a class of a module, as it is among the base classes of a class.
         """
-        return f"{self._names[path].name}.{name}"
+        return f"{self._modules[path].name.name}.{name}"
 
 
 def _is_pytest_file(path: Path) -> bool:
@@ -374,9 +363,9 @@ def _is_pytest_class(path: Path, name: str) -> bool:
     return _is_pytest_file(path) and all(part.startswith("Test") for part in name.split("."))
 
 
-def _is_sqlalchemy(names: frozenset[str], ends: frozenset[str]) -> bool:
+def _is_sqlalchemy(names: frozenset[str], ends: tuple[str, ...]) -> bool:
     """
     Check whether one of the dotted names of something is a name of SQLAlchemy that ends with one of
-    the given names, such as `sqlalchemy.orm.mapped_column` for `mapped_column`.
+    the given ends, such as `sqlalchemy.orm.mapped_column` for `.mapped_column`.
     """
-    return any(name.startswith("sqlalchemy.") and name.endswith(tuple(f".{end}" for end in ends)) for name in names)
+    return any(name.startswith("sqlalchemy.") and name.endswith(ends) for name in names)
