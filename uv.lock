@@ -1084,19 +1084,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pytest-sugar"
-version = "1.1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pytest" },
-    { name = "termcolor" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0b/4e/60fed105549297ba1a700e1ea7b828044842ea27d72c898990510b79b0e2/pytest-sugar-1.1.1.tar.gz", hash = "sha256:73b8b65163ebf10f9f671efab9eed3d56f20d2ca68bda83fa64740a92c08f65d", size = 16533, upload-time = "2025-08-23T12:19:35.737Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/87/d5/81d38a91c1fdafb6711f053f5a9b92ff788013b19821257c2c38c1e132df/pytest_sugar-1.1.1-py3-none-any.whl", hash = "sha256:2f8319b907548d5b9d03a171515c1d43d2e38e32bd8182a1781eb20b43344cc8", size = 11440, upload-time = "2025-08-23T12:19:34.894Z" },
-]
-
-[[package]]
 name = "python-dateutil"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1232,15 +1219,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/89/a2/7e2d5d0c46c5216cde98c51a1c8c556acbb6f3972e6139b75e0b51054499/shpyx-1.0.0.tar.gz", hash = "sha256:21a8ae5626ed8d22a781258a0ee83bebba37830ac642187191df0e1f668a8fec", size = 117873, upload-time = "2026-10-23T14:48:25.764Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/25/763b99fd42e631dd64fc8380839ed95da0ad34a8c881232ccddbf8300880/shpyx-1.0.0-py3-none-any.whl", hash = "sha256:4cdc60c4616518a04d366ec3260979094c4bad48e17de029be56e895ddbf7ea0", size = 11676, upload-time = "2026-10-23T14:48:24.868Z" },
-]
-
-[[package]]
-name = "termcolor"
-version = "3.3.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/46/79/cf31d7a93a8fdc6aa0fbb665be84426a8c5a557d9240b6239e9e11e35fc5/termcolor-3.3.0.tar.gz", hash = "sha256:348871ca648ec6a9a983a13ab626c0acce02f515b9e1983332b17af7979521c5", size = 14434, upload-time = "2025-12-29T12:55:21.882Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/d1/8bb87d21e9aeb323cc03034f5eaf2c8f69841e40e4853c2627edf8111ed3/termcolor-3.3.0-py3-none-any.whl", hash = "sha256:cf642efadaf0a8ebbbf4bc7a31cec2f9b5f21a9f726f4ccbb08192c9c26f43a5", size = 7734, upload-time = "2025-12-29T12:55:20.718Z" },
 ]
 
 [[package]]
@@ -1401,7 +1379,6 @@ dev = [
     { name = "prek" },
     { name = "pytest" },
     { name = "pytest-cov" },
-    { name = "pytest-sugar" },
     { name = "ruff" },
     { name = "shpyx" },
     { name = "ty" },
@@ -1424,7 +1401,6 @@ dev = [
     { name = "prek", specifier = "==0.5.10" },
     { name = "pytest", specifier = "==9.2.0" },
     { name = "pytest-cov", specifier = "==7.1.0" },
-    { name = "pytest-sugar", specifier = "==1.1.1" },
     { name = "ruff", specifier = "==0.17.4" },
     { name = "shpyx", specifier = "==1.0.0" },
     { name = "ty", specifier = "==0.0.101" },
