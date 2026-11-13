@@ -14,7 +14,7 @@ those that nothing references.
 
 ## Quick start
 
-Check the project in the current directory, using [`uvx`](https://docs.astral.sh/uv/):
+Run it with [`uvx`](https://docs.astral.sh/uv/):
 
 ```shell
 $ uvx unref
@@ -22,12 +22,8 @@ src/project/models.py:12:7: unused-class 'Account'
 src/project/utils.py:40:5: unused-function 'parse_date'
 ```
 
-The tests, fixtures and hooks that pytest and unittest find by themselves count as used, without any
-configuration. See the [configuration](https://unref.readthedocs.io/en/latest/configuration/) to change
-that, and for the other options.
-
-Or run it as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook, next to
-[Ruff](https://docs.astral.sh/ruff/), which covers unused imports and local variables:
+Or as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook, alongside
+[Ruff](https://docs.astral.sh/ruff/):
 
 ```yaml
 repos:
@@ -42,17 +38,15 @@ repos:
       - id: unref
 ```
 
-See the [documentation](https://unref.readthedocs.io/en/latest/#pre-commit-and-prek) for how the hook works.
-
 ## Benchmark
 
 Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.0, about 2,100 files):
 
 | Tool                | Time   |
 | ------------------- | ------ |
-| unref               | 2.66s  |
-| unref (one process) | 9.87s  |
-| vulture             | 19.46s |
+| unref               | 3.96s  |
+| unref (one process) | 9.32s  |
+| vulture             | 14.87s |
 
 Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py).
 
