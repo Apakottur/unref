@@ -5,12 +5,23 @@
 
 # unref
 
-Find unreferenced Python code.
-
-`unref` reports the unused functions, classes, methods, variables and attributes of a Python project:
-those that nothing references.
+Find dead code in Python projects: the unused functions, classes, methods, variables and attributes that
+nothing references.
 
 **Documentation**: [unref.readthedocs.io](https://unref.readthedocs.io/)
+
+## Why
+
+Unused code piles up in every codebase, faster than ever now that AI tools write much of it.
+
+[Ruff](https://docs.astral.sh/ruff/) does not find unused code yet, see
+[astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` fills that gap until it does:
+
+- **Just works**: built-in rules for pytest, unittest, Pydantic and SQLAlchemy, so most projects need little
+  or no configuration.
+- **Ruff-style**: same conventions, options and output style, and it covers what Ruff leaves out.
+- **Fast**: checks all of CPython in seconds.
+- **Modern**: ty-style rule codes and configuration in `pyproject.toml`.
 
 ## Quick start
 
@@ -33,10 +44,19 @@ repos:
       - id: ruff-check
       - id: ruff-format
   - repo: https://github.com/Apakottur/unref
-    rev: "" # The latest release.
+    rev: v0.1.0 # Or run `pre-commit autoupdate`.
     hooks:
       - id: unref
 ```
+
+## How it works
+
+- **Matched by module**: a function, class or variable is used only when its own module reads it, or
+  another module reaches it through an import, `module.name` or `__all__`.
+- **Installed base classes**: base classes from the project's environment are followed, so the methods a
+  subclass overrides count as used.
+- **Ignore comments by code**: `# unref: ignore[...]` names the rule it ignores, and a comment that ignores
+  nothing is reported.
 
 ## Benchmark
 
@@ -50,19 +70,7 @@ Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.
 
 Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py).
 
-## Why
-
-Unused code piles up in every codebase, faster than ever now that AI tools write much of it.
-
-[Ruff](https://docs.astral.sh/ruff/) does not find unused code yet, see
-[astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` fills that gap until it does:
-
-- **Just works**: sensible defaults for common frameworks, so most projects need little or no
-  configuration.
-- **Made for Ruff**: same conventions, options and output style, and it covers what Ruff leaves out.
-- **Fast**: checks all of CPython in seconds.
-- **Modern**: ty-style rule codes, configuration in `pyproject.toml`, and a typed Python API.
-
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md).
+False positives and other bugs are welcome as [issues](https://github.com/Apakottur/unref/issues). To
+contribute code, see [CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md).
