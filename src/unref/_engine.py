@@ -264,6 +264,9 @@ def _imported_objects(
         Each object with its module, and its name in the module followed by the attributes.
     """
     found: set[tuple[Path, tuple[str, ...]]] = set()
+    # Each binding that is followed is followed once, which ends a cycle of modules that import the
+    # names of each other.
+    followed: set[tuple[Path, str]] = set()
     pending = [(path, binding, attributes)]
     while pending:
         path, (source, level, name), attributes = pending.pop()
@@ -271,16 +274,20 @@ def _imported_objects(
         if module is None:
             continue
         parts = [*module.split("."), *filter(None, [name]), *attributes]
+        longest = None
         for index in range(1, len(parts)):
             for imported in files_by_name.get(".".join(parts[:index]), []):
-                read = (imported, tuple(parts[index:]))
-                if read in found:
-                    continue
-                found.add(read)
-                # A module that imports the name in turn, such as a package that re-exports it.
-                imported_binding = facts[imported].references.bindings.get(parts[index])
-                if imported_binding is not None:
-                    pending.append((imported, imported_binding, tuple(parts[index + 1 :])))
+                found.add((imported, tuple(parts[index:])))
+                longest = index
+        if longest is None:
+            continue
+        # A module that imports the name in turn, such as a package that re-exports it. Only the longest
+        # module is followed, as `package.module.name` reads `name` from `package.module`.
+        for imported in files_by_name[".".join(parts[:longest])]:
+            imported_binding = facts[imported].references.bindings.get(parts[longest])
+            if imported_binding is not None and (imported, parts[longest]) not in followed:
+                followed.add((imported, parts[longest]))
+                pending.append((imported, imported_binding, tuple(parts[longest + 1 :])))
     return found
 
 
