@@ -18,14 +18,15 @@ Unused imports and local variables are left to [Ruff](https://docs.astral.sh/ruf
 
 A definition counts as used when something references it:
 
-- A function, class or variable: read in its module, imported from it, read as `module.name`, or listed in
-  its `__all__`.
-- A method or attribute: read as `value.name` anywhere in the project, matched by name.
-- A field of a `TypedDict`: read as a key, `value["name"]`, `value.get("name")` or `"name" in value`,
-  anywhere in the project, matched by name.
-- A method or attribute named like a member of a base class from outside the project, such as `emit` in
-  a subclass of `logging.Handler`: the base class uses it. The base class is read from the
-  [environment of the project](configuration.md#python).
+| Definition                 | Used when                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Function, class, variable  | Read in its module, imported from it, read as `module.name`, or listed in its `__all__`.                            |
+| Method, attribute          | Read as `value.name` anywhere in the project, matched by name.                                                      |
+| `TypedDict` field          | Read as a key anywhere in the project, matched by name: `value["name"]`, `value.get("name")` or `"name" in value`.  |
+| Enum member                | Read as `Color.RED`, or the enum is read whole: `Color(value)`, `list(Color)`, or as the type of a class attribute. |
+| Member of an external base | Named like a member of a base class from outside the project, such as `emit` in a subclass of `logging.Handler`.    |
+
+A base class from outside the project is read from the [environment of the project](configuration.md#python).
 
 A reference from inside an unused function does not count, so a function that only an unused function
 calls is unused too. Dunders and `_` are never reported.
