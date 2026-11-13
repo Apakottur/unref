@@ -8,7 +8,7 @@ from types import MappingProxyType
 DEFAULT_DUMMY_VARIABLE_RGX = r"^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 # The known frameworks, and whether each is enabled by default.
-FRAMEWORKS: Mapping[str, bool] = MappingProxyType({"pytest": True, "unittest": True})
+FRAMEWORKS: Mapping[str, bool] = MappingProxyType({"pytest": True, "unittest": True, "pydantic": True})
 
 # The codes of the findings, which an ignore comment can name.
 CODES = frozenset(
@@ -62,7 +62,7 @@ class Override:
 
     Attributes:
         paths: Selects the definitions in these files and directories.
-        base_classes: Selects the definitions in subclasses of these classes, such as `pydantic.BaseModel`.
+        base_classes: Selects the definitions in subclasses of these classes, such as `ast.NodeVisitor`.
         class_decorators: Selects the definitions in classes with these decorators, such as
             `dataclasses.dataclass`.
         used_names: Names, as patterns, of the selected definitions that count as used.

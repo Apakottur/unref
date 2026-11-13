@@ -5,16 +5,7 @@ and adapt.
 
 ## Pydantic
 
-Pydantic reads the fields of a model:
-
-```toml
-[[tool.unref.overrides]]
-base-classes = ["pydantic.BaseModel", "pydantic.main.BaseModel"]
-used-names = ["*"]
-```
-
-The second name covers subclasses from other packages, such as `pydantic_settings.BaseSettings`, which
-import it from `pydantic.main`.
+Built in: the [`pydantic` framework](configuration.md#frameworks) needs no configuration.
 
 ## FastAPI
 
@@ -26,8 +17,8 @@ used-decorators = ["app.get", "app.post", "router.get", "router.post"]
 ```
 
 A decorator is matched by its name as written: add the methods and the names of the `FastAPI` and
-`APIRouter` objects your project uses, such as `users_router.delete` or `app.websocket`. Add the
-[Pydantic](#pydantic) recipe for the models.
+`APIRouter` objects your project uses, such as `users_router.delete` or `app.websocket`. The
+[`pydantic` framework](configuration.md#frameworks) covers the models.
 
 ## pytest
 

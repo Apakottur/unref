@@ -1,3 +1,7 @@
+# The rules of Pydantic are turned off, to show what the overrides do on their own.
+[tool.unref.frameworks]
+pydantic = false
+
 [[tool.unref.overrides]]
 base-classes = ["pydantic.BaseModel"]
 used-names = ["table_name"]

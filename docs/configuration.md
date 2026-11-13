@@ -31,7 +31,7 @@ Names that count as used, such as those a framework looks up. Patterns, with `*`
 
 ```toml
 [tool.unref]
-used-names = ["model_config", "visit_*"]
+used-names = ["handle_*", "visit_*"]
 ```
 
 ### `used-decorators`
@@ -101,6 +101,7 @@ unittest = false
 | ---------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pytest`   | `true`             | In `test_*.py` and `*_test.py` files: `test*` functions, `Test*` classes and their `test*` methods, setup and teardown functions. Anywhere: `pytest_*` hooks and fixtures. |
 | `unittest` | `true`             | Subclasses of `unittest.TestCase`, with their `test*`, `setUp` and `tearDown` methods.                                                                                         |
+| `pydantic` | `true`             | In subclasses of `pydantic.BaseModel`: fields and `model_config`. Anywhere: methods with Pydantic's validator and serializer decorators, and `computed_field`.              |
 
 A project with custom pytest naming can add what these miss with an [override](#overrides).
 
@@ -153,7 +154,7 @@ Options that apply only to some definitions. An override selects them with at le
 | Selector           | Selects                                                                                |
 | ------------------ | -------------------------------------------------------------------------------------- |
 | `paths`            | Definitions in these files and directories.                                            |
-| `base-classes`     | Definitions in subclasses of these classes, such as `pydantic.BaseModel`.              |
+| `base-classes`     | Definitions in subclasses of these classes, such as `ast.NodeVisitor`.                 |
 | `class-decorators` | Definitions in classes with these decorators, such as `dataclasses.dataclass`.         |
 
 With several selectors, an override applies to what matches all of them. It then takes these options,
@@ -170,8 +171,8 @@ paths = ["migrations"]
 used-names = ["Migration"]
 
 [[tool.unref.overrides]]
-base-classes = ["pydantic.BaseModel"]
-used-names = ["model_config"]
+base-classes = ["ast.NodeVisitor"]
+used-names = ["visit_*"]
 
 [[tool.unref.overrides]]
 class-decorators = ["dataclasses.dataclass"]
