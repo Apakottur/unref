@@ -5,36 +5,40 @@ Find unreferenced Python code.
 `unref` reports the unused functions, classes, methods, variables and attributes of a Python project:
 those that nothing references.
 
-## Installation
+## Quick start
 
-unref is available as [`unref`](https://pypi.org/project/unref/) on PyPI. Run it without installing via
-[`uvx`](https://docs.astral.sh/uv/), or install it with `uv` (recommended) or `pip`:
+Run it with [`uvx`](https://docs.astral.sh/uv/):
 
 ```shell
-# With uv.
-uv tool install unref@latest  # Install unref globally.
-uv add --dev unref            # Or add unref to your project.
+$ uvx unref
+src/project/models.py:12:7: unused-class 'Account'
+src/project/utils.py:40:5: unused-function 'parse_date'
+```
 
-# With pip.
-pip install unref
+Or as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook, alongside
+[Ruff](https://docs.astral.sh/ruff/):
+
+```yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.4
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+  - repo: https://github.com/Apakottur/unref
+    rev: "" # The latest release.
+    hooks:
+      - id: unref
 ```
 
 ## Usage
 
 ### Command line
 
-Check the project in the current directory:
+`unref` checks the project in the current directory, or only the files and directories it is given:
 
 ```shell
-$ unref
-src/project/models.py:12:7: unused-class 'Account'
-src/project/utils.py:40:5: unused-function 'parse_date'
-```
-
-Or only some files and directories:
-
-```shell
-unref src scripts
+uvx unref src scripts
 ```
 
 `unref` exits with a non-zero status if anything is found.
@@ -58,21 +62,8 @@ for finding in unref.check(["src"]):
 
 ### pre-commit and prek
 
-`unref` can run as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook. It
-leaves unused imports and local variables to [Ruff](https://docs.astral.sh/ruff/), so run both:
-
-```yaml
-repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.4
-    hooks:
-      - id: ruff-check
-      - id: ruff-format
-  - repo: https://github.com/Apakottur/unref
-    rev: "" # The latest release.
-    hooks:
-      - id: unref
-```
+The hook in the [quick start](#quick-start) runs next to Ruff, which covers the unused imports and local
+variables that `unref` leaves out.
 
 Set `rev` to the [latest release](https://github.com/Apakottur/unref/releases), or let `pre-commit autoupdate`
 or `prek autoupdate` fill it in.
