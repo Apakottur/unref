@@ -33,6 +33,7 @@ from pathlib import Path
 
 from unref._classes import ClassHierarchy
 from unref._definitions import Definition
+from unref._models import Framework
 from unref._modules import ModuleName
 
 _PYTEST_FILES = ("test_*.py", "*_test.py")
@@ -142,7 +143,7 @@ class FrameworkRules:
 
     def __init__(
         self,
-        frameworks: Collection[str],
+        frameworks: Collection[Framework],
         *,
         definitions: dict[Path, list[Definition]],
         names: dict[Path, ModuleName],
@@ -155,10 +156,10 @@ class FrameworkRules:
             names: The module name of each file.
             hierarchy: The hierarchy of the classes of the project.
         """
-        self._pytest = "pytest" in frameworks
-        self._unittest = "unittest" in frameworks
-        self._pydantic = "pydantic" in frameworks
-        self._sqlalchemy = "sqlalchemy" in frameworks
+        self._pytest = Framework.PYTEST in frameworks
+        self._unittest = Framework.UNITTEST in frameworks
+        self._pydantic = Framework.PYDANTIC in frameworks
+        self._sqlalchemy = Framework.SQLALCHEMY in frameworks
         self._names = names
         self._hierarchy = hierarchy
 

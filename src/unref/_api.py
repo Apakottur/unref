@@ -2,7 +2,7 @@ import os
 from collections.abc import Iterable, Mapping
 
 from unref._engine import find_unused
-from unref._models import DEFAULT_DUMMY_VARIABLE_RGX, Finding, Override
+from unref._models import DEFAULT_DUMMY_VARIABLE_RGX, Finding, Framework, Override
 
 
 def check(
@@ -16,7 +16,7 @@ def check(
     python: str | os.PathLike[str] | None = None,
     dummy_variable_rgx: str = DEFAULT_DUMMY_VARIABLE_RGX,
     entry_points: Iterable[str] = (),
-    frameworks: Mapping[str, bool] = {},
+    frameworks: Mapping[Framework, bool] = {},
 ) -> list[Finding]:
     """
     Find the unused code in a Python project.
@@ -37,8 +37,8 @@ def check(
             purpose. Defaults to Ruff's default.
         entry_points: Object references of the entry points of the project, such as
             `package.module:function`. The objects they name count as used.
-        frameworks: Whether the built-in rules of each framework apply, by name. A framework that is
-            not given keeps its default.
+        frameworks: Whether the built-in rules of each framework apply, such as
+            `{Framework.UNITTEST: False}`. A framework that is not given keeps its default.
 
     Returns:
         The findings: one for each unused definition, for each problem with an ignore comment, and for
