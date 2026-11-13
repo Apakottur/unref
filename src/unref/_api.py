@@ -37,8 +37,8 @@ def check(
             purpose. Defaults to Ruff's default.
         entry_points: Object references of the entry points of the project, such as
             `package.module:function`. The objects they name count as used.
-        frameworks: Frameworks whose rules apply, by name: what they find and call by themselves counts
-            as used. Defaults to all the known ones.
+        frameworks: Frameworks whose built-in rules apply, by name. Defaults to those enabled by
+            default.
 
     Returns:
         The findings: one for each unused definition, for each problem with an ignore comment, and for
