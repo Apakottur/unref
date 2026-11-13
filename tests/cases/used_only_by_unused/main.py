@@ -32,15 +32,18 @@ class Holder:
         return self.only_from_unused()
 
 
-# A nested function is used only if the function that it is in is used and it is called.
+# A nested function or class is used only if the function that it is in is used and it is read.
 def outer():
     def called():
         return 3
 
+    class Used:
+        pass
+
     def not_called():  # expect: 9 [unused-function]
         return from_not_called()
 
-    return called()
+    return called(), Used
 
 
 def from_not_called():  # expect: 5 [unused-function]

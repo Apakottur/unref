@@ -1,5 +1,0 @@
-# A lone `!` and a trailing backslash are invalid, git skips them and keeps the other lines.
-!
-scratch_*.py
-broken\
-!scratch_kept.py

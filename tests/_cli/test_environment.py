@@ -22,6 +22,9 @@ _WITHOUT_ENVIRONMENT = (
     f"{_CASE}/main.py:21:9: unused-method 'hook'\n"
 )
 
+# Removes the active environment for the run, so that the environment of the tests does not count.
+_NO_ACTIVE_ENVIRONMENT: dict[str, str | None] = {"VIRTUAL_ENV": None}
+
 
 def _no_config(tmp_path: Path) -> Path:
     """
@@ -36,9 +39,12 @@ def _no_config(tmp_path: Path) -> Path:
 @pytest.mark.parametrize("python", [".venv", ".venv/bin/python"])
 def test_option(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, python: str) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
-    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), "--python", str(_CASE / python), str(_CASE)])
+    result = _runner.invoke(
+        app,
+        ["--config", str(_no_config(tmp_path)), "--python", str(_CASE / python), str(_CASE)],
+        env=_NO_ACTIVE_ENVIRONMENT,
+    )
 
     assert result.stdout == _WITH_ENVIRONMENT
 
@@ -50,10 +56,11 @@ def test_option_windows_system_python(monkeypatch: pytest.MonkeyPatch, tmp_path:
     shutil.copytree(_CASE / ".venv" / "lib" / "python3.14" / "site-packages", prefix / "Lib" / "site-packages")
     (prefix / "python.exe").touch()
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
     result = _runner.invoke(
-        app, ["--config", str(_no_config(tmp_path)), "--python", str(prefix / "python.exe"), str(_CASE)]
+        app,
+        ["--config", str(_no_config(tmp_path)), "--python", str(prefix / "python.exe"), str(_CASE)],
+        env=_NO_ACTIVE_ENVIRONMENT,
     )
 
     # The `.pth` file of the copy lists a directory that is not next to it.
@@ -79,18 +86,18 @@ def test_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text(f'python = "{_CASE.name}/.venv"\n')
     monkeypatch.chdir(_CASE.parent)
-    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
-    result = _runner.invoke(app, ["--config", str(config), str(_CASE)])
+    result = _runner.invoke(app, ["--config", str(config), str(_CASE)], env=_NO_ACTIVE_ENVIRONMENT)
 
     assert result.stdout == _WITH_ENVIRONMENT
 
 
 def test_active_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("VIRTUAL_ENV", str(_CASE / ".venv"))
 
-    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), str(_CASE)])
+    result = _runner.invoke(
+        app, ["--config", str(_no_config(tmp_path)), str(_CASE)], env={"VIRTUAL_ENV": str(_CASE / ".venv")}
+    )
 
     assert result.stdout == _WITH_ENVIRONMENT
 
@@ -99,17 +106,15 @@ def test_venv_of_current_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     # A prek or pre-commit hook activates the environment that runs the check, which is not the one of
     # the project.
     monkeypatch.chdir(_CASE)
-    monkeypatch.setenv("VIRTUAL_ENV", sys.prefix)
 
-    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), str(_CASE)])
+    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), str(_CASE)], env={"VIRTUAL_ENV": sys.prefix})
 
     assert result.stdout == _WITH_ENVIRONMENT
 
 
 def test_no_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
-    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), str(_CASE)])
+    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), str(_CASE)], env=_NO_ACTIVE_ENVIRONMENT)
 
     assert result.stdout == _WITHOUT_ENVIRONMENT
