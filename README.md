@@ -42,11 +42,11 @@ repos:
 
 Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.0, about 2,100 files):
 
-| Tool                | Time   |
-| ------------------- | ------ |
-| unref               | 3.96s  |
-| unref (one process) | 9.32s  |
-| vulture             | 14.87s |
+| Tool                                               | Time   |
+| -------------------------------------------------- | ------ |
+| unref                                              | 3.96s  |
+| unref (one process)                                | 9.32s  |
+| [vulture](https://github.com/jendrikseipp/vulture) | 14.87s |
 
 Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py).
 
