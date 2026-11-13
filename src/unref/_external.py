@@ -1,38 +1,14 @@
 import ast
-from dataclasses import dataclass
 from importlib.machinery import BYTECODE_SUFFIXES, EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
 
-from unref._definitions import Definition
 from unref._modules import ModuleName
 from unref._references import Binding, References, parse_module, walk_module
+from unref._symbols import ModuleSymbols
 
 # The files that a module can be imported from, in the order that Python looks for them: a compiled
 # module, a source, and a bytecode file.
 _SUFFIXES = (*EXTENSION_SUFFIXES, *SOURCE_SUFFIXES, *BYTECODE_SUFFIXES)
-
-
-@dataclass(frozen=True)
-class ExternalModule:
-    """
-    A module that is imported from outside the project, such as a module of the standard library.
-
-    Attributes:
-        path: The source file of the module.
-        name: The name that the module is imported by.
-        definitions: What the module defines.
-        bindings: The names that the module imports at its top level.
-        stars: The modules that the module star imports at its top level, each as it is written and
-            with its number of leading dots.
-        lazy: The names that the module gives out from its `__getattr__`, each with the imports of it.
-    """
-
-    path: Path
-    name: ModuleName
-    definitions: list[Definition]
-    bindings: dict[str, Binding]
-    stars: list[tuple[str | None, int]]
-    lazy: dict[str, list[Binding]]
 
 
 class ExternalModules:
@@ -50,7 +26,7 @@ class ExternalModules:
             search_path: The directories that modules are imported from, in order.
         """
         self._search_path = search_path
-        self._modules: dict[str, ExternalModule | None] = {}
+        self._modules: dict[str, ModuleSymbols | None] = {}
         self._found: dict[str, tuple[Path | None, bool] | None] = {}
 
     def exists(self, name: str) -> bool:
@@ -65,7 +41,7 @@ class ExternalModules:
         """
         return self._locate(name) is not None
 
-    def get(self, name: str) -> ExternalModule | None:
+    def get(self, name: str) -> ModuleSymbols | None:
         """
         Get a module by its dotted name.
 
@@ -100,7 +76,7 @@ class ExternalModules:
             self._found[name] = (file, locations is not None)
         return self._found[name]
 
-    def _read(self, name: str) -> ExternalModule | None:
+    def _read(self, name: str) -> ModuleSymbols | None:
         """
         Find a module and read its source.
         """
@@ -115,30 +91,13 @@ class ExternalModules:
             return None
 
         definitions, references = walk_module(file, tree, source)
-        return ExternalModule(
-            path=file,
-            name=ModuleName(name=name, is_package=is_package),
-            definitions=definitions,
-            bindings=references.bindings,
-            stars=star_imports(references),
-            lazy=lazy_imports(tree, references),
+        return ModuleSymbols.of(
+            file,
+            ModuleName(name=name, is_package=is_package),
+            definitions,
+            references,
+            lazy_imports(tree, references),
         )
-
-
-def star_imports(references: References) -> list[tuple[str | None, int]]:
-    """
-    Get the modules that a module star imports at its top level.
-
-    Args:
-        references: What the module refers to.
-
-    Returns:
-        The modules, each as it is written and with its number of leading dots.
-    """
-    return sorted(
-        ((source, level) for owner, source, level, name in references.imports if owner is None and name == "*"),
-        key=str,
-    )
 
 
 def lazy_imports(tree: ast.Module, references: References) -> dict[str, list[Binding]]:

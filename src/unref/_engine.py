@@ -11,13 +11,14 @@ from pathlib import Path
 from unref._classes import ClassHierarchy
 from unref._definitions import Definition
 from unref._discover import discover, is_under
-from unref._external import ExternalModules, environment_paths, star_imports
+from unref._external import ExternalModules, environment_paths
 from unref._files import FileFacts, analyze_files
 from unref._frameworks import FrameworkRules
 from unref._ignores import apply_ignore_comments, ignored_codes
 from unref._models import FRAMEWORKS, Finding, Framework, Override
 from unref._modules import ModuleName, import_root, module_name
 from unref._references import Binding, Owner
+from unref._symbols import ModuleSymbols
 from unref._transitive import transitive
 
 # The object reference of an entry point, as the entry points specification of the Python Packaging
@@ -108,7 +109,12 @@ def find_unused(
         files_by_name.setdefault(name.name, []).append(path)
 
     uses = _uses(files, facts=facts, names=names, files_by_name=files_by_name)
-    hierarchy = _hierarchy(files, facts=facts, names=names, files_by_name=files_by_name, python=python)
+    modules = {
+        path: ModuleSymbols.of(path, names[path], facts[path].definitions, facts[path].references, facts[path].lazy)
+        for path in files
+    }
+    hierarchy = _hierarchy(modules, files_by_name=files_by_name, python=python)
+    fields, enums = _subclass_attributes(files, facts=facts, hierarchy=hierarchy, bases=(_TYPED_DICTS, _ENUMS))
     kept, ignored = _roots(
         files,
         facts=facts,
@@ -118,20 +124,15 @@ def find_unused(
         overrides=overrides,
         dummy_variable_rgx=dummy_variable_rgx,
         entry_objects=_entry_objects(entry_points, files_by_name=files_by_name),
-        rules=FrameworkRules(
-            enabled,
-            definitions={path: facts[path].definitions for path in files},
-            names=names,
-            hierarchy=hierarchy,
-        ),
+        rules=FrameworkRules(enabled, modules=modules, hierarchy=hierarchy),
     )
 
     graph = _Graph(
         files=files,
         definitions=[definition for path in files for definition in facts[path].definitions],
         uses=uses,
-        fields=_typed_dict_fields(files, facts=facts, hierarchy=hierarchy),
-        enums=_enum_members(files, facts=facts, hierarchy=hierarchy),
+        fields={definition for members in fields.values() for definition in members},
+        enums=enums,
         has_all={path for path in files if facts[path].references.has_all},
     )
 
@@ -292,10 +293,8 @@ def _imported_objects(
 
 
 def _hierarchy(
-    files: list[Path],
+    modules: dict[Path, ModuleSymbols],
     *,
-    facts: dict[Path, FileFacts],
-    names: dict[Path, ModuleName],
     files_by_name: dict[str, list[Path]],
     python: str | os.PathLike[str] | None,
 ) -> ClassHierarchy:
@@ -307,9 +306,7 @@ def _hierarchy(
     environment of the project, if it is given, replace those of the check.
 
     Args:
-        files: The files of the project.
-        facts: What each file defines and refers to.
-        names: The module name of each file.
+        modules: The symbols of each module of the project.
         files_by_name: The files of each module name.
         python: The Python environment or interpreter of the project, or None for the environment that the
             check runs in.
@@ -324,67 +321,39 @@ def _hierarchy(
             *environment_paths(Path(python)),
             *(path for path in imported_from if path not in own_site_packages),
         ]
-    search_path = list(dict.fromkeys([*(import_root(path, names[path]) for path in files), *imported_from]))
-    return ClassHierarchy(
-        names=names,
-        files_by_name=files_by_name,
-        bindings={path: facts[path].references.bindings for path in files},
-        stars={path: star_imports(facts[path].references) for path in files},
-        lazy={path: facts[path].lazy for path in files},
-        definitions={path: facts[path].definitions for path in files},
-        external=ExternalModules(search_path),
+    search_path = list(
+        dict.fromkeys([*(import_root(path, module.name) for path, module in modules.items()), *imported_from])
     )
+    return ClassHierarchy(modules, files_by_name=files_by_name, external=ExternalModules(search_path))
 
 
-def _typed_dict_fields(
-    files: list[Path], *, facts: dict[Path, FileFacts], hierarchy: ClassHierarchy
-) -> set[Definition]:
+def _subclass_attributes(
+    files: list[Path], *, facts: dict[Path, FileFacts], hierarchy: ClassHierarchy, bases: Iterable[frozenset[str]]
+) -> list[dict[tuple[Path, str], list[Definition]]]:
     """
-    Find the fields of the TypedDicts of a project, which are read as keys rather than as attributes.
+    Find the attributes of the classes of a project that inherit from given base classes, such as the
+    fields of the TypedDicts, which are read as keys rather than as attributes, or the members of the
+    enums.
 
     Args:
         files: The files of the project.
         facts: What each file defines and refers to.
         hierarchy: The hierarchy of the classes of the project.
+        bases: The sets of dotted names of base classes.
 
     Returns:
-        The attributes of the classes that inherit from `TypedDict`, directly or not.
+        For each set of base classes, the attributes of each class that inherits from one of them,
+        directly or not, by its file and its name in the module.
     """
-    return {
-        definition
-        for path in files
-        for definition in facts[path].definitions
-        if definition.kind == "attribute"
-        and definition.owner is not None
-        and not hierarchy.ancestors(path, definition.owner).isdisjoint(_TYPED_DICTS)
-    }
-
-
-def _enum_members(
-    files: list[Path], *, facts: dict[Path, FileFacts], hierarchy: ClassHierarchy
-) -> dict[tuple[Path, str], list[Definition]]:
-    """
-    Find the members of the enums of a project.
-
-    Args:
-        files: The files of the project.
-        facts: What each file defines and refers to.
-        hierarchy: The hierarchy of the classes of the project.
-
-    Returns:
-        The attributes of each class that inherits from `enum.Enum`, directly or not, by its file and its
-        name in the module.
-    """
-    members: dict[tuple[Path, str], list[Definition]] = defaultdict(list)
+    attributes: dict[tuple[Path, str], list[Definition]] = defaultdict(list)
     for path in files:
         for definition in facts[path].definitions:
-            if (
-                definition.kind == "attribute"
-                and definition.owner is not None
-                and not hierarchy.ancestors(path, definition.owner).isdisjoint(_ENUMS)
-            ):
-                members[path, definition.owner].append(definition)
-    return members
+            if definition.kind == "attribute" and definition.owner is not None:
+                attributes[path, definition.owner].append(definition)
+    return [
+        {key: members for key, members in attributes.items() if not hierarchy.ancestors(*key).isdisjoint(names)}
+        for names in bases
+    ]
 
 
 def _roots(

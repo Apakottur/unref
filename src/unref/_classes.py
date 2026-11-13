@@ -1,9 +1,8 @@
 from pathlib import Path
 
-from unref._definitions import Definition
 from unref._external import ExternalModules
-from unref._modules import ModuleName
 from unref._references import Binding
+from unref._symbols import ModuleSymbols
 
 
 class ClassHierarchy:
@@ -17,52 +16,23 @@ class ClassHierarchy:
     """
 
     def __init__(
-        self,
-        *,
-        names: dict[Path, ModuleName],
-        files_by_name: dict[str, list[Path]],
-        bindings: dict[Path, dict[str, Binding]],
-        stars: dict[Path, list[tuple[str | None, int]]],
-        lazy: dict[Path, dict[str, list[Binding]]],
-        definitions: dict[Path, list[Definition]],
-        external: ExternalModules,
+        self, modules: dict[Path, ModuleSymbols], *, files_by_name: dict[str, list[Path]], external: ExternalModules
     ) -> None:
         """
         Args:
-            names: The name of each module of the project.
+            modules: The symbols of each module of the project.
             files_by_name: The files of the project by their module name.
-            bindings: The names that each module imports at its top level.
-            stars: The modules that each module star imports at its top level, each as it is written
-                and with its number of leading dots.
-            lazy: The names that each module gives out from its `__getattr__`, each with the imports of
-                it in the function.
-            definitions: The definitions of each module of the project.
             external: The modules that are imported from outside the project.
         """
-        # The classes of each module, by their name in the module, with their decorators as they are
-        # written.
-        self._decorators = {
-            path: {
-                definition.qualified_name: definition.decorators
-                for definition in file_definitions
-                if definition.kind == "class"
-            }
-            for path, file_definitions in definitions.items()
-        }
+        self._project = modules
+        # The modules outside the project that are read are added to this, so it is a copy.
+        self._modules = dict(modules)
+        self._files_by_name = files_by_name
+        self._external = external
+        self._ancestors: dict[tuple[Path, str], frozenset[str]] = {}
+        self._inherited: dict[tuple[Path, str], frozenset[str]] = {}
         self._resolved_decorators: dict[tuple[Path, str], frozenset[str]] = {}
         self._resolved: dict[tuple[Path, str], frozenset[str]] = {}
-        # The external modules that are read are added to these, so they are copies.
-        self._classes = {path: _bases(file_definitions) for path, file_definitions in definitions.items()}
-        self._names = dict(names)
-        self._files_by_name = files_by_name
-        self._bindings = dict(bindings)
-        self._stars = dict(stars)
-        self._lazy = dict(lazy)
-        self._ancestors: dict[tuple[Path, str], frozenset[str]] = {}
-        self._external = external
-        # The members of the classes of each module outside the project, by the name of the class.
-        self._external_members: dict[Path, dict[str, set[str]]] = {}
-        self._inherited: dict[tuple[Path, str], frozenset[str]] = {}
 
     def ancestors(self, path: Path, name: str) -> frozenset[str]:
         """
@@ -80,7 +50,7 @@ class ClassHierarchy:
         if key not in self._ancestors:
             seen: set[str] = set()
             found: set[str] = set()
-            for base in self._classes[path][name]:
+            for base in self._modules[path].bases[name]:
                 found |= self._resolve(path, base, seen)
             self._ancestors[key] = frozenset(found)
         return self._ancestors[key]
@@ -106,7 +76,8 @@ class ClassHierarchy:
             for ancestor in self.ancestors(path, name):
                 for file, symbol in self._locate(ancestor):
                     # The members of the modules of the project are not collected.
-                    found |= self._external_members.get(file, {}).get(symbol, set())
+                    if file not in self._project:
+                        found |= self._modules[file].members.get(symbol, set())
             self._inherited[key] = frozenset(found)
         return self._inherited[key]
 
@@ -125,7 +96,7 @@ class ClassHierarchy:
         key = (path, name)
         if key not in self._resolved_decorators:
             self._resolved_decorators[key] = frozenset().union(
-                *(self.resolve(path, decorator) for decorator in self._decorators[path][name])
+                *(self.resolve(path, decorator) for decorator in self._modules[path].decorators[name])
             )
         return self._resolved_decorators[key]
 
@@ -151,15 +122,16 @@ class ClassHierarchy:
         Get the dotted names of a base class or decorator, as it is written in a module, and of the
         base classes of a base class.
         """
+        module = self._modules[path]
         first, _, rest = written.partition(".")
 
-        if first in self._classes[path]:
+        if first in module.bases:
             # A class or function of the module itself.
-            return self._follow(f"{self._names[path].name}.{written}", seen)
+            return self._follow(f"{module.name.name}.{written}", seen)
 
-        if first in self._bindings[path]:
+        if first in module.bindings:
             # A name that the module imports.
-            imported = self._imported(path, self._bindings[path][first])
+            imported = self._imported(path, module.bindings[first])
             if imported is None:
                 return set()
             return self._follow(".".join(filter(None, [imported, rest])), seen)
@@ -178,22 +150,23 @@ class ClassHierarchy:
 
         found = {name}
         for path, symbol in self._locate(name):
+            module = self._modules[path]
             first, _, rest = symbol.partition(".")
-            if symbol in self._classes[path]:
-                for base in self._classes[path][symbol]:
+            if symbol in module.bases:
+                for base in module.bases[symbol]:
                     found |= self._resolve(path, base, seen)
-            elif first in self._bindings[path]:
-                imported = self._imported(path, self._bindings[path][first])
+            elif first in module.bindings:
+                imported = self._imported(path, module.bindings[first])
                 if imported is not None:
                     found |= self._follow(".".join(filter(None, [imported, rest])), seen)
-            elif first not in self._classes[path]:
+            elif first not in module.bases:
                 # A name that the module may star import.
-                for source, level in self._stars[path]:
-                    star_module = self._names[path].resolve(source, level)
+                for source, level in module.stars:
+                    star_module = module.name.resolve(source, level)
                     if star_module is not None:
                         found |= self._follow(f"{star_module}.{symbol}", seen)
                 # A name that the `__getattr__` of the module imports, which it gives out.
-                for binding in self._lazy[path].get(first, []):
+                for binding in module.lazy.get(first, []):
                     imported = self._imported(path, binding)
                     if imported is not None:
                         found |= self._follow(".".join(filter(None, [imported, rest])), seen)
@@ -223,41 +196,18 @@ class ClassHierarchy:
         Get the dotted name that an imported name of a module stands for.
         """
         module, level, name = binding
-        source = self._names[path].resolve(module, level)
+        source = self._modules[path].name.resolve(module, level)
         if source is None:
             return None
         return ".".join(filter(None, [source, name]))
 
     def _read_external(self, module: str) -> list[Path]:
         """
-        Get the file of a module that is imported from outside the project, and add its classes and
-        imports to those of the project.
+        Get the file of a module that is imported from outside the project, and add its symbols to
+        those of the project.
         """
         external = self._external.get(module)
         if external is None:
             return []
-        path = external.path
-        if path not in self._classes:
-            self._names[path] = external.name
-            self._bindings[path] = external.bindings
-            self._stars[path] = external.stars
-            self._lazy[path] = external.lazy
-            self._classes[path] = _bases(external.definitions)
-            members: dict[str, set[str]] = {}
-            for definition in external.definitions:
-                if definition.owner is not None:
-                    members.setdefault(definition.owner, set()).add(definition.name)
-            self._external_members[path] = members
-        return [path]
-
-
-def _bases(definitions: list[Definition]) -> dict[str, tuple[str, ...]]:
-    """
-    Get the classes and functions of a module, by their name in the module (`Outer.Inner` for a nested
-    class), with their base classes as they are written. A function has none.
-    """
-    return {
-        definition.qualified_name: definition.bases
-        for definition in definitions
-        if definition.kind in ("class", "function")
-    }
+        self._modules.setdefault(external.path, external)
+        return [external.path]
