@@ -97,7 +97,7 @@ def test_syntax_error() -> None:
 
     assert result.exit_code == 1
     assert result.stdout == (
-        f"{case}/bad.py:5:1: invalid-syntax 'Missing parentheses in call to 'print'. Did you mean print(...)?'\n"
+        f"{case}/bad.py:6:1: invalid-syntax 'Missing parentheses in call to 'print'. Did you mean print(...)?'\n"
         f"{case}/good.py:1:5: unused-function 'unused'\n"
     )
 

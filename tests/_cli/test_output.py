@@ -36,7 +36,7 @@ def test_output_format_github() -> None:
 
     assert result.exit_code == 1
     assert result.stdout == (
-        f"::error title=unref (invalid-syntax),file={case}/bad.py,line=5,col=1::{case}/bad.py:5:1: "
+        f"::error title=unref (invalid-syntax),file={case}/bad.py,line=6,col=1::{case}/bad.py:6:1: "
         "invalid-syntax 'Missing parentheses in call to 'print'. Did you mean print(...)?'\n"
         f"::error title=unref (unused-function),file={case}/good.py,line=1,col=5::{case}/good.py:1:5: "
         "unused-function 'unused'\n"
