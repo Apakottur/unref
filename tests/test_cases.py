@@ -16,7 +16,8 @@ The comment can follow another comment on the line:
 
 The findings must match exactly: a line without the comment must not have a finding.
 
-A case is configured with a `pyproject.toml` in its directory, which also gives its entry points.
+A case is run through the command, from its directory, so it is configured with a `pyproject.toml` in
+its directory, as a project is, which also gives its entry points.
 """
 
 import re
@@ -24,13 +25,17 @@ import tokenize
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
-import unref
-from unref._config import load_config
+from unref._cli import app
 
 _CASES_DIR = Path(__file__).parent / "cases"
 _EXPECT_PREFIX = "# expect:"
 _EXPECTED = re.compile(r"\s*(?P<column>\d+) \[(?P<code>[a-z-]+)\]\s*")
+# A finding as the command prints it: `path:line:column: code 'name'`.
+_FINDING = re.compile(r"(?P<path>.+):(?P<line>\d+):(?P<column>\d+): (?P<code>[a-z-]+) '.*'")
+
+_runner = CliRunner()
 
 # A finding as compared by the tests: file path relative to the case, line, column and code.
 _Finding = tuple[str, int, int, str]
@@ -57,26 +62,24 @@ def _expected_findings(case: Path) -> list[_Finding]:
 
 def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch) -> list[_Finding]:
     """
-    Run the check on a case from its directory, as the paths of its configuration are relative to the
-    current directory, and collect its findings.
+    Run the command on a case from its directory, as a user runs it on their project, and collect the
+    findings it prints. The paths of the configuration and of the findings are relative to the current
+    directory.
     """
     monkeypatch.chdir(case)
-    config = load_config()
+    # An environment that is active in the shell that runs the tests is not the one of the case.
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
-    return sorted(
-        (finding.path.as_posix(), finding.line, finding.column, finding.code)
-        for finding in unref.check(
-            [Path()],
-            used_names=config.used_names,
-            used_decorators=config.used_decorators,
-            exclude=config.exclude,
-            overrides=config.overrides,
-            python=config.python,
-            dummy_variable_rgx=config.dummy_variable_rgx,
-            entry_points=config.entry_points,
-            frameworks=config.frameworks,
-        )
-    )
+    # A single process keeps the check in the process of the tests, which is faster for small cases.
+    result = _runner.invoke(app, ["--jobs", "1"])
+
+    assert result.exit_code in {0, 1}, result.output
+    findings: list[_Finding] = []
+    for line in result.stdout.splitlines():
+        match = _FINDING.fullmatch(line)
+        assert match, f"invalid finding {line!r}"
+        findings.append((match["path"], int(match["line"]), int(match["column"]), match["code"]))
+    return sorted(findings)
 
 
 @pytest.mark.parametrize(
