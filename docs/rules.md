@@ -25,6 +25,7 @@ A definition counts as used when something references it:
 | `TypedDict` field          | Read as a key anywhere in the project, matched by name: `value["name"]`, `value.get("name")` or `"name" in value`.  |
 | Enum member                | Read as `Color.RED`, or the enum is read whole: `Color(value)`, `list(Color)`, or as the type of a class attribute. |
 | Member of an external base | Named like a member of a base class from outside the project, such as `emit` in a subclass of `logging.Handler`.    |
+| `visit_*` method           | Always, in a subclass of `ast.NodeVisitor`, whose `visit` calls it by the name of the node.                         |
 
 A base class from outside the project is read from the [environment of the project](configuration.md#python).
 
