@@ -19,7 +19,7 @@ class OutputFormat(StrEnum):
     """
 
     CONCISE = "concise"
-    """One line for each finding: `path:line: kind 'name'`."""
+    """One line for each finding: `path:line:column: code 'name'`."""
 
     GITHUB = "github"
     """A GitHub Actions workflow command for each finding, which shows it as an annotation."""

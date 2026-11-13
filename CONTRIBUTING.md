@@ -42,8 +42,21 @@ def unused():  # expect: 5 [unused-function]
     return 1
 ```
 
+Several findings on one line are separated by commas:
+
+```python
+first, second = 1, 2  # expect: 1 [unused-variable], 8 [unused-variable]
+```
+
+The comment can follow another comment on the line, such as a `# type: ignore[...]`.
+
 The findings must match exactly, so a line without the comment must not have a finding. To test a new
 behavior, add a directory with the files that show it.
+
+A case is configured with a `pyproject.toml` in its directory, as a project is, which also gives its
+entry points.
+
+### Type checks
 
 Run the type checks with `mypy` and `ty` (both run in CI):
 
