@@ -23,6 +23,9 @@ A definition counts as used when something references it:
 - A method or attribute: read as `value.name` anywhere in the project, matched by name.
 - A field of a `TypedDict`: read as a key, `value["name"]`, `value.get("name")` or `"name" in value`,
   anywhere in the project, matched by name.
+- A member of an enum: read as `Color.RED`, matched by name. Every member, when the enum is read other
+  than through a member, such as `Color(value)`, `list(Color)` or as the type of a class attribute. A
+  type hint of a parameter or a return reads no member.
 - A method or attribute named like a member of a base class from outside the project, such as `emit` in
   a subclass of `logging.Handler`: the base class uses it. The base class is read from the
   [environment of the project](configuration.md#python).

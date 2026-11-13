@@ -37,6 +37,13 @@ class References:
             the attributes, in order.
         keys: The string keys that are read from a mapping: `value["name"]`, `value.get("name")`,
             `"name" in value`, or a mapping pattern (`case {"name": ...}`).
+        objects: The objects that are read from a name of the module itself, each with the name and the
+            attributes that are read from it, in order: none for a plain name, as in `Color(value)`,
+            and those of a chain, as in `Color.RED`. A name that is listed in `__all__` is read as a
+            plain name. The annotations of the parameters and the return of a function are left out,
+            as they do not read the object.
+        imported_objects: The objects that are read from an imported name, as for `objects`, each with
+            what the imported name stands for.
         imports: The names that are imported from another module (`from module import name`), each
             with the module, as it is written, and its number of leading dots. A star import has the
             name `*`.
@@ -48,6 +55,8 @@ class References:
     attributes: set[tuple[Owner, str]] = field(default_factory=set)
     imported_attributes: set[tuple[Owner, Binding, tuple[str, ...]]] = field(default_factory=set)
     keys: set[tuple[Owner, str]] = field(default_factory=set)
+    objects: set[tuple[Owner, str, tuple[str, ...]]] = field(default_factory=set)
+    imported_objects: set[tuple[Owner, Binding, tuple[str, ...]]] = field(default_factory=set)
     imports: set[tuple[Owner, str | None, int, str]] = field(default_factory=set)
     has_all: bool = False
     bindings: dict[str, Binding] = field(default_factory=dict)
@@ -102,6 +111,11 @@ def walk_module(path: Path, module: ast.Module, source: bytes) -> tuple[list[Def
     scope = walker.scope
     references.bindings = scope.imports
     references.names |= scope.names
+    for owner, root, attributes in scope.objects:
+        if root in scope.imports:
+            references.imported_objects.add((owner, scope.imports[root], attributes))
+        else:
+            references.objects.add((owner, root, attributes))
     for owner, root, attributes in scope.chains:
         if root in scope.imports:
             references.imported_attributes.add((owner, scope.imports[root], attributes))
@@ -127,6 +141,8 @@ class _Scope:
         chains: The chains of attributes, such as `package.module.name`, that start with a name and
             that are read in the scope, or in a scope nested in it, as for `names`. Each has its owner,
             the name and the attributes in order.
+        objects: The objects that are read from a name, as for `chains`, with no attributes for a plain
+            name, and without the annotations of the parameters and the return of a function.
         enclosing: The scope that also binds the names that the scope binds. A comprehension binds its
             variables in the function that it is in as well.
         defined: The variables of a module, or the attributes of a class, that were already found. A
@@ -141,6 +157,7 @@ class _Scope:
     imports: dict[str, Binding] = field(default_factory=dict)
     names: set[tuple[Owner, str]] = field(default_factory=set)
     chains: set[tuple[Owner, str, tuple[str, ...]]] = field(default_factory=set)
+    objects: set[tuple[Owner, str, tuple[str, ...]]] = field(default_factory=set)
     enclosing: "_Scope | None" = None
     defined: set[str] = field(default_factory=set)
     instance: str | None = None
@@ -161,6 +178,7 @@ class _Walker:
             class body, and in what a function evaluates where it is defined, it is a scope of its own
             that is then dropped, since the names that they bind are not tracked.
         owner: The function that the node is in, or None for code that runs when the module is imported.
+        in_signature: Whether the node is in the annotation of a parameter or the return of a function.
     """
 
     def __init__(self, path: Path, references: References, positions: SourcePositions) -> None:
@@ -171,6 +189,7 @@ class _Walker:
         self.scope = _Scope(kind="module")
         self.binder = self.scope
         self.owner: Owner = None
+        self.in_signature = False
 
     def visit(self, node: ast.AST) -> None:
         """
@@ -201,6 +220,8 @@ class _Walker:
         """
         if isinstance(node.ctx, ast.Load):
             self.scope.names.add((self.owner, node.id))
+            if not self.in_signature:
+                self.scope.objects.add((self.owner, node.id, ()))
         else:
             self.bind(node.id)
 
@@ -215,6 +236,8 @@ class _Walker:
         if isinstance(base, ast.Name):
             # Whether the chain starts with an imported name is known when the scope ends.
             self.scope.chains.add((self.owner, base.id, attributes))
+            if not self.in_signature:
+                self.scope.objects.add((self.owner, base.id, attributes))
         else:
             self.references.attributes.update((self.owner, attribute) for attribute in attributes)
             self.visit(base)
@@ -258,20 +281,24 @@ class _Walker:
 
         # The decorators, the default values and the annotations are evaluated where the function is
         # defined, so they do not see its local variables, and what they bind is not tracked.
-        outside: list[ast.AST | None] = [
-            *arguments.defaults,
-            *arguments.kw_defaults,
-            *(parameter.annotation for parameter in parameters),
-        ]
+        outside: list[ast.AST | None] = [*arguments.defaults, *arguments.kw_defaults]
+        signature: list[ast.AST | None] = [parameter.annotation for parameter in parameters]
         body_scope = _Scope()
         line = 0
         if not isinstance(function, ast.Lambda):
-            outside += [*function.decorator_list, function.returns]
+            outside += function.decorator_list
+            signature.append(function.returns)
             body_scope, line = self.define_function(function)
         binder, self.binder = self.binder, _Scope()
         for node in outside:
             if node is not None:
                 self.visit(node)
+        # A type hint of a parameter or the return reads no value of the object that it names.
+        self.in_signature = True
+        for node in signature:
+            if node is not None:
+                self.visit(node)
+        self.in_signature = False
 
         # The body runs only when the function is called. A lambda has no name, and is part of the code
         # that it is in.
@@ -361,7 +388,9 @@ class _Walker:
                 self.define_target(target, annotation=annotation, call=call)
         if any(map(_is_all, targets)):
             self.references.has_all = True
-            self.references.names.update((self.owner, name) for name in _string_literals(node.value))
+            listed = _string_literals(node.value)
+            self.references.names.update((self.owner, name) for name in listed)
+            self.references.objects.update((self.owner, name, ()) for name in listed)
         self.visit_children(node)
 
     def visit_pattern_or_handler(
@@ -514,6 +543,11 @@ class _Walker:
         """
         outer = self.scope
         outer.names.update(read for read in inner.names if read[1] not in local_names)
+        for owner, root, attributes in inner.objects:
+            if root in inner.imports:
+                self.references.imported_objects.add((owner, inner.imports[root], attributes))
+            elif root not in local_names:
+                outer.objects.add((owner, root, attributes))
         for owner, root, attributes in inner.chains:
             if root in inner.imports:
                 # Attributes of an imported name, which are resolved once every module is known.

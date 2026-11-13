@@ -17,13 +17,15 @@ from unref._frameworks import FrameworkRules
 from unref._ignores import apply_ignore_comments, ignored_codes
 from unref._models import FRAMEWORKS, Finding, Framework, Override
 from unref._modules import ModuleName, import_root, module_name
-from unref._references import Owner
+from unref._references import Binding, Owner
 
 # The object reference of an entry point, as the entry points specification of the Python Packaging
 # User Guide gives it.
 _OBJECT_REFERENCE = re.compile(r"(?P<module>[\w.]+)\s*(:\s*(?P<attributes>[\w.]+)\s*)?(\[.*\]\s*)?")
 # `TypedDict`, as `typing` and `typing_extensions` give it out.
 _TYPED_DICTS = frozenset({"typing.TypedDict", "typing_extensions.TypedDict"})
+# `Enum`, which `IntEnum`, `StrEnum`, `Flag` and the other enums of `enum` inherit from.
+_ENUMS = frozenset({"enum.Enum"})
 
 
 @dataclass
@@ -35,12 +37,15 @@ class _Uses:
         names: The names of the modules of the project that the code uses, each with its module.
         attributes: The names that the code reads as attributes of an object.
         keys: The string keys that the code reads from a mapping.
+        objects: The objects of the modules of the project that the code reads, each with its module
+            and its name in the module followed by the attributes that are read from it, in order.
         stars: The modules that the code star imports.
     """
 
     names: set[tuple[Path, str]] = field(default_factory=set)
     attributes: set[str] = field(default_factory=set)
     keys: set[str] = field(default_factory=set)
+    objects: set[tuple[Path, tuple[str, ...]]] = field(default_factory=set)
     stars: set[Path] = field(default_factory=set)
 
 
@@ -125,6 +130,7 @@ def find_unused(
         definitions=[definition for path in files for definition in facts[path].definitions],
         uses=uses,
         fields=_typed_dict_fields(files, facts=facts, hierarchy=hierarchy),
+        enums=_enum_members(files, facts=facts, hierarchy=hierarchy),
         has_all={path for path in files if facts[path].references.has_all},
     )
 
@@ -198,6 +204,12 @@ def _uses(
             uses[path, owner].attributes.add(name)
         for owner, name in references.keys:
             uses[path, owner].keys.add(name)
+        for owner, root, attributes in references.objects:
+            uses[path, owner].objects.add((path, (root, *attributes)))
+        for owner, binding, attributes in references.imported_objects:
+            uses[path, owner].objects.update(
+                _imported_objects(path, binding, attributes, facts=facts, names=names, files_by_name=files_by_name)
+            )
 
         # An attribute of an imported name is resolved: `package.module.name` refers to `name` in the
         # module `package.module`.
@@ -216,6 +228,51 @@ def _uses(
                     first_of_object = max(first_of_object, index + 1)
             uses[path, owner].attributes.update(parts[first_of_object:])
     return uses
+
+
+def _imported_objects(
+    path: Path,
+    binding: Binding,
+    attributes: tuple[str, ...],
+    *,
+    facts: dict[Path, FileFacts],
+    names: dict[Path, ModuleName],
+    files_by_name: dict[str, list[Path]],
+) -> set[tuple[Path, tuple[str, ...]]]:
+    """
+    Find the objects of the modules of the project that an imported name, and the attributes read from
+    it, stand for, through the modules that import the name in turn.
+
+    Args:
+        path: The file that imports the name.
+        binding: What the imported name stands for.
+        attributes: The attributes that are read from the imported name, in order.
+        facts: What each file defines and refers to.
+        names: The module name of each file.
+        files_by_name: The files of each module name.
+
+    Returns:
+        Each object with its module, and its name in the module followed by the attributes.
+    """
+    found: set[tuple[Path, tuple[str, ...]]] = set()
+    pending = [(path, binding, attributes)]
+    while pending:
+        path, (source, level, name), attributes = pending.pop()
+        module = names[path].resolve(source, level)
+        if module is None:
+            continue
+        parts = [*module.split("."), *filter(None, [name]), *attributes]
+        for index in range(1, len(parts)):
+            for imported in files_by_name.get(".".join(parts[:index]), []):
+                read = (imported, tuple(parts[index:]))
+                if read in found:
+                    continue
+                found.add(read)
+                # A module that imports the name in turn, such as a package that re-exports it.
+                imported_binding = facts[imported].references.bindings.get(parts[index])
+                if imported_binding is not None:
+                    pending.append((imported, imported_binding, tuple(parts[index + 1 :])))
+    return found
 
 
 def _hierarchy(
@@ -285,6 +342,33 @@ def _typed_dict_fields(
         and definition.owner is not None
         and not hierarchy.ancestors(path, definition.owner).isdisjoint(_TYPED_DICTS)
     }
+
+
+def _enum_members(
+    files: list[Path], *, facts: dict[Path, FileFacts], hierarchy: ClassHierarchy
+) -> dict[tuple[Path, str], list[Definition]]:
+    """
+    Find the members of the enums of a project.
+
+    Args:
+        files: The files of the project.
+        facts: What each file defines and refers to.
+        hierarchy: The hierarchy of the classes of the project.
+
+    Returns:
+        The attributes of each class that inherits from `enum.Enum`, directly or not, by its file and its
+        name in the module.
+    """
+    members: dict[tuple[Path, str], list[Definition]] = defaultdict(list)
+    for path in files:
+        for definition in facts[path].definitions:
+            if (
+                definition.kind == "attribute"
+                and definition.owner is not None
+                and not hierarchy.ancestors(path, definition.owner).isdisjoint(_ENUMS)
+            ):
+                members[path, definition.owner].append(definition)
+    return members
 
 
 def _roots(
@@ -474,6 +558,7 @@ class _Graph:
         definitions: list[Definition],
         uses: dict[tuple[Path, Owner], _Uses],
         fields: set[Definition],
+        enums: dict[tuple[Path, str], list[Definition]],
         has_all: set[Path],
     ) -> None:
         """
@@ -482,9 +567,11 @@ class _Graph:
             definitions: The definitions of the project.
             uses: What the code of each owner uses.
             fields: The fields of the TypedDicts of the project.
+            enums: The members of each enum of the project, by its file and its name in the module.
             has_all: The modules that define `__all__`.
         """
         self._uses = uses
+        self._enums = {key: (members, {member.name for member in members}) for key, members in enums.items()}
         self._by_name: dict[tuple[Path, str], list[Definition]] = defaultdict(list)
         self._by_attribute: dict[str, list[Definition]] = defaultdict(list)
         self._by_key: dict[str, list[Definition]] = defaultdict(list)
@@ -509,6 +596,7 @@ class _Graph:
         self._seen_names: set[tuple[Path, str]] = set()
         self._seen_attributes: set[str] = set()
         self._seen_keys: set[str] = set()
+        self._seen_objects: set[tuple[Path, tuple[str, ...]]] = set()
         self._seen_stars: set[Path] = set()
 
     def use(self, roots: Iterable[Definition]) -> set[Definition]:
@@ -542,10 +630,26 @@ class _Graph:
             for key in uses.keys - self._seen_keys:
                 self._seen_keys.add(key)
                 self._add(self._by_key.get(key, []))
+            for read in uses.objects - self._seen_objects:
+                self._seen_objects.add(read)
+                self._use_enums(*read)
             for star in uses.stars - self._seen_stars:
                 self._seen_stars.add(star)
                 self._add(self._public.get(star, []))
         return set(self._used)
+
+    def _use_enums(self, path: Path, parts: tuple[str, ...]) -> None:
+        """
+        Use the members of the enums that an object read uses as a whole.
+
+        A member read as an attribute, as in `Color.RED`, is used by its name. Any other read of an enum,
+        such as `Color(value)`, `list(Color)`, `Color.parse(text)` or an annotation, can reach any
+        member, so it uses them all.
+        """
+        for index in range(1, len(parts) + 1):
+            enum = self._enums.get((path, ".".join(parts[:index])))
+            if enum is not None and (index == len(parts) or parts[index] not in enum[1]):
+                self._add(enum[0])
 
     def _add(self, definitions: Iterable[Definition]) -> None:
         """Mark definitions as used, and queue the code of the functions among them."""
