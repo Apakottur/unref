@@ -17,7 +17,8 @@ def test_unknown_framework() -> None:
     frameworks: dict[Any, bool] = {unref.Framework.PYTEST: True, "nose": False}
 
     with pytest.raises(
-        ValueError, match="Unknown framework 'nose', expected one of 'pytest', 'unittest', 'pydantic', 'sqlalchemy'"
+        ValueError,
+        match="Unknown framework 'nose', expected one of 'pytest', 'unittest', 'pydantic', 'sqlalchemy', 'fastapi'",
     ):
         unref.check([_CASES_DIR / "function"], frameworks=frameworks)
 

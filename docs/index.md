@@ -86,8 +86,8 @@ Unused code piles up in every codebase, faster than ever now that AI tools write
 [Ruff](https://docs.astral.sh/ruff/) does not find unused code yet, see
 [astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` fills that gap until it does:
 
-- **Just works**: built-in rules for pytest, unittest, Pydantic and SQLAlchemy, so most projects need little
-  or no configuration.
+- **Just works**: built-in rules for pytest, unittest, Pydantic, SQLAlchemy and FastAPI, so most projects need
+  little or no configuration.
 - **Ruff-style**: same conventions, options and output style, and it covers what Ruff leaves out.
 - **Fast**: checks all of CPython in seconds.
 - **Modern**: ty-style rule codes, configuration in `pyproject.toml`, and a typed Python API.

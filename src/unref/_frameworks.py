@@ -22,6 +22,9 @@ The rules follow what the frameworks do with their default settings:
   that they inherit from. An attribute is mapped when its annotation is `Mapped`, or its value is a
   call of a construct such as `mapped_column`, `Column` or `relationship`. SQLAlchemy calls the
   functions that `event.listens_for`, `validates`, `reconstructor` and `declared_attr` register.
+- FastAPI calls the functions that the decorators of an application or a router register, such as
+  `app.get` or `router.websocket`: of a variable at the top level of a module that is set to
+  `FastAPI()` or `APIRouter()`, or to an instance of a subclass of them.
 
 pytest and unittest find the methods of a test class through its base classes as well, so a base class
 of a test class, wherever it is, holds tests.
@@ -131,6 +134,30 @@ _SQLALCHEMY_DECORATORS = (
     ".declared_attr.cascading",
 )
 
+# The classes of FastAPI's applications and routers, as `fastapi` gives them out, and where they are
+# defined.
+_FASTAPI_ROUTERS = frozenset(
+    {"fastapi.FastAPI", "fastapi.applications.FastAPI", "fastapi.APIRouter", "fastapi.routing.APIRouter"}
+)
+# The methods of an application or a router that register the function they decorate.
+_FASTAPI_DECORATORS = frozenset(
+    {
+        "get",
+        "put",
+        "post",
+        "delete",
+        "options",
+        "head",
+        "patch",
+        "trace",
+        "api_route",
+        "websocket",
+        "on_event",
+        "middleware",
+        "exception_handler",
+    }
+)
+
 
 class FrameworkRules:
     """
@@ -150,6 +177,7 @@ class FrameworkRules:
         self._unittest = Framework.UNITTEST in frameworks
         self._pydantic = Framework.PYDANTIC in frameworks
         self._sqlalchemy = Framework.SQLALCHEMY in frameworks
+        self._fastapi = Framework.FASTAPI in frameworks
         self._modules = modules
         self._hierarchy = hierarchy
 
@@ -160,6 +188,8 @@ class FrameworkRules:
         # decorator, by their dotted names.
         classes: list[tuple[Path, str]] = []
         made: set[str] = set()
+        # The applications and routers of FastAPI, by their dotted names.
+        self._fastapi_routers: set[str] = set()
         for path, module in modules.items():
             for definition in module.definitions:
                 name = definition.qualified_name
@@ -173,13 +203,12 @@ class FrameworkRules:
                         hierarchy.decorators(path, name), _SQLALCHEMY_BASE_DECORATORS
                     ):
                         made.add(self._dotted_name(path, name))
-                elif (
-                    self._sqlalchemy
-                    and definition.kind == "variable"
-                    and definition.call is not None
-                    and _is_sqlalchemy(hierarchy.resolve(path, definition.call), _SQLALCHEMY_BASE_FUNCTIONS)
-                ):
-                    made.add(self._dotted_name(path, name))
+                elif definition.kind == "variable" and definition.call is not None:
+                    called = hierarchy.resolve(path, definition.call)
+                    if self._sqlalchemy and _is_sqlalchemy(called, _SQLALCHEMY_BASE_FUNCTIONS):
+                        made.add(self._dotted_name(path, name))
+                    if self._fastapi and not called.isdisjoint(_FASTAPI_ROUTERS):
+                        self._fastapi_routers.add(self._dotted_name(path, name))
 
         # The declarative models of SQLAlchemy, and the classes that they inherit from, such as mixins,
         # by their dotted names.
@@ -201,6 +230,7 @@ class FrameworkRules:
             or (self._unittest and self._unittest_uses(definition, path))
             or (self._pydantic and self._pydantic_uses(definition, path))
             or (self._sqlalchemy and self._sqlalchemy_uses(definition, path))
+            or (self._fastapi and self._fastapi_uses(definition, path))
         )
 
     def _pytest_uses(self, definition: Definition, path: Path) -> bool:
@@ -313,6 +343,23 @@ class FrameworkRules:
             )
         )
 
+    def _fastapi_uses(self, definition: Definition, path: Path) -> bool:
+        """
+        Check whether FastAPI calls a definition by itself.
+        """
+        if definition.kind not in ("function", "method"):
+            return False
+        for decorator in definition.decorators:
+            for name in self._hierarchy.resolve(path, decorator):
+                router, _, method = name.rpartition(".")
+                # A router of the module itself is left as it is written, and is named by its module.
+                if method in _FASTAPI_DECORATORS and (
+                    router in self._fastapi_routers
+                    or (name == decorator and self._dotted_name(path, router) in self._fastapi_routers)
+                ):
+                    return True
+        return False
+
     def _sqlalchemy_classes(self, classes: list[tuple[Path, str]], made: set[str]) -> set[str]:
         """
         Get the dotted names of the declarative models of SQLAlchemy, and of the classes that they
@@ -343,7 +390,8 @@ class FrameworkRules:
 
     def _dotted_name(self, path: Path, name: str) -> str:
         """
-        Get the dotted name of a class of a module, as it is among the base classes of a class.
+        Get the dotted name of a class or variable of a module, as it is among the base classes of a
+        class.
         """
         return f"{self._modules[path].name.name}.{name}"
 

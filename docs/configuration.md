@@ -104,6 +104,7 @@ unittest = false
 | `unittest`   | `true`             | Subclasses of `unittest.TestCase`, with their `test*`, `setUp` and `tearDown` methods.                                                                                                                                                  |
 | `pydantic`   | `true`             | In subclasses of `pydantic.BaseModel`: fields and `model_config`. Anywhere: methods with Pydantic's validator and serializer decorators, and `computed_field`.                                                                          |
 | `sqlalchemy` | `true`             | In declarative models and their mixins: attributes annotated `Mapped`, or set to `mapped_column`, `Column`, `relationship` and the like. Anywhere: functions with `event.listens_for`, `validates`, `reconstructor` or `declared_attr`. |
+| `fastapi`    | `true`             | Functions and methods with a route or event decorator, such as `app.get` or `router.websocket`, of a module-level `FastAPI()` or `APIRouter()`, or of an instance of a subclass.                                                        |
 
 A project with custom pytest naming can add what these miss with an [override](#overrides).
 

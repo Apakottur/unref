@@ -18,11 +18,18 @@ class Framework(StrEnum):
     UNITTEST = "unittest"
     PYDANTIC = "pydantic"
     SQLALCHEMY = "sqlalchemy"
+    FASTAPI = "fastapi"
 
 
 # Whether each framework is enabled by default.
 FRAMEWORKS: Mapping[Framework, bool] = MappingProxyType(
-    {Framework.PYTEST: True, Framework.UNITTEST: True, Framework.PYDANTIC: True, Framework.SQLALCHEMY: True}
+    {
+        Framework.PYTEST: True,
+        Framework.UNITTEST: True,
+        Framework.PYDANTIC: True,
+        Framework.SQLALCHEMY: True,
+        Framework.FASTAPI: True,
+    }
 )
 
 # The codes of the findings, which an ignore comment can name.
