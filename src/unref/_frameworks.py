@@ -26,8 +26,11 @@ from unref._modules import ModuleName
 
 _PYTEST_FILES = ("test_*.py", "*_test.py")
 _PYTEST_CONFTEST = "conftest.py"
-# `pytest.fixture` as `pytest` gives it out, and where it is defined.
-_PYTEST_FIXTURES = frozenset({"pytest.fixture", "_pytest.fixtures.fixture"})
+# `pytest.fixture` as `pytest` gives it out, and where it is defined, and the same for the fixtures of
+# pytest-asyncio.
+_PYTEST_FIXTURES = frozenset(
+    {"pytest.fixture", "_pytest.fixtures.fixture", "pytest_asyncio.fixture", "pytest_asyncio.plugin.fixture"}
+)
 # The functions of a test module that pytest calls, besides the tests.
 _PYTEST_MODULE_FUNCTIONS = frozenset(
     {
