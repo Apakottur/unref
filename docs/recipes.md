@@ -39,3 +39,7 @@ The [`pytest` framework](configuration.md#frameworks) follows pytest's default n
 paths = ["tests"]
 used-names = ["check_*", "Describe*"]
 ```
+
+## unittest
+
+Built in: the [`unittest` framework](configuration.md#frameworks) needs no configuration.
