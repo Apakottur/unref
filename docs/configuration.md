@@ -88,19 +88,18 @@ dummy-variable-rgx = "^_$|^unused_"
 
 ### `frameworks`
 
-Frameworks whose built-in rules apply: what the framework finds and calls by itself counts as used. The
-known frameworks are currently `pytest` and `unittest`, both on by default; `frameworks = []` turns them
-off.
+Frameworks whose built-in rules apply: what a framework finds and calls by itself counts as used.
+`frameworks = []` turns them all off.
 
 ```toml
 [tool.unref]
 frameworks = ["pytest", "unittest"]
 ```
 
-- **pytest**: in `test_*.py` and `*_test.py` files, `test*` functions, `Test*` classes and their `test*`
-  methods, and setup and teardown functions. Anywhere, `pytest_*` hooks and `@pytest.fixture` fixtures.
-- **unittest**: subclasses of `unittest.TestCase`, with their `test*` methods and `setUp`/`tearDown`
-  methods.
+| Framework  | Enabled by default | Counts as used                                                                                                                                                                  |
+| ---------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pytest`   | `true`             | In `test_*.py` and `*_test.py` files: `test*` functions, `Test*` classes and their `test*` methods, setup and teardown functions. Anywhere: `pytest_*` hooks and fixtures. |
+| `unittest` | `true`             | Subclasses of `unittest.TestCase`, with their `test*`, `setUp` and `tearDown` methods.                                                                                         |
 
 A project with custom pytest naming can add what these miss with an [override](#overrides).
 
