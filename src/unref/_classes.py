@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from unref._definitions import Definition
 from unref._external import ExternalModules
 from unref._modules import ModuleName
 from unref._references import Binding
@@ -23,8 +24,7 @@ class ClassHierarchy:
         bindings: dict[Path, dict[str, Binding]],
         stars: dict[Path, list[tuple[str | None, int]]],
         lazy: dict[Path, dict[str, list[Binding]]],
-        classes: dict[Path, dict[str, tuple[str, ...]]],
-        decorators: dict[Path, dict[str, tuple[str, ...]]],
+        definitions: dict[Path, list[Definition]],
         external: ExternalModules,
     ) -> None:
         """
@@ -36,23 +36,28 @@ class ClassHierarchy:
                 and with its number of leading dots.
             lazy: The names that each module gives out from its `__getattr__`, each with the imports of
                 it in the function.
-            classes: The classes and functions of each module, by their name in the module
-                (`Outer.Inner` for a nested class), with their base classes as they are written. A
-                function has none.
-            decorators: The classes of each module, by their name in the module, with their decorators
-                as they are written.
+            definitions: The definitions of each module of the project.
             external: The modules that are imported from outside the project.
         """
-        self._decorators = decorators
+        # The classes of each module, by their name in the module, with their decorators as they are
+        # written.
+        self._decorators = {
+            path: {
+                definition.qualified_name: definition.decorators
+                for definition in file_definitions
+                if definition.kind == "class"
+            }
+            for path, file_definitions in definitions.items()
+        }
         self._resolved_decorators: dict[tuple[Path, str], frozenset[str]] = {}
         self._resolved: dict[tuple[Path, str], frozenset[str]] = {}
         # The external modules that are read are added to these, so they are copies.
+        self._classes = {path: _bases(file_definitions) for path, file_definitions in definitions.items()}
         self._names = dict(names)
         self._files_by_name = files_by_name
         self._bindings = dict(bindings)
         self._stars = dict(stars)
         self._lazy = dict(lazy)
-        self._classes = dict(classes)
         self._ancestors: dict[tuple[Path, str], frozenset[str]] = {}
         self._external = external
         # The members of the classes of each module outside the project, by the name of the class.
@@ -237,14 +242,22 @@ class ClassHierarchy:
             self._bindings[path] = external.bindings
             self._stars[path] = external.stars
             self._lazy[path] = external.lazy
-            self._classes[path] = {
-                definition.qualified_name: definition.bases
-                for definition in external.definitions
-                if definition.kind in ("class", "function")
-            }
+            self._classes[path] = _bases(external.definitions)
             members: dict[str, set[str]] = {}
             for definition in external.definitions:
                 if definition.owner is not None:
                     members.setdefault(definition.owner, set()).add(definition.name)
             self._external_members[path] = members
         return [path]
+
+
+def _bases(definitions: list[Definition]) -> dict[str, tuple[str, ...]]:
+    """
+    Get the classes and functions of a module, by their name in the module (`Outer.Inner` for a nested
+    class), with their base classes as they are written. A function has none.
+    """
+    return {
+        definition.qualified_name: definition.bases
+        for definition in definitions
+        if definition.kind in ("class", "function")
+    }

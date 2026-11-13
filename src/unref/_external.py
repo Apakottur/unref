@@ -1,12 +1,11 @@
 import ast
-import warnings
 from dataclasses import dataclass
 from importlib.machinery import BYTECODE_SUFFIXES, EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
 
 from unref._definitions import Definition
 from unref._modules import ModuleName
-from unref._references import Binding, References, walk_module
+from unref._references import Binding, References, parse_module, walk_module
 
 # The files that a module can be imported from, in the order that Python looks for them: a compiled
 # module, a source, and a bytecode file.
@@ -111,9 +110,7 @@ class ExternalModules:
             return None
         try:
             source = file.read_bytes()
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                tree = ast.parse(source, filename=str(file))
+            tree = parse_module(source, file)
         except (OSError, SyntaxError, ValueError):
             return None
 
