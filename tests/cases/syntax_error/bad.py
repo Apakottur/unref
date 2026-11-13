@@ -1,4 +1,4 @@
-def function():  # unref: ignore
+def function():  # unref: ignore[unused-function]
     pass
 
 

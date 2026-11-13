@@ -14,6 +14,7 @@ from unref._discover import discover, is_under
 from unref._external import ExternalModules, environment_paths, star_imports
 from unref._files import FileFacts, analyze_files
 from unref._frameworks import FrameworkRules
+from unref._ignores import apply_ignore_comments, ignored_codes
 from unref._models import FRAMEWORKS, Finding, Override
 from unref._modules import ModuleName, import_root, module_name
 from unref._references import Owner
@@ -306,6 +307,7 @@ def _roots(
         # An override with paths applies to the files under them.
         file_overrides = [override for roots, override in resolved_overrides if not roots or is_under(path, roots)]
 
+        ignored_in_file = ignored_codes(facts[path].ignore_comments)
         for definition in facts[path].definitions:
             if (
                 definition.name == "_"
@@ -332,7 +334,7 @@ def _roots(
                 )
             ):
                 kept.add(definition)
-            elif definition.line in facts[path].ignore_comments:
+            elif (definition.line, _code(definition)) in ignored_in_file:
                 ignored.add(definition)
     return kept, ignored
 
@@ -399,8 +401,8 @@ def _findings(
         needed: The definitions that an ignore comment is needed for.
 
     Returns:
-        A finding for each unused definition, for each ignore comment that ignores nothing, and for each
-        file that does not parse, sorted by file, line and column.
+        A finding for each unused definition, for each problem with an ignore comment, and for each file
+        that does not parse, sorted by file, line and column.
     """
     findings: list[Finding] = []
     for path in discovered:
@@ -413,22 +415,29 @@ def _findings(
                 path=definition.path,
                 line=definition.line,
                 column=definition.column,
-                code=f"unused-{definition.kind}",
+                code=_code(definition),
                 name=definition.name,
             )
             for definition in facts[path].definitions
             if definition not in used
         ]
 
-        # An ignore comment that ignores nothing is a finding itself.
-        needed_lines = {definition.line for definition in needed if definition.path == path}
-        file_findings.extend(
-            Finding(path=path, line=line, column=column, code="unused-ignore-comment", name="unref: ignore")
-            for line, column in facts[path].ignore_comments.items()
-            if line not in needed_lines
+        # A code of an ignore comment that ignores nothing is a finding itself.
+        file_findings += apply_ignore_comments(
+            path,
+            facts[path].ignore_comments,
+            facts[path].ignore_findings,
+            ignored=[(definition.line, _code(definition)) for definition in needed if definition.path == path],
         )
         findings += sorted(file_findings, key=lambda finding: (finding.line, finding.column))
     return findings
+
+
+def _code(definition: Definition) -> str:
+    """
+    Get the code of the finding of a definition that is unused, such as `unused-function`.
+    """
+    return f"unused-{definition.kind}"
 
 
 class _Graph:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from unref._definitions import Definition
 from unref._external import lazy_imports
-from unref._ignores import find_ignore_comments
+from unref._ignores import IgnoreComment, find_ignore_comments
 from unref._models import Finding
 from unref._references import Binding, References, walk_module
 
@@ -28,13 +28,16 @@ class FileFacts:
     Attributes:
         definitions: The definitions of the file.
         references: What the file refers to.
-        ignore_comments: The column of the ignore comment of each line that has one, by its line.
+        ignore_comments: The ignore comments of the file that parse.
+        ignore_findings: The findings about the ignore comments of the file, which they can ignore
+            themselves.
         lazy: The names that the file gives out from its `__getattr__`, each with the imports of it.
     """
 
     definitions: list[Definition]
     references: References
-    ignore_comments: dict[int, int]
+    ignore_comments: list[IgnoreComment]
+    ignore_findings: list[Finding]
     lazy: dict[str, list[Binding]]
 
 
@@ -91,10 +94,12 @@ def analyze_file(path: Path) -> FileFacts | Finding:
         )
 
     definitions, references = walk_module(path, tree, source)
+    ignore_comments, ignore_findings = find_ignore_comments(source, path)
     return FileFacts(
         definitions=definitions,
         references=references,
-        ignore_comments=find_ignore_comments(source),
+        ignore_comments=ignore_comments,
+        ignore_findings=ignore_findings,
         lazy=lazy_imports(tree, references),
     )
 

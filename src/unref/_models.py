@@ -9,17 +9,34 @@ DEFAULT_DUMMY_VARIABLE_RGX = r"^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 # The test frameworks that are known, all of which are on by default.
 FRAMEWORKS = ("pytest", "unittest")
 
+# The codes of the findings, which an ignore comment can name.
+CODES = frozenset(
+    {
+        "unused-function",
+        "unused-class",
+        "unused-method",
+        "unused-variable",
+        "unused-attribute",
+        "unused-ignore-comment",
+        "invalid-ignore-comment",
+        "ignore-comment-unknown-rule",
+        "invalid-syntax",
+    }
+)
+
 
 @dataclass(frozen=True)
 class Finding:
     """
-    An unused definition, an ignore comment that ignores nothing, or a file that does not parse.
+    An unused definition, a problem with an ignore comment, or a file that does not parse.
 
     Each finding has the code of its rule, a kebab-case name as ty gives its rules:
 
     - `unused-function`, `unused-class`, `unused-method`, `unused-variable` and `unused-attribute`
       for an unused definition.
-    - `unused-ignore-comment` for an ignore comment that ignores nothing.
+    - `unused-ignore-comment` for an ignore comment, or a code of one, that ignores nothing.
+    - `invalid-ignore-comment` for an ignore comment that does not parse, or that names no code.
+    - `ignore-comment-unknown-rule` for a code of an ignore comment that is not known.
     - `invalid-syntax` for a file that does not parse.
 
     Attributes:
@@ -27,11 +44,12 @@ class Finding:
         line: The line of the name of the definition in the file, starting at 1. For an ignore comment,
             the line of the comment. For a file that does not parse, the line of the error, or 1 if it
             is unknown.
-        column: The column of the name of the definition, of the ignore comment, or of the error, in
-            characters, starting at 1, as ruff and ty count them.
+        column: The column of the name of the definition, of the ignore comment or its code, or of the
+            error, in characters, starting at 1, as ruff and ty count them.
         code: The code of the rule, for example `unused-function`.
-        name: The name of the definition, `unref: ignore` for an ignore comment, or the message of the
-            error for a file that does not parse.
+        name: The name of the definition. For an ignore comment that ignores nothing, the comment, or
+            the code of it that ignores nothing. For an ignore comment that does not parse, or a file
+            that does not parse, what is wrong. For a code that is not known, the code.
     """
 
     path: Path
