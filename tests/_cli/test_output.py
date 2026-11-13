@@ -106,3 +106,66 @@ def test_output_format_config_invalid(tmp_path: Path, value: str) -> None:
     assert result.stderr == (
         f"Error: Option 'output-format' in the configuration file {config} must be one of 'concise', 'github'\n"
     )
+
+
+def test_show_transitive() -> None:
+    # The methods of the unused class are reached only from it.
+    case = _CASES_DIR / "method"
+
+    result = _runner.invoke(app, ["--show-transitive", str(case)])
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        f"{case}/main.py:1:7: unused-class 'Class'\n"
+        f"{case}/main.py:2:9: unused-method 'method'\n"
+        f"{case}/main.py:5:15: unused-method 'async_method'\n"
+    )
+
+
+def test_show_transitive_github() -> None:
+    case = _CASES_DIR / "method"
+
+    result = _runner.invoke(app, ["--output-format", "github", str(case)])
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        f"::error title=unref (unused-class),file={case}/main.py,line=1,col=7::{case}/main.py:1:7: unused-class 'Class'\n"
+    )
+
+
+def test_show_transitive_config(tmp_path: Path) -> None:
+    config = tmp_path / "unref.toml"
+    config.write_text("show-transitive = true\n")
+    case = _CASES_DIR / "method"
+
+    result = _runner.invoke(app, ["--config", str(config), str(case)])
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        f"{case}/main.py:1:7: unused-class 'Class'\n"
+        f"{case}/main.py:2:9: unused-method 'method'\n"
+        f"{case}/main.py:5:15: unused-method 'async_method'\n"
+    )
+
+
+def test_show_transitive_option_over_config(tmp_path: Path) -> None:
+    # The command-line option takes precedence over the configuration file, as with ruff.
+    config = tmp_path / "unref.toml"
+    config.write_text("show-transitive = true\n")
+    case = _CASES_DIR / "method"
+
+    result = _runner.invoke(app, ["--config", str(config), "--no-show-transitive", str(case)])
+
+    assert result.exit_code == 1
+    assert result.stdout == f"{case}/main.py:1:7: unused-class 'Class'\n"
+
+
+def test_show_transitive_config_invalid(tmp_path: Path) -> None:
+    config = tmp_path / "unref.toml"
+    config.write_text('show-transitive = "yes"\n')
+
+    result = _runner.invoke(app, ["--config", str(config), str(_CASES_DIR / "method")])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert result.stderr == f"Error: Option 'show-transitive' in the configuration file {config} must be a boolean\n"

@@ -27,5 +27,5 @@ class Parent(Grandparent):
 
 # Not a base class of a test class.
 class Unrelated:  # expect: 7 [unused-class]
-    def test_method(self):  # expect: 9 [unused-method]
+    def test_method(self):  # expect: 9 [unused-method] transitive
         pass

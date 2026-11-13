@@ -55,6 +55,9 @@ class Finding:
         code: The code of the rule, such as `unused-function`, see
             [Rules](https://unref.readthedocs.io/en/latest/rules/).
         name: The name of the unused definition, or what is wrong.
+        transitive: Whether the unused definition is reached only from other unused definitions, which
+            are reported too: it is called or read by them, or defined in them. The command shows it
+            only with `show-transitive`. Always false for the other findings.
     """
 
     path: Path
@@ -62,6 +65,7 @@ class Finding:
     column: int
     code: str
     name: str
+    transitive: bool = False
 
     def __str__(self) -> str:
         return f"{self.path}:{self.line}:{self.column}: {self.code} '{self.name}'"

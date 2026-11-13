@@ -306,9 +306,7 @@ def test_entry_points_not_from_other_file(monkeypatch: pytest.MonkeyPatch, tmp_p
     result = _runner.invoke(app, ["--config", str(config), "main.py"])
 
     assert result.exit_code == 1
-    assert result.stdout == (
-        "main.py:2:5: unused-function 'run'\nmain.py:6:5: unused-function 'helper'\nmain.py:10:5: unused-function 'unused'\n"
-    )
+    assert result.stdout == ("main.py:2:5: unused-function 'run'\nmain.py:10:5: unused-function 'unused'\n")
 
 
 @pytest.mark.parametrize(
@@ -359,7 +357,6 @@ def test_config_frameworks_table(tmp_path: Path) -> None:
         f"{case}/test_module.py:12:5: unused-function 'plain'\n"
         f"{case}/test_module.py:16:5: unused-function 'pytest_configure'\n"
         f"{case}/test_module.py:20:7: unused-class 'TestClass'\n"
-        f"{case}/test_module.py:21:9: unused-method 'test_method'\n"
     )
 
 

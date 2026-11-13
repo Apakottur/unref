@@ -14,7 +14,17 @@ The comment can follow another comment on the line:
 
     unused = 1  # type: ignore[assignment]  # expect: 1 [unused-variable]
 
-The findings must match exactly: a line without the comment must not have a finding.
+A finding that only other unused definitions reach, such as a function that only an unused function
+calls or a method of an unused class, is marked `transitive`:
+
+    def unused():  # expect: 5 [unused-function]
+        helper()
+
+    def helper():  # expect: 5 [unused-function] transitive
+
+The findings must match exactly: a line without the comment must not have a finding. Each case is run
+twice: by default, which prints only the findings that are not transitive, and with `--show-transitive`,
+which prints them all.
 
 A case is run through the command, from its directory, so it is configured with a `pyproject.toml` in
 its directory, as a project is, which also gives its entry points.
@@ -31,7 +41,7 @@ from unref._cli import app
 
 _CASES_DIR = Path(__file__).parent / "cases"
 _EXPECT_PREFIX = "# expect:"
-_EXPECTED = re.compile(r"\s*(?P<column>\d+) \[(?P<code>[a-z-]+)\]\s*")
+_EXPECTED = re.compile(r"\s*(?P<column>\d+) \[(?P<code>[a-z-]+)\](?P<transitive> transitive)?\s*")
 # A finding as the command prints it: `path:line:column: code 'name'`.
 _FINDING = re.compile(r"(?P<path>.+):(?P<line>\d+):(?P<column>\d+): (?P<code>[a-z-]+) '.*'")
 
@@ -41,9 +51,10 @@ _runner = CliRunner()
 _Finding = tuple[str, int, int, str]
 
 
-def _expected_findings(case: Path) -> list[_Finding]:
+def _expected_findings(case: Path, *, show_transitive: bool) -> list[_Finding]:
     """
-    Collect the findings that the `# expect:` comments of a case ask for.
+    Collect the findings that the `# expect:` comments of a case ask for, with those marked `transitive`
+    only if they are shown.
     """
     findings: list[_Finding] = []
     for path in case.rglob("*.py"):
@@ -54,13 +65,15 @@ def _expected_findings(case: Path) -> list[_Finding]:
                 for expected in token.string.partition(_EXPECT_PREFIX)[2].split(","):
                     match = _EXPECTED.fullmatch(expected)
                     assert match, f"{path}:{token.start[0]}: invalid expectation {expected!r}"
+                    if match["transitive"] and not show_transitive:
+                        continue
                     findings.append(
                         (path.relative_to(case).as_posix(), token.start[0], int(match["column"]), match["code"])
                     )
     return sorted(findings)
 
 
-def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch) -> list[_Finding]:
+def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch, *, show_transitive: bool) -> list[_Finding]:
     """
     Run the command on a case from its directory, as a user runs it on their project, and collect the
     findings it prints. The paths of the configuration and of the findings are relative to the current
@@ -71,14 +84,16 @@ def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch) -> list[_Findi
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
     # A single process keeps the check in the process of the tests, which is faster for small cases.
-    result = _runner.invoke(app, ["--jobs", "1"])
+    result = _runner.invoke(app, ["--jobs", "1", "--show-transitive" if show_transitive else "--no-show-transitive"])
 
-    assert result.exit_code in {0, 1}, result.output
     findings: list[_Finding] = []
     for line in result.stdout.splitlines():
         match = _FINDING.fullmatch(line)
         assert match, f"invalid finding {line!r}"
         findings.append((match["path"], int(match["line"]), int(match["column"]), match["code"]))
+    # The exit code does not depend on which findings are shown: a transitive finding is reached from
+    # another unused definition, so there are findings that are shown exactly when there are findings.
+    assert result.exit_code == (1 if findings else 0), result.output
     return sorted(findings)
 
 
@@ -87,5 +102,7 @@ def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch) -> list[_Findi
     sorted(path for path in _CASES_DIR.iterdir() if path.is_dir()),
     ids=lambda case: case.name,
 )
-def test_case(case: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _actual_findings(case, monkeypatch) == _expected_findings(case)
+@pytest.mark.parametrize("show_transitive", [False, True], ids=["default", "show-transitive"])
+def test_case(case: Path, show_transitive: bool, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: FBT001
+    expected = _expected_findings(case, show_transitive=show_transitive)
+    assert _actual_findings(case, monkeypatch, show_transitive=show_transitive) == expected

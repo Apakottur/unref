@@ -71,6 +71,14 @@ def main(
             show_default=False,
         ),
     ] = None,
+    show_transitive: Annotated[
+        bool | None,
+        typer.Option(
+            "--show-transitive/--no-show-transitive",
+            help="Also print the unused definitions that only other unused definitions reach.",
+            show_default=False,
+        ),
+    ] = None,
     version: Annotated[  # noqa: ARG001, FBT002
         bool,
         typer.Option(
@@ -118,9 +126,15 @@ def main(
         )
 
     output_format = output_format or options.output_format
+    if show_transitive is None:
+        show_transitive = options.show_transitive
     for finding in findings:
+        if finding.transitive and not show_transitive:
+            continue
         typer.echo(_github(finding) if output_format == OutputFormat.GITHUB else finding)
 
+    # A transitive finding is reached from another unused definition, so there are findings exactly when
+    # some are printed.
     if findings:
         raise typer.Exit(code=1)
 

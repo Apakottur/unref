@@ -53,6 +53,7 @@ sqlalchemy
 strerror
 subclassing
 taplo
+Tarjan
 typer
 typeshed
 unref

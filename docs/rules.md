@@ -29,7 +29,8 @@ A definition counts as used when something references it:
 A base class from outside the project is read from the [environment of the project](configuration.md#python).
 
 A reference from inside an unused function does not count, so a function that only an unused function
-calls is unused too. Dunders and `_` are never reported.
+calls is unused too. By default only the top of each such chain is printed, see
+[`show-transitive`](configuration.md#show-transitive). Dunders and `_` are never reported.
 
 ## Ignoring a finding
 

@@ -18,7 +18,7 @@ class Movie(TypedDict):
     # Only read as an attribute.
     genre: str  # expect: 5 [unused-attribute]
     # Only read in a function that is unused.
-    sequel: str  # expect: 5 [unused-attribute]
+    sequel: str  # expect: 5 [unused-attribute] transitive
 
 
 class Options(typing.TypedDict, total=False):

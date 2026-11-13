@@ -6,11 +6,11 @@ def unused():  # expect: 5 [unused-function]
     return only_from_unused() + also_from_used() + helpers.only_from_unused() + Holder().only_from_unused()
 
 
-def only_from_unused():  # expect: 5 [unused-function]
+def only_from_unused():  # expect: 5 [unused-function] transitive
     return chain()
 
 
-def chain():  # expect: 5 [unused-function]
+def chain():  # expect: 5 [unused-function] transitive
     return 1
 
 
@@ -19,7 +19,7 @@ def also_from_used():
 
 
 class Holder:
-    def only_from_unused(self):  # expect: 9 [unused-method]
+    def only_from_unused(self):  # expect: 9 [unused-method] transitive
         return self
 
     def from_used_method(self):
@@ -46,7 +46,7 @@ def outer():
     return called(), Used
 
 
-def from_not_called():  # expect: 5 [unused-function]
+def from_not_called():  # expect: 5 [unused-function] transitive
     return 4
 
 
@@ -75,7 +75,7 @@ def in_lambda():
 
 # Code that runs when the module is imported uses what it refers to, in a class body as well.
 class Body:  # expect: 7 [unused-class]
-    value = from_class_body()  # expect: 5 [unused-attribute]
+    value = from_class_body()  # expect: 5 [unused-attribute] transitive
 
 
 def from_class_body():

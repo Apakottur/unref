@@ -43,7 +43,7 @@ _chained = _chained_too = 14  # expect: 1 [unused-variable], 12 [unused-variable
 
 
 class Settings:  # expect: 7 [unused-class]
-    _private = 15  # expect: 5 [unused-attribute]
+    _private = 15  # expect: 5 [unused-attribute] transitive
 
 
 # A name that does not match the pattern is reported in an unpacking.

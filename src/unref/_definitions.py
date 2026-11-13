@@ -19,6 +19,8 @@ class Definition:
             without their arguments. A decorator that is not a dotted name is left out.
         owner: The class that the definition is in, by its name in the module (`Outer.Inner` for a
             nested class), or None if it is not in a class.
+        function: The function that the definition is in, by the line of its name, or None if it is
+            not in a function. A class in a function is in it, and so are the methods of the class.
         bases: For a class, the dotted names of its base classes as they are written, without their
             type arguments. A base class that is not a dotted name is left out.
         unpacked: For a variable or a class attribute, whether it is first assigned by its name in an
@@ -39,6 +41,7 @@ class Definition:
     name: str
     decorators: tuple[str, ...] = ()
     owner: str | None = None
+    function: int | None = None
     bases: tuple[str, ...] = ()
     unpacked: bool = False
     annotation: str | None = None

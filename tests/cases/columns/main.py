@@ -23,10 +23,10 @@ def \
 
 class \
     ContinuedClass:  # expect: 5 [unused-class]
-    def method(self):  # expect: 9 [unused-method]
-        self . spaced_attribute = 1  # expect: 16 [unused-attribute]
+    def method(self):  # expect: 9 [unused-method] transitive
+        self . spaced_attribute = 1  # expect: 16 [unused-attribute] transitive
         (self.
-         split_attribute) = 2  # expect: 10 [unused-attribute]
+         split_attribute) = 2  # expect: 10 [unused-attribute] transitive
 
 
 é = 1; ü = 2  # expect: 1 [unused-variable], 8 [unused-variable]

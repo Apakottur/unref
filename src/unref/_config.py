@@ -48,6 +48,8 @@ class Config:
             `package.module:function`.
         frameworks: Whether the rules of each framework apply, for the frameworks that the file sets.
         output_format: How the findings are printed.
+        show_transitive: Whether the unused definitions that only other unused definitions reach are
+            printed too.
     """
 
     used_names: tuple[str, ...] = ()
@@ -59,6 +61,7 @@ class Config:
     entry_points: tuple[str, ...] = ()
     frameworks: Mapping[Framework, bool] = field(default_factory=dict)
     output_format: OutputFormat = OutputFormat.CONCISE
+    show_transitive: bool = False
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -137,6 +140,7 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
             "dummy-variable-rgx",
             "frameworks",
             "output-format",
+            "show-transitive",
         },
         where,
     )
@@ -165,6 +169,10 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
             f"Option 'output-format' in {where} must be one of {', '.join(repr(str(item)) for item in OutputFormat)}"
         )
 
+    show_transitive = options.get("show-transitive", False)
+    if not isinstance(show_transitive, bool):
+        raise UnrefConfigError(f"Option 'show-transitive' in {where} must be a boolean")
+
     return Config(
         used_names=tuple(_string_list(options, "used-names", where)),
         used_decorators=tuple(_decorators(options, "used-decorators", where)),
@@ -175,6 +183,7 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
         dummy_variable_rgx=dummy_variable_rgx,
         frameworks=_frameworks(options, where),
         output_format=OutputFormat(output_format),
+        show_transitive=show_transitive,
     )
 
 

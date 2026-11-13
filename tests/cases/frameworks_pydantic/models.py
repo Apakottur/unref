@@ -94,7 +94,7 @@ class Plain:
     title: str = ""  # expect: 5 [unused-attribute]
 
     class Config:  # expect: 11 [unused-class]
-        orm_mode = True  # expect: 9 [unused-attribute]
+        orm_mode = True  # expect: 9 [unused-attribute] transitive
 
 
 print(User, FromModule, FromMain, Admin, Settings, Legacy, Plain)
