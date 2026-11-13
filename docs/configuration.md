@@ -247,6 +247,22 @@ output-format = "github"
 The `--output-format` option of the command takes precedence over it. The library returns the findings
 and prints nothing, so it does not take the option.
 
+## Command line
+
+The command takes the files and directories to check, the current directory by default, and these
+options:
+
+| Option            | Description                                                                         |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `--config`        | Configuration file. Defaults to the `pyproject.toml` in the current directory.      |
+| `--python`        | The [`python`](#python) option. Takes precedence over the configuration.            |
+| `--output-format` | The [`output-format`](#output-format) option. Takes precedence over the configuration. |
+| `--jobs`, `-j`    | Number of processes. Defaults to one for each CPU.                                  |
+| `--version`       | Print the version and exit.                                                         |
+
+The library uses one process by default. Pass `jobs` to [`unref.check`](reference/api.md#unref.check) to
+use more, or `jobs=None` for one for each CPU.
+
 ## Entry points
 
 The objects that the entry points of the project name count as used, and so does what they use. They

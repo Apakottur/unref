@@ -41,12 +41,8 @@ repos:
 uvx unref src scripts
 ```
 
-`unref` exits with a non-zero status if anything is found.
-
-A large project is analyzed with a process for each CPU, or as many as `--jobs` (`-j`) gives.
-
-`--output-format` sets how the findings are printed: `concise`, the default, or `github`, see
-[`output-format`](configuration.md#output-format). `--version` prints the version of `unref`.
+`unref` exits with a non-zero status if anything is found. See the [command line](configuration.md#command-line)
+for its options.
 
 ### Python
 
@@ -57,8 +53,7 @@ for finding in unref.check(["src"]):
     print(finding)
 ```
 
-`check` uses one process by default. Pass `jobs` to use more, or `jobs=None` for one for each CPU. See the
-[Python API](reference/api.md).
+See the [Python API](reference/api.md).
 
 ### pre-commit and prek
 
