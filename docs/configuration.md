@@ -23,6 +23,7 @@ top level. Paths are relative to the current directory, as in Ruff. The Python A
 | `dummy-variable-rgx` | Names of the variables that are unused on purpose.                |
 | `frameworks`         | Frameworks whose built-in rules apply.                            |
 | `output-format`      | How the findings are printed.                                     |
+| `show-transitive`    | Also print what only other unused definitions reach.              |
 | `overrides`          | Options for some of the definitions, see [Overrides](#overrides). |
 
 ### `used-names`
@@ -120,6 +121,19 @@ output-format = "github"
 | `concise` | `true`  | One line for each finding: `src/app.py:40:5: unused-function 'parse_date'`.                                                                                                |
 | `github`  | `false` | A [GitHub Actions annotation](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands) for each finding, shown on the file in a pull request. |
 
+### `show-transitive`
+
+By default, only the top of each unused chain is printed: a definition that only other unused
+definitions call, read or contain is left out. Definitions that only reach each other, such as two
+functions that call each other, are all printed. Set it to print every finding, as
+[Ruff's `show-fixes`](https://docs.astral.sh/ruff/settings/#show-fixes) prints every fix. The exit code
+is the same either way.
+
+```toml
+[tool.unref]
+show-transitive = true
+```
+
 ## Command line
 
 `unref [paths]` checks the given files and directories, or the current directory.
@@ -129,6 +143,7 @@ output-format = "github"
 | `--config`        | Configuration file. Defaults to `./pyproject.toml`.                  |
 | `--python`        | The [`python`](#python) option. Overrides the configuration.         |
 | `--output-format` | The [`output-format`](#output-format) option. Overrides the configuration. |
+| `--show-transitive`, `--no-show-transitive` | The [`show-transitive`](#show-transitive) option. Overrides the configuration. |
 | `--jobs`, `-j`    | Number of processes. Defaults to one for each CPU.                   |
 | `--version`       | Print the version and exit.                                          |
 

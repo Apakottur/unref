@@ -18,7 +18,7 @@ def pytest_configure(config):  # expect: 5 [unused-function]
 
 
 class TestClass:  # expect: 7 [unused-class]
-    def test_method(self):  # expect: 9 [unused-method]
+    def test_method(self):  # expect: 9 [unused-method] transitive
         pass
 
 

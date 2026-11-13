@@ -25,11 +25,8 @@ def test_findings() -> None:
     result = _runner.invoke(app, [str(case)])
 
     assert result.exit_code == 1
-    assert result.stdout == (
-        f"{case}/main.py:1:7: unused-class 'Class'\n"
-        f"{case}/main.py:2:9: unused-method 'method'\n"
-        f"{case}/main.py:5:15: unused-method 'async_method'\n"
-    )
+    # The methods of the unused class are transitive, and not shown by default.
+    assert result.stdout == f"{case}/main.py:1:7: unused-class 'Class'\n"
 
 
 def test_file_path() -> None:

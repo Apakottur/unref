@@ -69,7 +69,7 @@ class Axis(Enum):
 # Read as a whole only by an unused function.
 class Unit(Enum):
     METER = 1
-    FOOT = 2  # expect: 5 [unused-attribute]
+    FOOT = 2  # expect: 5 [unused-attribute] transitive
 
 
 # Not an enum: a class attribute is read by its name.

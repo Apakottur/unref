@@ -3,7 +3,7 @@ import re
 import sys
 import sysconfig
 from collections import defaultdict
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -18,6 +18,7 @@ from unref._ignores import apply_ignore_comments, ignored_codes
 from unref._models import FRAMEWORKS, Finding, Framework, Override
 from unref._modules import ModuleName, import_root, module_name
 from unref._references import Binding, Owner
+from unref._transitive import transitive
 
 # The object reference of an entry point, as the entry points specification of the Python Packaging
 # User Guide gives it.
@@ -138,8 +139,16 @@ def find_unused(
     # then used, and so is what it uses.
     needed = ignored - graph.use(kept)
     used = graph.use(needed)
+    unused = [definition for path in files for definition in facts[path].definitions if definition not in used]
 
-    return _findings(discovered, facts=facts, syntax_errors=syntax_errors, used=used, needed=needed)
+    return _findings(
+        discovered,
+        facts=facts,
+        syntax_errors=syntax_errors,
+        used=used,
+        needed=needed,
+        transitive=transitive(_unused_reached(unused, graph=graph)),
+    )
 
 
 def _analyze(discovered: list[Path], *, jobs: int | None) -> tuple[dict[Path, FileFacts], dict[Path, Finding]]:
@@ -442,6 +451,46 @@ def _roots(
     return kept, ignored
 
 
+def _unused_reached(unused: list[Definition], *, graph: "_Graph") -> dict[Definition, list[Definition]]:
+    """
+    Find the unused definitions that each unused definition reaches.
+
+    An unused function reaches what its code uses, as it would if it were used. An unused class reaches
+    what is defined in it, and an unused function what is defined in it, since deleting them deletes
+    those too. An ignored definition is used, so it reaches nothing here.
+
+    Args:
+        unused: The unused definitions.
+        graph: The definitions of the project and what the code of each owner uses.
+
+    Returns:
+        The unused definitions that each unused definition reaches.
+    """
+    is_unused = set(unused)
+    reached = {
+        definition: [other for other in graph.reached(definition) if other in is_unused] for definition in unused
+    }
+    classes = {
+        (definition.path, definition.qualified_name): definition for definition in unused if definition.kind == "class"
+    }
+    # By the owner of their code, which is None for no function.
+    functions: dict[tuple[Path, Owner], Definition] = {
+        (definition.path, definition.line): definition
+        for definition in unused
+        if definition.kind in ("function", "method")
+    }
+    for definition in unused:
+        # A definition in a class is in the class first, even if the class is in a function.
+        container = (
+            classes.get((definition.path, definition.owner))
+            if definition.owner is not None
+            else functions.get((definition.path, definition.function))
+        )
+        if container is not None:
+            reached[container].append(definition)
+    return reached
+
+
 def _covers(override: Override, path: Path, definition: Definition, hierarchy: ClassHierarchy) -> bool:
     """
     Check whether an override that applies to a file covers a definition of it.
@@ -492,6 +541,7 @@ def _findings(
     syntax_errors: dict[Path, Finding],
     used: set[Definition],
     needed: set[Definition],
+    transitive: set[Definition],
 ) -> list[Finding]:
     """
     Make the findings of a project.
@@ -502,6 +552,7 @@ def _findings(
         syntax_errors: The finding of each file that does not parse.
         used: The definitions that are used.
         needed: The definitions that an ignore comment is needed for.
+        transitive: The unused definitions that only other unused definitions reach.
 
     Returns:
         A finding for each unused definition, for each problem with an ignore comment, and for each file
@@ -520,6 +571,7 @@ def _findings(
                 column=definition.column,
                 code=_code(definition),
                 name=definition.name,
+                transitive=definition in transitive,
             )
             for definition in facts[path].definitions
             if definition not in used
@@ -632,15 +684,43 @@ class _Graph:
                 self._add(self._by_key.get(key, []))
             for read in uses.objects - self._seen_objects:
                 self._seen_objects.add(read)
-                self._use_enums(*read)
+                for members in self._enums_read(*read):
+                    self._add(members)
             for star in uses.stars - self._seen_stars:
                 self._seen_stars.add(star)
                 self._add(self._public.get(star, []))
         return set(self._used)
 
-    def _use_enums(self, path: Path, parts: tuple[str, ...]) -> None:
+    def reached(self, definition: Definition) -> set[Definition]:
         """
-        Use the members of the enums that an object read uses as a whole.
+        Find the definitions that the code of a function uses directly, as if it were used.
+
+        Args:
+            definition: The definition, which reaches nothing if it is not a function.
+
+        Returns:
+            The definitions that the code of the function uses.
+        """
+        uses = self._uses.get((definition.path, definition.line))
+        if definition.kind not in ("function", "method") or uses is None:
+            return set()
+        reached: set[Definition] = set()
+        for name in uses.names:
+            reached.update(self._by_name.get(name, []))
+        for attribute in uses.attributes:
+            reached.update(self._by_attribute.get(attribute, []))
+        for key in uses.keys:
+            reached.update(self._by_key.get(key, []))
+        for read in uses.objects:
+            for members in self._enums_read(*read):
+                reached.update(members)
+        for star in uses.stars:
+            reached.update(self._public.get(star, []))
+        return reached
+
+    def _enums_read(self, path: Path, parts: tuple[str, ...]) -> Iterator[list[Definition]]:
+        """
+        Find the members of the enums that an object read uses as a whole.
 
         A member read as an attribute, as in `Color.RED`, is used by its name. Any other read of an enum,
         such as `Color(value)`, `list(Color)`, `Color.parse(text)` or an annotation, can reach any
@@ -649,7 +729,7 @@ class _Graph:
         for index in range(1, len(parts) + 1):
             enum = self._enums.get((path, ".".join(parts[:index])))
             if enum is not None and (index == len(parts) or parts[index] not in enum[1]):
-                self._add(enum[0])
+                yield enum[0]
 
     def _add(self, definitions: Iterable[Definition]) -> None:
         """Mark definitions as used, and queue the code of the functions among them."""

@@ -330,6 +330,7 @@ class _Walker:
             name=node.name,
             decorators=decorator_names(node),
             owner=self.binder.class_name if self.binder.kind == "class" else None,
+            function=self.owner,
             bases=tuple(filter(None, (dotted_name(base, unwrap=ast.Subscript) for base in node.bases))),
         )
         self.definitions.append(definition)
@@ -442,6 +443,7 @@ class _Walker:
                 name=function.name,
                 decorators=decorator_names(function),
                 owner=enclosing.class_name if enclosing.kind == "class" else None,
+                function=self.owner,
             )
         )
         return scope, line
@@ -498,6 +500,7 @@ class _Walker:
                     kind=kind,
                     name=name,
                     owner=scope.class_name,
+                    function=self.owner,
                     unpacked=unpacked,
                     annotation=annotation,
                     call=call,

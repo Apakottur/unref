@@ -64,5 +64,5 @@ class Async(unittest.IsolatedAsyncioTestCase):
 
 # Not a test case.
 class Plain:  # expect: 7 [unused-class]
-    def test_method(self):  # expect: 9 [unused-method]
+    def test_method(self):  # expect: 9 [unused-method] transitive
         pass

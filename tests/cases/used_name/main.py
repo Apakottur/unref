@@ -1,8 +1,8 @@
 class Model:  # expect: 7 [unused-class]
     # An exact name.
     model_config = {}
-    model_configuration = {}  # expect: 5 [unused-attribute]
-    config = {}  # expect: 5 [unused-attribute]
+    model_configuration = {}  # expect: 5 [unused-attribute] transitive
+    config = {}  # expect: 5 [unused-attribute] transitive
 
 
 class Visitor:  # expect: 7 [unused-class]
@@ -13,10 +13,10 @@ class Visitor:  # expect: 7 [unused-class]
     def visit_(self):
         return 2
 
-    def visit(self):  # expect: 9 [unused-method]
+    def visit(self):  # expect: 9 [unused-method] transitive
         return 3
 
-    def revisit_name(self):  # expect: 9 [unused-method]
+    def revisit_name(self):  # expect: 9 [unused-method] transitive
         return 4
 
 

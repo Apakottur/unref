@@ -111,11 +111,11 @@ class TestClass:
             pass
 
     class Nested:  # expect: 11 [unused-class]
-        def test_nested(self):  # expect: 13 [unused-method]
+        def test_nested(self):  # expect: 13 [unused-method] transitive
             pass
 
 
 # Other classes do not hold tests.
 class Helper:  # expect: 7 [unused-class]
-    def test_method(self):  # expect: 9 [unused-method]
+    def test_method(self):  # expect: 9 [unused-method] transitive
         pass
