@@ -42,27 +42,26 @@ repos:
 
 Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.0, about 2,100 files):
 
-| Tool                | Time   |
-| ------------------- | ------ |
-| unref               | 3.96s  |
-| unref (one process) | 9.32s  |
-| vulture             | 14.87s |
+| Tool                                               | Time   |
+| -------------------------------------------------- | ------ |
+| unref                                              | 3.96s  |
+| unref (one process)                                | 9.32s  |
+| [vulture](https://github.com/jendrikseipp/vulture) | 14.87s |
 
 Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py).
 
 ## Why
 
-Unused code piles up in every codebase, and faster than ever now that AI tools write much of it and
-tend to leave unused code behind.
+Unused code piles up in every codebase, faster than ever now that AI tools write much of it.
 
-Finding and removing dead code reduces bloat, speeds up AI code scanning and simplifies development.
+[Ruff](https://docs.astral.sh/ruff/) does not find unused code yet, see
+[astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` fills that gap until it does:
 
-[Ruff](https://docs.astral.sh/ruff/) does not support this yet, see
-[astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` exists to fill the gap until
-Ruff supports it natively.
-
-`unref` follows [Vulture](https://github.com/jendrikseipp/vulture), the tool that has long filled this
-role, as a fast and modern package that follows the conventions of Ruff.
+- **Just works**: sensible defaults for common frameworks, so most projects need little or no
+  configuration.
+- **Made for Ruff**: same conventions, options and output style, and it covers what Ruff leaves out.
+- **Fast**: checks all of CPython in seconds.
+- **Modern**: ty-style rule codes, configuration in `pyproject.toml`, and a typed Python API.
 
 ## Contributing
 
