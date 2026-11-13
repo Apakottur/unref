@@ -18,6 +18,7 @@ dunder
 dunders
 elif
 elts
+fastapi
 getattr
 httpx
 ignorelist

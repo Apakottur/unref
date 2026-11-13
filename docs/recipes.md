@@ -9,16 +9,7 @@ Built in: the [`pydantic` framework](configuration.md#frameworks) needs no confi
 
 ## FastAPI
 
-FastAPI calls the functions that its decorators register:
-
-```toml
-[tool.unref]
-used-decorators = ["app.get", "app.post", "router.get", "router.post"]
-```
-
-A decorator is matched by its name as written: add the methods and the names of the `FastAPI` and
-`APIRouter` objects your project uses, such as `users_router.delete` or `app.websocket`. The
-[`pydantic` framework](configuration.md#frameworks) covers the models.
+Built in: the [`fastapi` framework](configuration.md#frameworks) needs no configuration.
 
 ## pytest
 
