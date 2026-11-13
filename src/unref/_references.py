@@ -1,10 +1,11 @@
 import ast
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from unref._definitions import Definition, base_name, decorator_names
+from unref._definitions import Definition, decorator_names, dotted_name
 from unref._positions import SourcePositions
 
 # A name that a module imports: the module it is imported from, as it is written, the number of leading
@@ -44,6 +45,28 @@ class References:
     imports: set[tuple[Owner, str | None, int, str]] = field(default_factory=set)
     has_all: bool = False
     bindings: dict[str, Binding] = field(default_factory=dict)
+
+
+def parse_module(source: bytes, path: Path) -> ast.Module:
+    """
+    Parse a Python module.
+
+    The warnings that parsing emits, such as `SyntaxWarning` for an invalid escape sequence, are about
+    the code that is checked, not about the check, so they are not shown.
+
+    Args:
+        source: The content of the module.
+        path: The file of the module.
+
+    Returns:
+        The syntax tree of the module.
+
+    Raises:
+        SyntaxError: The module does not parse.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return ast.parse(source, filename=str(path))
 
 
 def walk_module(path: Path, module: ast.Module, source: bytes) -> tuple[list[Definition], References]:
@@ -249,7 +272,7 @@ class _Walker:
             name=node.name,
             decorators=decorator_names(node),
             owner=self.binder.class_name if self.binder.kind == "class" else None,
-            bases=tuple(filter(None, map(base_name, node.bases))),
+            bases=tuple(filter(None, (dotted_name(base, unwrap=ast.Subscript) for base in node.bases))),
         )
         self.definitions.append(definition)
         binder, self.binder = self.binder, _Scope(kind="class", class_name=definition.qualified_name)

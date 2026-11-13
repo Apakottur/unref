@@ -1,7 +1,5 @@
-import ast
 import math
 import os
-import warnings
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -11,7 +9,7 @@ from unref._definitions import Definition
 from unref._external import lazy_imports
 from unref._ignores import IgnoreComment, find_ignore_comments
 from unref._models import Finding
-from unref._references import Binding, References, walk_module
+from unref._references import Binding, References, parse_module, walk_module
 
 # Below this much source code, the work of a check is shorter than starting the processes.
 MIN_PARALLEL_BYTES = 1_000_000
@@ -83,7 +81,7 @@ def analyze_file(path: Path) -> FileFacts | Finding:
     """
     source = path.read_bytes()
     try:
-        tree = _parse(source, path)
+        tree = parse_module(source, path)
     except SyntaxError as error:
         return Finding(
             path=path,
@@ -102,25 +100,3 @@ def analyze_file(path: Path) -> FileFacts | Finding:
         ignore_findings=ignore_findings,
         lazy=lazy_imports(tree, references),
     )
-
-
-def _parse(source: bytes, path: Path) -> ast.Module:
-    """
-    Parse a Python module.
-
-    The warnings that parsing emits, such as `SyntaxWarning` for an invalid escape sequence, are about
-    the code of the project, not about the check, so they are not shown.
-
-    Args:
-        source: The content of the module.
-        path: The file of the module.
-
-    Returns:
-        The syntax tree of the module.
-
-    Raises:
-        SyntaxError: The module does not parse.
-    """
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        return ast.parse(source, filename=str(path))

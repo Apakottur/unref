@@ -48,10 +48,10 @@ def find_unused(
     exclude: Iterable[str],
     overrides: Iterable[Override],
     jobs: int | None,
-    python: str | os.PathLike[str] | None = None,
+    python: str | os.PathLike[str] | None,
     dummy_variable_rgx: str,
-    entry_points: Iterable[str] = (),
-    frameworks: Iterable[str] = FRAMEWORKS,
+    entry_points: Iterable[str],
+    frameworks: Iterable[str],
 ) -> list[Finding]:
     """
     Find the unused definitions of a Python project, which are those that nothing references.
@@ -248,22 +248,7 @@ def _hierarchy(
         bindings={path: facts[path].references.bindings for path in files},
         stars={path: star_imports(facts[path].references) for path in files},
         lazy={path: facts[path].lazy for path in files},
-        classes={
-            path: {
-                definition.qualified_name: definition.bases
-                for definition in facts[path].definitions
-                if definition.kind in ("class", "function")
-            }
-            for path in files
-        },
-        decorators={
-            path: {
-                definition.qualified_name: definition.decorators
-                for definition in facts[path].definitions
-                if definition.kind == "class"
-            }
-            for path in files
-        },
+        definitions={path: facts[path].definitions for path in files},
         external=ExternalModules(search_path),
     )
 

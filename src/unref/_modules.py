@@ -41,7 +41,7 @@ class ModuleName:
         return ".".join([*package[: len(package) - level + 1], *filter(None, [module])])
 
 
-def module_name(path: Path, roots: Collection[Path] = ()) -> ModuleName:
+def module_name(path: Path, roots: Collection[Path]) -> ModuleName:
     """
     Get the name that a Python file is imported by.
 

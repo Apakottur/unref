@@ -47,43 +47,33 @@ def decorator_names(node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
     """
     Get the dotted names of the decorators of a class or function.
     """
-    names = (_dotted_name(decorator) for decorator in node.decorator_list)
+    names = (dotted_name(decorator, unwrap=ast.Call) for decorator in node.decorator_list)
     return tuple(name for name in names if name is not None)
 
 
-def _dotted_name(expression: ast.expr) -> str | None:
+def dotted_name(expression: ast.expr, *, unwrap: type[ast.Call | ast.Subscript]) -> str | None:
     """
-    Get the dotted name of a decorator, such as `app.command` for `@app.command("name")`.
+    Get the dotted name of a decorator or a base class.
+
+    A decorator is unwrapped from a call, such as `app.command` for `@app.command("name")`, and a base
+    class from a subscript, such as `pydantic.BaseModel` for `pydantic.BaseModel[int]`.
+
+    Args:
+        expression: The decorator or base class.
+        unwrap: The kind of expression to unwrap: `ast.Call` for a decorator and `ast.Subscript` for a
+            base class.
 
     Returns:
-        The dotted name, or None if the decorator is not a dotted name, for example `@decorators[0]`.
+        The dotted name, or None if the expression is not a dotted name, for example `@decorators[0]`
+        or `make_base()`.
     """
     match expression:
-        case ast.Call(func=function):
-            return _dotted_name(function)
+        case ast.Call(func=inner) | ast.Subscript(value=inner) if isinstance(expression, unwrap):
+            return dotted_name(inner, unwrap=unwrap)
         case ast.Name(id=name):
             return name
         case ast.Attribute(value=value, attr=name):
-            prefix = _dotted_name(value)
-            return None if prefix is None else f"{prefix}.{name}"
-        case _:
-            return None
-
-
-def base_name(expression: ast.expr) -> str | None:
-    """
-    Get the dotted name of a base class, such as `pydantic.BaseModel` for `pydantic.BaseModel[int]`.
-
-    Returns:
-        The dotted name, or None if the base class is not a dotted name, for example `make_base()`.
-    """
-    match expression:
-        case ast.Subscript(value=value):
-            return base_name(value)
-        case ast.Name(id=name):
-            return name
-        case ast.Attribute(value=value, attr=name):
-            prefix = base_name(value)
+            prefix = dotted_name(value, unwrap=unwrap)
             return None if prefix is None else f"{prefix}.{name}"
         case _:
             return None
