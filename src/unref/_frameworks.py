@@ -1,5 +1,5 @@
 """
-The definitions that test frameworks find and call by themselves, which count as used.
+The definitions that frameworks find, call or read by themselves, which count as used.
 
 The rules follow what the frameworks do with their default settings:
 
@@ -12,8 +12,13 @@ The rules follow what the frameworks do with their default settings:
   and teardown methods. Its `discover` command loads the files that match `test*.py`, and calls their
   module setup and teardown, and their `load_tests` function.
 
-Both find the methods of a test class through its base classes as well, so a base class of a test
-class, wherever it is, holds tests.
+- Pydantic reads the fields of the subclasses of `pydantic.BaseModel`, the names they annotate other
+  than class variables and private attributes, and their `model_config`, or their `Config` class in
+  Pydantic 1. It calls the methods that its validator and serializer decorators register, and reads
+  the properties that `computed_field` registers.
+
+pytest and unittest find the methods of a test class through its base classes as well, so a base class
+of a test class, wherever it is, holds tests.
 """
 
 from collections.abc import Collection
@@ -55,10 +60,44 @@ _UNITTEST_TEST_CASES = frozenset({"unittest.TestCase", "unittest.case.TestCase"}
 _UNITTEST_MODULE_FUNCTIONS = frozenset({"setUpModule", "tearDownModule", "load_tests"})
 _UNITTEST_METHODS = frozenset({"setUp", "tearDown", "setUpClass", "tearDownClass", "asyncSetUp", "asyncTearDown"})
 
+# `pydantic.BaseModel` as `pydantic` gives it out, and where it is defined, also in the Pydantic 1 API of
+# `pydantic.v1`. Packages such as `pydantic_settings` import it from where it is defined.
+_PYDANTIC_MODELS = frozenset(
+    {"pydantic.BaseModel", "pydantic.main.BaseModel", "pydantic.v1.BaseModel", "pydantic.v1.main.BaseModel"}
+)
+# The decorators that register a method with Pydantic, as `pydantic` gives them out, and where they are
+# defined, also in the Pydantic 1 API of `pydantic.v1`.
+_PYDANTIC_DECORATORS = frozenset(
+    {
+        "pydantic.field_validator",
+        "pydantic.functional_validators.field_validator",
+        "pydantic.model_validator",
+        "pydantic.functional_validators.model_validator",
+        "pydantic.field_serializer",
+        "pydantic.functional_serializers.field_serializer",
+        "pydantic.model_serializer",
+        "pydantic.functional_serializers.model_serializer",
+        "pydantic.computed_field",
+        "pydantic.fields.computed_field",
+        "pydantic.validator",
+        "pydantic.deprecated.class_validators.validator",
+        "pydantic.root_validator",
+        "pydantic.deprecated.class_validators.root_validator",
+        "pydantic.v1.validator",
+        "pydantic.v1.class_validators.validator",
+        "pydantic.v1.root_validator",
+        "pydantic.v1.class_validators.root_validator",
+    }
+)
+_PYDANTIC_CONFIG = "model_config"
+# The configuration class of a model in Pydantic 1.
+_PYDANTIC_V1_CONFIG = "Config"
+_CLASS_VARIABLES = frozenset({"typing.ClassVar", "typing_extensions.ClassVar"})
+
 
 class FrameworkRules:
     """
-    The rules of the test frameworks of a project.
+    The rules of the frameworks of a project.
     """
 
     def __init__(
@@ -71,13 +110,14 @@ class FrameworkRules:
     ) -> None:
         """
         Args:
-            frameworks: The test frameworks whose rules apply.
+            frameworks: The frameworks whose rules apply.
             definitions: The definitions of each file of the project.
             names: The module name of each file.
             hierarchy: The hierarchy of the classes of the project.
         """
         self._pytest = "pytest" in frameworks
         self._unittest = "unittest" in frameworks
+        self._pydantic = "pydantic" in frameworks
         self._names = names
         self._hierarchy = hierarchy
 
@@ -95,7 +135,7 @@ class FrameworkRules:
 
     def uses(self, definition: Definition, path: Path) -> bool:
         """
-        Check whether a test framework finds and calls a definition by itself.
+        Check whether a framework finds, calls or reads a definition by itself.
 
         Args:
             definition: The definition.
@@ -104,8 +144,10 @@ class FrameworkRules:
         Returns:
             Whether one of the frameworks uses the definition.
         """
-        return (self._pytest and self._pytest_uses(definition, path)) or (
-            self._unittest and self._unittest_uses(definition, path)
+        return (
+            (self._pytest and self._pytest_uses(definition, path))
+            or (self._unittest and self._unittest_uses(definition, path))
+            or (self._pydantic and self._pydantic_uses(definition, path))
         )
 
     def _pytest_uses(self, definition: Definition, path: Path) -> bool:
@@ -159,6 +201,42 @@ class FrameworkRules:
                 or self._dotted_name(path, definition.owner) in self._unittest_bases
             )
         )
+
+    def _pydantic_uses(self, definition: Definition, path: Path) -> bool:
+        """
+        Check whether Pydantic calls or reads a definition by itself.
+        """
+        owner = definition.owner
+        if owner is None:
+            return False
+        if definition.kind == "method":
+            # A decorator registers the method with Pydantic, in a model or a Pydantic dataclass.
+            return any(
+                not self._hierarchy.resolve(path, decorator).isdisjoint(_PYDANTIC_DECORATORS)
+                for decorator in definition.decorators
+            )
+        if definition.kind == "class":
+            return definition.name == _PYDANTIC_V1_CONFIG and self._is_model(path, owner)
+
+        # An attribute.
+        model, _, last = owner.rpartition(".")
+        if last == _PYDANTIC_V1_CONFIG and model and self._is_model(path, model):
+            return True
+        return self._is_model(path, owner) and (
+            definition.name == _PYDANTIC_CONFIG
+            or (
+                # A field: an annotated name that is not a private attribute or a class variable.
+                definition.annotation is not None
+                and not definition.name.startswith("_")
+                and self._hierarchy.resolve(path, definition.annotation).isdisjoint(_CLASS_VARIABLES)
+            )
+        )
+
+    def _is_model(self, path: Path, name: str) -> bool:
+        """
+        Check whether a class of a module is a subclass of `pydantic.BaseModel`.
+        """
+        return not self._hierarchy.ancestors(path, name).isdisjoint(_PYDANTIC_MODELS)
 
     def _is_test_case(self, path: Path, name: str) -> bool:
         """

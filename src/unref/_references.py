@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from unref._definitions import Definition, decorator_names, dotted_name
+from unref._definitions import Definition, annotation_name, decorator_names, dotted_name
 from unref._positions import SourcePositions
 
 # A name that a module imports: the module it is imported from, as it is written, the number of leading
@@ -355,8 +355,9 @@ class _Walker:
         """
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         if not isinstance(node, ast.AugAssign):
+            annotation = annotation_name(node.annotation) if isinstance(node, ast.AnnAssign) else None
             for target in targets:
-                self.define_target(target)
+                self.define_target(target, annotation=annotation)
         if any(map(_is_all, targets)):
             self.references.has_all = True
             self.references.names.update((self.owner, name) for name in _string_literals(node.value))
@@ -415,13 +416,14 @@ class _Walker:
         )
         return scope, line
 
-    def define_target(self, target: ast.expr, *, in_unpacking: bool = False) -> None:
+    def define_target(self, target: ast.expr, *, in_unpacking: bool = False, annotation: str | None = None) -> None:
         """
         Add the variables and attributes that an assignment target defines.
 
         Args:
             target: The assignment target.
             in_unpacking: Whether the target is part of an unpacking.
+            annotation: The dotted name of the annotation of the target, see `Definition.annotation`.
         """
         scope = self.binder
         kind: Literal["variable", "attribute"]
@@ -459,6 +461,7 @@ class _Walker:
                     name=name,
                     owner=scope.class_name,
                     unpacked=unpacked,
+                    annotation=annotation,
                 )
             )
 

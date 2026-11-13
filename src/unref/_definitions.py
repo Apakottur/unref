@@ -23,6 +23,10 @@ class Definition:
             type arguments. A base class that is not a dotted name is left out.
         unpacked: For a variable or a class attribute, whether it is first assigned by its name in an
             unpacking, such as `second` in `first, second = pair()`, where Python needs a name to bind.
+        annotation: For a variable or an attribute that is first assigned with an annotation, the
+            dotted name of the annotation as it is written, without its type arguments, such as
+            `ClassVar` for `ClassVar[int]`. An empty string if the annotation is not a dotted name, such
+            as `int | None`, and None if there is no annotation.
     """
 
     path: Path
@@ -34,6 +38,7 @@ class Definition:
     owner: str | None = None
     bases: tuple[str, ...] = ()
     unpacked: bool = False
+    annotation: str | None = None
 
     @property
     def qualified_name(self) -> str:
@@ -49,6 +54,19 @@ def decorator_names(node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
     """
     names = (dotted_name(decorator, unwrap=ast.Call) for decorator in node.decorator_list)
     return tuple(name for name in names if name is not None)
+
+
+def annotation_name(annotation: ast.expr) -> str:
+    """
+    Get the dotted name of an annotation, without its type arguments, such as `ClassVar` for
+    `ClassVar[int]`, also when the annotation is quoted. An empty string if it is not a dotted name.
+    """
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        try:
+            annotation = ast.parse(annotation.value.strip(), mode="eval").body
+        except SyntaxError:
+            return ""
+    return dotted_name(annotation, unwrap=ast.Subscript) or ""
 
 
 def dotted_name(expression: ast.expr, *, unwrap: type[ast.Call | ast.Subscript]) -> str | None:
