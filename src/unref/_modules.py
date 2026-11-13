@@ -52,8 +52,8 @@ def module_name(path: Path, roots: Collection[Path]) -> ModuleName:
 
     Args:
         path: The file.
-        roots: The files and directories that make up the project, resolved. A namespace package is only
-            looked for under them, so that a package outside the project does not pull directories in.
+        roots: The directories given to the check, resolved. A namespace package is only looked for under
+            them, so that a package outside the project does not pull directories in.
     """
     path = path.resolve()
     is_package = path.name == _INIT

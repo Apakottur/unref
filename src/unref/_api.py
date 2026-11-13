@@ -41,10 +41,11 @@ def check(
             as used. Defaults to all the known ones.
 
     Returns:
-        The findings, one for each unused definition, sorted by file and line.
+        The findings: one for each unused definition, for each problem with an ignore comment, and for
+        each file that does not parse, sorted by file, line and column.
 
     Raises:
-        ValueError: If a framework is not a known one.
+        ValueError: If a framework is not a known one, or if `jobs` is less than 1.
     """
     return find_unused(
         paths,

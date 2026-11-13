@@ -30,10 +30,11 @@ does not read a configuration file.
 | `used-names`         | `used_names`         | Names of the definitions that count as used.                        |
 | `used-decorators`    | `used_decorators`    | Decorators that make the definitions they decorate count as used.   |
 | `exclude`            | `exclude`            | Files and directories that are not part of the project.             |
-| `python`             | `python`             | Virtual environment that the project runs in.                       |
+| `python`             | `python`             | Python environment or interpreter that the project runs in.         |
 | `dummy-variable-rgx` | `dummy_variable_rgx` | Names of the variables that are unused on purpose, in an unpacking. |
 | `frameworks`         | `frameworks`         | Test frameworks whose tests, fixtures and hooks count as used.      |
 | `output-format`      | -                    | How the findings are printed.                                       |
+| `overrides`          | `overrides`          | Options for some of the definitions, see [Overrides](#overrides).   |
 
 ### `used-names`
 

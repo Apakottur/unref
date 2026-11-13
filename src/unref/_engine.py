@@ -70,11 +70,11 @@ def find_unused(
         frameworks: The test frameworks whose tests, fixtures and hooks count as used.
 
     Returns:
-        A finding for each unused definition, and for each file that does not parse, sorted by file and
-        line.
+        A finding for each unused definition, for each problem with an ignore comment, and for each file
+        that does not parse, sorted by file, line and column.
 
     Raises:
-        ValueError: If a framework is not a known one.
+        ValueError: If a framework is not a known one, or if `jobs` is less than 1.
     """
     paths = list(paths)
     frameworks = frozenset(frameworks)

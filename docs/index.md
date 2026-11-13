@@ -58,23 +58,8 @@ for finding in unref.check(["src"]):
 
 ### pre-commit and prek
 
-`unref` can run as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook:
-
-```yaml
-repos:
-  - repo: https://github.com/Apakottur/unref
-    rev: "" # The latest release.
-    hooks:
-      - id: unref
-```
-
-Set `rev` to the [latest release](https://github.com/Apakottur/unref/releases), or let `pre-commit autoupdate`
-or `prek autoupdate` fill it in.
-
-The hook checks the whole project, not only the changed files: a definition is unused only if no file
-references it.
-
-`unref` leaves unused imports and local variables to [Ruff](https://docs.astral.sh/ruff/), so run both:
+`unref` can run as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook. It
+leaves unused imports and local variables to [Ruff](https://docs.astral.sh/ruff/), so run both:
 
 ```yaml
 repos:
@@ -88,6 +73,12 @@ repos:
     hooks:
       - id: unref
 ```
+
+Set `rev` to the [latest release](https://github.com/Apakottur/unref/releases), or let `pre-commit autoupdate`
+or `prek autoupdate` fill it in.
+
+The hook checks the whole project, not only the changed files: a definition is unused only if no file
+references it.
 
 ### GitHub Actions
 
@@ -173,11 +164,12 @@ The comment goes on the line of the finding, which for a function or class is th
 usually that of its `def` or `class`. For names that a framework uses, prefer the
 [configuration](configuration.md).
 
+<!-- cspell:ignore noqa -->
+
 The codes are separated by commas, and the comment can share its line with other comments:
 
 ```python
-class Plugin:
-    hook = None  # type: ignore[assignment]  # unref: ignore[unused-class, unused-attribute]
+class Plugin: hook = None  # noqa: E701  # fmt: skip  # unref: ignore[unused-class, unused-attribute]
 ```
 
 The comment must name its codes. A bare `# unref: ignore` ignores nothing, and is reported as an
