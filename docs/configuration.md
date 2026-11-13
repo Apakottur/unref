@@ -105,14 +105,17 @@ A project with custom pytest naming can add what these miss with an [override](#
 
 ### `output-format`
 
-`concise`, the default, prints `path:line:column: code 'name'`. `github` prints
-[GitHub Actions annotations](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands).
-Same as [Ruff's option](https://docs.astral.sh/ruff/settings/#output-format).
+How the findings are printed, as [Ruff's option](https://docs.astral.sh/ruff/settings/#output-format).
 
 ```toml
 [tool.unref]
 output-format = "github"
 ```
+
+| Format    | Default | Prints                                                                                                                                                                      |
+| --------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `concise` | `true`  | One line for each finding: `src/app.py:40:5: unused-function 'parse_date'`.                                                                                                |
+| `github`  | `false` | A [GitHub Actions annotation](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands) for each finding, shown on the file in a pull request. |
 
 ## Command line
 
