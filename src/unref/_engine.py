@@ -209,17 +209,17 @@ def _uses(
 
         for owner, binding, attributes, reads_object in references.imported_reads:
             owner_uses = uses[path, owner]
-            if reads_object:
-                owner_uses.objects.update(
-                    _imported_objects(path, binding, attributes, facts=facts, names=names, files_by_name=files_by_name)
-                )
-            if not attributes:
-                continue
-            # An attribute of an imported name is resolved: `package.module.name` is `name` in `package.module`.
             resolved = _resolve(names[path], binding, attributes, files_by_name)
             if resolved is None:
                 owner_uses.attributes.update(attributes)
                 continue
+            if reads_object:
+                owner_uses.objects.update(
+                    _imported_objects(resolved, facts=facts, names=names, files_by_name=files_by_name)
+                )
+            if not attributes:
+                continue
+            # An attribute of an imported name is resolved: `package.module.name` is `name` in `package.module`.
             parts, starts = resolved
             for index, modules in starts:
                 owner_uses.names.update((module, parts[index]) for module in modules)
@@ -262,14 +262,16 @@ def _resolve(
     if resolved is None:
         return None
     parts = [*resolved.split("."), *filter(None, [name]), *attributes]
-    starts = ((index, files_by_name.get(".".join(parts[:index]))) for index in range(1, len(parts)))
-    return parts, [(index, files) for index, files in starts if files is not None]
+    starts: list[tuple[int, list[Path]]] = []
+    for index in range(1, len(parts)):
+        files = files_by_name.get(".".join(parts[:index]))
+        if files is not None:
+            starts.append((index, files))
+    return parts, starts
 
 
 def _imported_objects(
-    path: Path,
-    binding: Binding,
-    attributes: tuple[str, ...],
+    resolved: tuple[list[str], list[tuple[int, list[Path]]]],
     *,
     facts: dict[Path, FileFacts],
     names: dict[Path, ModuleName],
@@ -280,9 +282,7 @@ def _imported_objects(
     it, stand for, through the modules that import the name in turn.
 
     Args:
-        path: The file that imports the name.
-        binding: What the imported name stands for.
-        attributes: The attributes that are read from the imported name, in order.
+        resolved: The dotted name of the imported name and its attributes, as `_resolve` finds it.
         facts: What each file defines and refers to.
         names: The module name of each file.
         files_by_name: The files of each module name.
@@ -294,13 +294,9 @@ def _imported_objects(
     # Each binding that is followed is followed once, which ends a cycle of modules that import the
     # names of each other.
     followed: set[tuple[Path, str]] = set()
-    pending = [(path, binding, attributes)]
+    pending = [resolved]
     while pending:
-        path, binding, attributes = pending.pop()
-        resolved = _resolve(names[path], binding, attributes, files_by_name)
-        if resolved is None:
-            continue
-        parts, starts = resolved
+        parts, starts = pending.pop()
         if not starts:
             continue
         for index, modules in starts:
@@ -312,7 +308,9 @@ def _imported_objects(
             module_binding = facts[module].references.bindings.get(parts[index])
             if module_binding is not None and (module, parts[index]) not in followed:
                 followed.add((module, parts[index]))
-                pending.append((module, module_binding, tuple(parts[index + 1 :])))
+                followed_name = _resolve(names[module], module_binding, tuple(parts[index + 1 :]), files_by_name)
+                if followed_name is not None:
+                    pending.append(followed_name)
     return found
 
 
