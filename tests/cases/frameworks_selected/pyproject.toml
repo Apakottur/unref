@@ -1,2 +1,2 @@
-[tool.unref]
-frameworks = ["unittest"]
+[tool.unref.frameworks]
+pytest = false

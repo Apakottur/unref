@@ -1,13 +1,14 @@
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 
 # The default of the `dummy-variable-rgx` option, the same as Ruff's.
 DEFAULT_DUMMY_VARIABLE_RGX = r"^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
-# The known frameworks, all of which are enabled by default.
-FRAMEWORKS = ("pytest", "unittest")
+# The known frameworks, and whether each is enabled by default.
+FRAMEWORKS: Mapping[str, bool] = MappingProxyType({"pytest": True, "unittest": True})
 
 # The codes of the findings, which an ignore comment can name.
 CODES = frozenset(

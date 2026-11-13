@@ -1,6 +1,7 @@
 import re
 import tomllib
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -45,7 +46,7 @@ class Config:
         dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
         entry_points: The object references of the entry points of the project, such as
             `package.module:function`.
-        frameworks: The test frameworks whose tests, fixtures and hooks count as used.
+        frameworks: Whether the rules of each framework apply, for the frameworks that the file sets.
         output_format: How the findings are printed.
     """
 
@@ -56,7 +57,7 @@ class Config:
     python: Path | None = None
     dummy_variable_rgx: str = DEFAULT_DUMMY_VARIABLE_RGX
     entry_points: tuple[str, ...] = ()
-    frameworks: tuple[str, ...] = FRAMEWORKS
+    frameworks: Mapping[str, bool] = field(default_factory=dict)
     output_format: OutputFormat = OutputFormat.CONCISE
 
 
@@ -158,14 +159,6 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
             f"Option 'dummy-variable-rgx' in {where} is not a valid regular expression: {error}"
         ) from error
 
-    frameworks = _string_list(options, "frameworks", where) if "frameworks" in options else list(FRAMEWORKS)
-    for framework in frameworks:
-        if framework not in FRAMEWORKS:
-            raise UnrefConfigError(
-                f"Option 'frameworks' in {where} has an unknown framework {framework!r}, "
-                f"expected one of {', '.join(map(repr, FRAMEWORKS))}"
-            )
-
     output_format = options.get("output-format", OutputFormat.CONCISE)
     if output_format not in list(OutputFormat):
         raise UnrefConfigError(
@@ -180,7 +173,7 @@ def _parse(options: dict[str, Any], path: Path) -> Config:
         overrides=tuple(_parse_override(item, path) for item in overrides),
         python=None if python is None else Path(python),
         dummy_variable_rgx=dummy_variable_rgx,
-        frameworks=tuple(frameworks),
+        frameworks=_frameworks(options, where),
         output_format=OutputFormat(output_format),
     )
 
@@ -205,6 +198,27 @@ def _parse_override(options: dict[str, Any], path: Path) -> Override:
         used_names=tuple(_string_list(options, "used-names", where)),
         used_decorators=tuple(_decorators(options, "used-decorators", where)),
     )
+
+
+def _frameworks(options: dict[str, Any], where: str) -> dict[str, bool]:
+    """
+    Get the `frameworks` table, which maps the name of a framework to whether its rules apply.
+    """
+    table = options.get("frameworks", {})
+    if not isinstance(table, dict):
+        raise UnrefConfigError(f"Option 'frameworks' in {where} must be a table")
+
+    frameworks: dict[str, bool] = {}
+    for name, value in table.items():
+        if name not in FRAMEWORKS:
+            raise UnrefConfigError(
+                f"Option 'frameworks' in {where} has an unknown framework {name!r}, "
+                f"expected one of {', '.join(map(repr, FRAMEWORKS))}"
+            )
+        if not isinstance(value, bool):
+            raise UnrefConfigError(f"Option 'frameworks.{name}' in {where} must be a boolean")
+        frameworks[name] = value
+    return frameworks
 
 
 def _check_names(options: dict[str, Any], known: set[str], where: str) -> None:

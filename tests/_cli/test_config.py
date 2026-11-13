@@ -343,21 +343,39 @@ def test_entry_points_invalid(tmp_path: Path, content: str, error: str) -> None:
     assert result.stderr == f"Error: {error.format(config=config)}\n"
 
 
+def test_config_frameworks_table(tmp_path: Path) -> None:
+    # In a file that is not a `pyproject.toml`, the table is `[frameworks]`.
+    config = tmp_path / "unref.toml"
+    config.write_text("[frameworks]\npytest = false\n")
+
+    case = _CASES_DIR / "frameworks_selected"
+
+    result = _runner.invoke(app, ["--config", str(config), str(case)])
+
+    # The rules of pytest are off, and those of unittest keep their default.
+    assert result.exit_code == 1
+    assert result.stdout == (
+        f"{case}/test_module.py:7:5: unused-function 'test_function'\n"
+        f"{case}/test_module.py:12:5: unused-function 'plain'\n"
+        f"{case}/test_module.py:16:5: unused-function 'pytest_configure'\n"
+        f"{case}/test_module.py:20:7: unused-class 'TestClass'\n"
+        f"{case}/test_module.py:21:9: unused-method 'test_method'\n"
+    )
+
+
 def test_config_frameworks_wrong_type(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
-    config.write_text('frameworks = "pytest"\n')
+    config.write_text('frameworks = ["pytest"]\n')
 
     result = _runner.invoke(app, ["--config", str(config)])
 
     assert result.exit_code == 2
-    assert result.stderr == (
-        f"Error: Option 'frameworks' in the configuration file {config} must be a list of strings\n"
-    )
+    assert result.stderr == f"Error: Option 'frameworks' in the configuration file {config} must be a table\n"
 
 
 def test_config_frameworks_unknown(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
-    config.write_text('frameworks = ["pytest", "nose"]\n')
+    config.write_text("[frameworks]\nnose = true\n")
 
     result = _runner.invoke(app, ["--config", str(config)])
 
@@ -365,4 +383,16 @@ def test_config_frameworks_unknown(tmp_path: Path) -> None:
     assert result.stderr == (
         f"Error: Option 'frameworks' in the configuration file {config} has an unknown framework 'nose', "
         "expected one of 'pytest', 'unittest'\n"
+    )
+
+
+def test_config_frameworks_not_boolean(tmp_path: Path) -> None:
+    config = tmp_path / "unref.toml"
+    config.write_text('[frameworks]\npytest = "false"\n')
+
+    result = _runner.invoke(app, ["--config", str(config)])
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        f"Error: Option 'frameworks.pytest' in the configuration file {config} must be a boolean\n"
     )
