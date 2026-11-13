@@ -200,8 +200,32 @@ def _uses(
     uses: dict[tuple[Path, Owner], _Uses] = defaultdict(_Uses)
     for path in files:
         references = facts[path].references
-        for owner, name in references.names:
-            uses[path, owner].names.add((path, name))
+        for owner, root, attributes, reads_object in references.reads:
+            owner_uses = uses[path, owner]
+            owner_uses.names.add((path, root))
+            owner_uses.attributes.update(attributes)
+            if reads_object:
+                owner_uses.objects.add((path, (root, *attributes)))
+
+        for owner, binding, attributes, reads_object in references.imported_reads:
+            owner_uses = uses[path, owner]
+            if reads_object:
+                owner_uses.objects.update(
+                    _imported_objects(path, binding, attributes, facts=facts, names=names, files_by_name=files_by_name)
+                )
+            if not attributes:
+                continue
+            # An attribute of an imported name is resolved: `package.module.name` is `name` in `package.module`.
+            resolved = _resolve(names[path], binding, attributes, files_by_name)
+            if resolved is None:
+                owner_uses.attributes.update(attributes)
+                continue
+            parts, starts = resolved
+            for index, modules in starts:
+                owner_uses.names.update((module, parts[index]) for module in modules)
+            # What follows the last name that a module of the project holds is read from an object.
+            first_of_object = max([len(parts) - len(attributes), *(index + 1 for index, _ in starts)])
+            owner_uses.attributes.update(parts[first_of_object:])
 
         for owner, source, level, name in references.imports:
             for imported in files_by_name.get(names[path].resolve(source, level) or "", []):
@@ -214,30 +238,32 @@ def _uses(
             uses[path, owner].attributes.add(name)
         for owner, name in references.keys:
             uses[path, owner].keys.add(name)
-        for owner, root, attributes in references.objects:
-            uses[path, owner].objects.add((path, (root, *attributes)))
-        for owner, binding, attributes in references.imported_objects:
-            uses[path, owner].objects.update(
-                _imported_objects(path, binding, attributes, facts=facts, names=names, files_by_name=files_by_name)
-            )
-
-        # An attribute of an imported name is resolved: `package.module.name` refers to `name` in the
-        # module `package.module`.
-        for owner, (source, level, name), attributes in references.imported_attributes:
-            module = names[path].resolve(source, level)
-            if module is None:
-                uses[path, owner].attributes.update(attributes)
-                continue
-            origin = [*module.split("."), *filter(None, [name])]
-            parts = [*origin, *attributes]
-            # What follows the last name that a module of the project holds is read from an object.
-            first_of_object = len(origin)
-            for index in range(1, len(parts)):
-                for imported in files_by_name.get(".".join(parts[:index]), []):
-                    uses[path, owner].names.add((imported, parts[index]))
-                    first_of_object = max(first_of_object, index + 1)
-            uses[path, owner].attributes.update(parts[first_of_object:])
     return uses
+
+
+def _resolve(
+    module: ModuleName, binding: Binding, attributes: tuple[str, ...], files_by_name: dict[str, list[Path]]
+) -> tuple[list[str], list[tuple[int, list[Path]]]] | None:
+    """
+    Find the dotted name that an imported name, and the attributes read from it, stand for.
+
+    Args:
+        module: The module that imports the name.
+        binding: What the imported name stands for.
+        attributes: The attributes that are read from the imported name, in order.
+        files_by_name: The files of each module name.
+
+    Returns:
+        The parts of the name, and each shorter start of it that is a module of the project, shortest
+        first, as its number of parts with its files. None if it is imported from beyond the root.
+    """
+    source, level, name = binding
+    resolved = module.resolve(source, level)
+    if resolved is None:
+        return None
+    parts = [*resolved.split("."), *filter(None, [name]), *attributes]
+    starts = ((index, files_by_name.get(".".join(parts[:index]))) for index in range(1, len(parts)))
+    return parts, [(index, files) for index, files in starts if files is not None]
 
 
 def _imported_objects(
@@ -270,25 +296,23 @@ def _imported_objects(
     followed: set[tuple[Path, str]] = set()
     pending = [(path, binding, attributes)]
     while pending:
-        path, (source, level, name), attributes = pending.pop()
-        module = names[path].resolve(source, level)
-        if module is None:
+        path, binding, attributes = pending.pop()
+        resolved = _resolve(names[path], binding, attributes, files_by_name)
+        if resolved is None:
             continue
-        parts = [*module.split("."), *filter(None, [name]), *attributes]
-        longest = None
-        for index in range(1, len(parts)):
-            for imported in files_by_name.get(".".join(parts[:index]), []):
-                found.add((imported, tuple(parts[index:])))
-                longest = index
-        if longest is None:
+        parts, starts = resolved
+        if not starts:
             continue
+        for index, modules in starts:
+            found.update((module, tuple(parts[index:])) for module in modules)
         # A module that imports the name in turn, such as a package that re-exports it. Only the longest
         # module is followed, as `package.module.name` reads `name` from `package.module`.
-        for imported in files_by_name[".".join(parts[:longest])]:
-            imported_binding = facts[imported].references.bindings.get(parts[longest])
-            if imported_binding is not None and (imported, parts[longest]) not in followed:
-                followed.add((imported, parts[longest]))
-                pending.append((imported, imported_binding, tuple(parts[longest + 1 :])))
+        index, modules = starts[-1]
+        for module in modules:
+            module_binding = facts[module].references.bindings.get(parts[index])
+            if module_binding is not None and (module, parts[index]) not in followed:
+                followed.add((module, parts[index]))
+                pending.append((module, module_binding, tuple(parts[index + 1 :])))
     return found
 
 

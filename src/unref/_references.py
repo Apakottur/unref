@@ -16,6 +16,10 @@ Binding = tuple[str | None, int, str | None]
 # in, or None for code that runs when the module is imported.
 Owner = int | None
 
+# A read of a name, or of a chain of attributes that starts with one (`package.module.name`): its owner, the
+# name, the attributes in order, and whether it reads the object, which a type hint of a parameter does not.
+Read = tuple[Owner, str, tuple[str, ...], bool]
+
 # The methods of a mapping that read a key, given as their first argument.
 _KEY_METHODS = frozenset({"get", "pop", "setdefault"})
 
@@ -28,22 +32,16 @@ class References:
     Each reference is made from an owner: the function that it is in, or the module itself.
 
     Attributes:
-        names: The names that are read as a plain name (`name`), without the local variables and
-            parameters, and the names that are listed in `__all__`. They refer to the module itself.
-        attributes: The names that are read as an attribute (`value.name`), without those that are
-            read from an imported name.
-        imported_attributes: The attributes that are read from an imported name
-            (`module.name.attribute`), each with what the imported name stands for and the names of
-            the attributes, in order.
+        reads: The reads of the names of the module itself, without the local variables and parameters.
+            A name that is listed in `__all__` is read as a plain name. A plain read of a name that the
+            module imports, at its top level or declared `global`, also reads its own name, without the
+            object, such as a fallback definition in an `except ImportError`.
+        imported_reads: The reads of the imported names, as for `reads`.
+        attributes: The names that are read as an attribute of something other than a name, such as
+            a call (`call().name`) or a local variable, and those that a class pattern matches by
+            keyword.
         keys: The string keys that are read from a mapping: `value["name"]`, `value.get("name")`,
             `"name" in value`, or a mapping pattern (`case {"name": ...}`).
-        objects: The objects that are read from a name of the module itself, each with the name and the
-            attributes that are read from it, in order: none for a plain name, as in `Color(value)`,
-            and those of a chain, as in `Color.RED`. A name that is listed in `__all__` is read as a
-            plain name. The annotations of the parameters and the return of a function are left out,
-            as they do not read the object.
-        imported_objects: The objects that are read from an imported name, as for `objects`, each with
-            what the imported name stands for.
         imports: The names that are imported from another module (`from module import name`), each
             with the module, as it is written, and its number of leading dots. A star import has the
             name `*`.
@@ -51,12 +49,10 @@ class References:
         bindings: The names that the module imports at its top level, each with what it stands for.
     """
 
-    names: set[tuple[Owner, str]] = field(default_factory=set)
+    reads: set[Read] = field(default_factory=set)
+    imported_reads: set[tuple[Owner, Binding, tuple[str, ...], bool]] = field(default_factory=set)
     attributes: set[tuple[Owner, str]] = field(default_factory=set)
-    imported_attributes: set[tuple[Owner, Binding, tuple[str, ...]]] = field(default_factory=set)
     keys: set[tuple[Owner, str]] = field(default_factory=set)
-    objects: set[tuple[Owner, str, tuple[str, ...]]] = field(default_factory=set)
-    imported_objects: set[tuple[Owner, Binding, tuple[str, ...]]] = field(default_factory=set)
     imports: set[tuple[Owner, str | None, int, str]] = field(default_factory=set)
     has_all: bool = False
     bindings: dict[str, Binding] = field(default_factory=dict)
@@ -106,22 +102,9 @@ def walk_module(path: Path, module: ast.Module, source: bytes) -> tuple[list[Def
     references = References()
     walker = _Walker(path, references, SourcePositions(source))
     walker.visit(module)
-
     # What reaches the module is read from the module itself, or from what it imports.
-    scope = walker.scope
-    references.bindings = scope.imports
-    references.names |= scope.names
-    for owner, root, attributes in scope.objects:
-        if root in scope.imports:
-            references.imported_objects.add((owner, scope.imports[root], attributes))
-        else:
-            references.objects.add((owner, root, attributes))
-    for owner, root, attributes in scope.chains:
-        if root in scope.imports:
-            references.imported_attributes.add((owner, scope.imports[root], attributes))
-        else:
-            references.attributes.update((owner, attribute) for attribute in attributes)
-            references.names.add((owner, root))
+    references.bindings = walker.scope.imports
+    walker.close(walker.scope, set(), references.reads)
     return walker.definitions, references
 
 
@@ -136,13 +119,8 @@ class _Scope:
         bound: The names that the scope binds, which are its local variables.
         global_names: The names that the scope declares `global`.
         imports: The names that the scope imports, each with what it stands for.
-        names: The names that are read in the scope, or in a scope nested in it, and that are not local
-            to the scopes in between, each with its owner.
-        chains: The chains of attributes, such as `package.module.name`, that start with a name and
-            that are read in the scope, or in a scope nested in it, as for `names`. Each has its owner,
-            the name and the attributes in order.
-        objects: The objects that are read from a name, as for `chains`, with no attributes for a plain
-            name, and without the annotations of the parameters and the return of a function.
+        reads: The reads of names in the scope, or in a scope nested in it, that are not local to the
+            scopes in between.
         enclosing: The scope that also binds the names that the scope binds. A comprehension binds its
             variables in the function that it is in as well.
         defined: The variables of a module, or the attributes of a class, that were already found. A
@@ -155,9 +133,7 @@ class _Scope:
     bound: set[str] = field(default_factory=set)
     global_names: set[str] = field(default_factory=set)
     imports: dict[str, Binding] = field(default_factory=dict)
-    names: set[tuple[Owner, str]] = field(default_factory=set)
-    chains: set[tuple[Owner, str, tuple[str, ...]]] = field(default_factory=set)
-    objects: set[tuple[Owner, str, tuple[str, ...]]] = field(default_factory=set)
+    reads: set[Read] = field(default_factory=set)
     enclosing: "_Scope | None" = None
     defined: set[str] = field(default_factory=set)
     instance: str | None = None
@@ -219,9 +195,7 @@ class _Walker:
         Add a read of a name, or bind it.
         """
         if isinstance(node.ctx, ast.Load):
-            self.scope.names.add((self.owner, node.id))
-            if not self.in_signature:
-                self.scope.objects.add((self.owner, node.id, ()))
+            self.scope.reads.add((self.owner, node.id, (), not self.in_signature))
         else:
             self.bind(node.id)
 
@@ -235,9 +209,7 @@ class _Walker:
         base, attributes = _attribute_chain(node)
         if isinstance(base, ast.Name):
             # Whether the chain starts with an imported name is known when the scope ends.
-            self.scope.chains.add((self.owner, base.id, attributes))
-            if not self.in_signature:
-                self.scope.objects.add((self.owner, base.id, attributes))
+            self.scope.reads.add((self.owner, base.id, attributes, not self.in_signature))
         else:
             self.references.attributes.update((self.owner, attribute) for attribute in attributes)
             self.visit(base)
@@ -312,7 +284,8 @@ class _Walker:
                 self.visit(node)
         inner = self.scope
         self.scope, self.binder, self.owner = scope, binder, owner
-        self.close(inner, {parameter.arg for parameter in parameters} | (inner.bound - inner.global_names))
+        local_names = {parameter.arg for parameter in parameters} | (inner.bound - inner.global_names)
+        self.close(inner, local_names, self.scope.reads)
 
     def visit_class(self, node: ast.ClassDef) -> None:
         """
@@ -347,7 +320,7 @@ class _Walker:
         self.visit_children(node)
         inner = self.scope
         self.scope, self.binder = scope, binder
-        self.close(inner, inner.bound)
+        self.close(inner, inner.bound, self.scope.reads)
 
     def visit_import(self, node: ast.Import) -> None:
         """
@@ -390,8 +363,7 @@ class _Walker:
         if any(map(_is_all, targets)):
             self.references.has_all = True
             listed = _string_literals(node.value)
-            self.references.names.update((self.owner, name) for name in listed)
-            self.references.objects.update((self.owner, name, ()) for name in listed)
+            self.references.reads.update((self.owner, name, (), True) for name in listed)
         self.visit_children(node)
 
     def visit_pattern_or_handler(
@@ -534,31 +506,28 @@ class _Walker:
             self.bind(name)
             self.binder.imports.setdefault(name, binding)
 
-    def close(self, inner: _Scope, local_names: set[str]) -> None:
+    def close(self, inner: _Scope, local_names: set[str], passed: set[Read]) -> None:
         """
-        End a scope that is nested in the current one: drop the reads of its local variables, resolve
-        the chains of attributes that start with a name that it imports, and pass the rest to the
-        current scope.
+        End a scope: drop the reads of its local variables, resolve the reads of the names that it
+        imports, which are matched once every module is known, and pass the rest on.
 
         Args:
             inner: The scope that ends.
             local_names: The local variables and parameters of the scope.
+            passed: The reads of the enclosing scope, or for the module, of its own names.
         """
-        outer = self.scope
-        outer.names.update(read for read in inner.names if read[1] not in local_names)
-        for owner, root, attributes in inner.objects:
+        for read in inner.reads:
+            owner, root, attributes, reads_object = read
             if root in inner.imports:
-                self.references.imported_objects.add((owner, inner.imports[root], attributes))
-            elif root not in local_names:
-                outer.objects.add((owner, root, attributes))
-        for owner, root, attributes in inner.chains:
-            if root in inner.imports:
-                # Attributes of an imported name, which are resolved once every module is known.
-                self.references.imported_attributes.add((owner, inner.imports[root], attributes))
+                self.references.imported_reads.add((owner, inner.imports[root], attributes, reads_object))
+                # A plain read of a name that is not local, at the module or declared `global`, is also
+                # a read of the name of the enclosing scope, without reading the object.
+                if not attributes and root not in local_names:
+                    passed.add((owner, root, (), False))
             elif root in local_names:
                 self.references.attributes.update((owner, attribute) for attribute in attributes)
             else:
-                outer.chains.add((owner, root, attributes))
+                passed.add(read)
 
 
 # The nodes that are walked other than by visiting their children.
