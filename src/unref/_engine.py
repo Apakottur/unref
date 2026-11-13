@@ -3,7 +3,7 @@ import re
 import sys
 import sysconfig
 from collections import defaultdict
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -51,7 +51,7 @@ def find_unused(
     python: str | os.PathLike[str] | None,
     dummy_variable_rgx: str,
     entry_points: Iterable[str],
-    frameworks: Iterable[str],
+    frameworks: Mapping[str, bool],
 ) -> list[Finding]:
     """
     Find the unused definitions of a Python project, which are those that nothing references.
@@ -67,7 +67,7 @@ def find_unused(
             check runs in.
         dummy_variable_rgx: The pattern of the names of the variables that are not used on purpose.
         entry_points: The object references of the entry points of the project.
-        frameworks: The test frameworks whose tests, fixtures and hooks count as used.
+        frameworks: Whether the rules of each framework apply, over the defaults.
 
     Returns:
         A finding for each unused definition, for each problem with an ignore comment, and for each file
@@ -77,10 +77,10 @@ def find_unused(
         ValueError: If a framework is not a known one, or if `jobs` is less than 1.
     """
     paths = list(paths)
-    frameworks = frozenset(frameworks)
-    unknown = sorted(frameworks.difference(FRAMEWORKS))
+    unknown = sorted(set(frameworks).difference(FRAMEWORKS))
     if unknown:
         raise ValueError(f"Unknown framework {unknown[0]!r}, expected one of {', '.join(map(repr, FRAMEWORKS))}")
+    enabled = {name for name, default in FRAMEWORKS.items() if frameworks.get(name, default)}
 
     discovered = discover(paths, exclude=exclude)
     facts, syntax_errors = _analyze(discovered, jobs=jobs)
@@ -106,7 +106,7 @@ def find_unused(
         dummy_variable_rgx=dummy_variable_rgx,
         entry_objects=_entry_objects(entry_points, files_by_name=files_by_name),
         rules=FrameworkRules(
-            frameworks,
+            enabled,
             definitions={path: facts[path].definitions for path in files},
             names=names,
             hierarchy=hierarchy,

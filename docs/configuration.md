@@ -88,12 +88,13 @@ dummy-variable-rgx = "^_$|^unused_"
 
 ### `frameworks`
 
-Frameworks whose built-in rules apply: what a framework finds and calls by itself counts as used.
-`frameworks = []` turns them all off.
+Frameworks whose built-in rules apply: what a framework finds and calls by itself counts as used. A
+framework that is not listed keeps its default. In a file that is not `pyproject.toml`, the table is
+`[frameworks]`.
 
 ```toml
-[tool.unref]
-frameworks = ["pytest", "unittest"]
+[tool.unref.frameworks]
+unittest = false
 ```
 
 | Framework  | Enabled by default | Counts as used                                                                                                                                                                  |
