@@ -22,6 +22,8 @@ from unref._references import Owner
 # The object reference of an entry point, as the entry points specification of the Python Packaging
 # User Guide gives it.
 _OBJECT_REFERENCE = re.compile(r"(?P<module>[\w.]+)\s*(:\s*(?P<attributes>[\w.]+)\s*)?(\[.*\]\s*)?")
+# `TypedDict`, as `typing` and `typing_extensions` give it out.
+_TYPED_DICTS = frozenset({"typing.TypedDict", "typing_extensions.TypedDict"})
 
 
 @dataclass
@@ -32,11 +34,13 @@ class _Uses:
     Attributes:
         names: The names of the modules of the project that the code uses, each with its module.
         attributes: The names that the code reads as attributes of an object.
+        keys: The string keys that the code reads from a mapping.
         stars: The modules that the code star imports.
     """
 
     names: set[tuple[Path, str]] = field(default_factory=set)
     attributes: set[str] = field(default_factory=set)
+    keys: set[str] = field(default_factory=set)
     stars: set[Path] = field(default_factory=set)
 
 
@@ -117,6 +121,7 @@ def find_unused(
         files=files,
         definitions=[definition for path in files for definition in facts[path].definitions],
         uses=uses,
+        fields=_typed_dict_fields(files, facts=facts, hierarchy=hierarchy),
         has_all={path for path in files if facts[path].references.has_all},
     )
 
@@ -188,6 +193,8 @@ def _uses(
 
         for owner, name in references.attributes:
             uses[path, owner].attributes.add(name)
+        for owner, name in references.keys:
+            uses[path, owner].keys.add(name)
 
         # An attribute of an imported name is resolved: `package.module.name` refers to `name` in the
         # module `package.module`.
@@ -251,6 +258,30 @@ def _hierarchy(
         definitions={path: facts[path].definitions for path in files},
         external=ExternalModules(search_path),
     )
+
+
+def _typed_dict_fields(
+    files: list[Path], *, facts: dict[Path, FileFacts], hierarchy: ClassHierarchy
+) -> set[Definition]:
+    """
+    Find the fields of the TypedDicts of a project, which are read as keys rather than as attributes.
+
+    Args:
+        files: The files of the project.
+        facts: What each file defines and refers to.
+        hierarchy: The hierarchy of the classes of the project.
+
+    Returns:
+        The attributes of the classes that inherit from `TypedDict`, directly or not.
+    """
+    return {
+        definition
+        for path in files
+        for definition in facts[path].definitions
+        if definition.kind == "attribute"
+        and definition.owner is not None
+        and not hierarchy.ancestors(path, definition.owner).isdisjoint(_TYPED_DICTS)
+    }
 
 
 def _roots(
@@ -439,6 +470,7 @@ class _Graph:
         files: list[Path],
         definitions: list[Definition],
         uses: dict[tuple[Path, Owner], _Uses],
+        fields: set[Definition],
         has_all: set[Path],
     ) -> None:
         """
@@ -446,16 +478,21 @@ class _Graph:
             files: The files of the project.
             definitions: The definitions of the project.
             uses: What the code of each owner uses.
+            fields: The fields of the TypedDicts of the project.
             has_all: The modules that define `__all__`.
         """
         self._uses = uses
         self._by_name: dict[tuple[Path, str], list[Definition]] = defaultdict(list)
         self._by_attribute: dict[str, list[Definition]] = defaultdict(list)
+        self._by_key: dict[str, list[Definition]] = defaultdict(list)
         self._public: dict[Path, list[Definition]] = defaultdict(list)
         for definition in definitions:
             self._by_name[definition.path, definition.name].append(definition)
-            # Only a method or an attribute is read as an attribute of an object.
-            if definition.owner is not None:
+            # A field of a TypedDict is read as a key, and only a method or another attribute is read
+            # as an attribute of an object.
+            if definition in fields:
+                self._by_key[definition.name].append(definition)
+            elif definition.owner is not None:
                 self._by_attribute[definition.name].append(definition)
             # A star import imports the names in `__all__`, which are references of the module
             # already, or every public name if there is no `__all__`.
@@ -468,6 +505,7 @@ class _Graph:
         self._seen_owners: set[tuple[Path, Owner]] = set()
         self._seen_names: set[tuple[Path, str]] = set()
         self._seen_attributes: set[str] = set()
+        self._seen_keys: set[str] = set()
         self._seen_stars: set[Path] = set()
 
     def use(self, roots: Iterable[Definition]) -> set[Definition]:
@@ -498,6 +536,9 @@ class _Graph:
             for attribute in uses.attributes - self._seen_attributes:
                 self._seen_attributes.add(attribute)
                 self._add(self._by_attribute.get(attribute, []))
+            for key in uses.keys - self._seen_keys:
+                self._seen_keys.add(key)
+                self._add(self._by_key.get(key, []))
             for star in uses.stars - self._seen_stars:
                 self._seen_stars.add(star)
                 self._add(self._public.get(star, []))

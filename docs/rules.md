@@ -21,6 +21,8 @@ A definition counts as used when something references it:
 - A function, class or variable: read in its module, imported from it, read as `module.name`, or listed in
   its `__all__`.
 - A method or attribute: read as `value.name` anywhere in the project, matched by name.
+- A field of a `TypedDict`: read as a key, `value["name"]`, `value.get("name")` or `"name" in value`,
+  anywhere in the project, matched by name.
 - A method or attribute named like a member of a base class from outside the project, such as `emit` in
   a subclass of `logging.Handler`: the base class uses it. The base class is read from the
   [environment of the project](configuration.md#python).

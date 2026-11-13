@@ -16,6 +16,9 @@ Binding = tuple[str | None, int, str | None]
 # in, or None for code that runs when the module is imported.
 Owner = int | None
 
+# The methods of a mapping that read a key, given as their first argument.
+_KEY_METHODS = frozenset({"get", "pop", "setdefault"})
+
 
 @dataclass
 class References:
@@ -32,6 +35,8 @@ class References:
         imported_attributes: The attributes that are read from an imported name
             (`module.name.attribute`), each with what the imported name stands for and the names of
             the attributes, in order.
+        keys: The string keys that are read from a mapping: `value["name"]`, `value.get("name")`,
+            `"name" in value`, or a mapping pattern (`case {"name": ...}`).
         imports: The names that are imported from another module (`from module import name`), each
             with the module, as it is written, and its number of leading dots. A star import has the
             name `*`.
@@ -42,6 +47,7 @@ class References:
     names: set[tuple[Owner, str]] = field(default_factory=set)
     attributes: set[tuple[Owner, str]] = field(default_factory=set)
     imported_attributes: set[tuple[Owner, Binding, tuple[str, ...]]] = field(default_factory=set)
+    keys: set[tuple[Owner, str]] = field(default_factory=set)
     imports: set[tuple[Owner, str | None, int, str]] = field(default_factory=set)
     has_all: bool = False
     bindings: dict[str, Binding] = field(default_factory=dict)
@@ -213,6 +219,31 @@ class _Walker:
             self.references.attributes.update((self.owner, attribute) for attribute in attributes)
             self.visit(base)
 
+    def visit_subscript(self, node: ast.Subscript) -> None:
+        """
+        Add a read of a string key (`value["name"]`).
+        """
+        if isinstance(node.ctx, ast.Load):
+            self.add_key(node.slice)
+        self.visit_children(node)
+
+    def visit_call(self, node: ast.Call) -> None:
+        """
+        Add a read of a string key by a method of a mapping (`value.get("name")`).
+        """
+        if isinstance(node.func, ast.Attribute) and node.func.attr in _KEY_METHODS and node.args:
+            self.add_key(node.args[0])
+        self.visit_children(node)
+
+    def visit_compare(self, node: ast.Compare) -> None:
+        """
+        Add a read of a string key by a membership test (`"name" in value`).
+        """
+        for operand, operator in zip([node.left, *node.comparators], node.ops, strict=False):
+            if isinstance(operator, (ast.In, ast.NotIn)):
+                self.add_key(operand)
+        self.visit_children(node)
+
     def visit_function(self, function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) -> None:
         """
         Add what a function or lambda refers to.
@@ -337,7 +368,13 @@ class _Walker:
         """
         Bind the name that an `except` clause or a pattern captures, and add what it refers to.
         """
-        name = node.rest if isinstance(node, ast.MatchMapping) else node.name
+        if isinstance(node, ast.MatchMapping):
+            name = node.rest
+            # A mapping pattern reads its keys.
+            for key in node.keys:
+                self.add_key(key)
+        else:
+            name = node.name
         if name is not None:
             self.bind(name)
         self.visit_children(node)
@@ -425,6 +462,13 @@ class _Walker:
                 )
             )
 
+    def add_key(self, key: ast.expr) -> None:
+        """
+        Add a read of a key, if it is a string literal.
+        """
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            self.references.keys.add((self.owner, key.value))
+
     def bind(self, name: str) -> None:
         """
         Bind a name in the current scope, and in the scopes that it binds names in as well.
@@ -471,6 +515,9 @@ class _Walker:
 _HANDLERS: dict[type[ast.AST], Callable[[_Walker, Any], None]] = {
     ast.Name: _Walker.visit_name,
     ast.Attribute: _Walker.visit_attribute,
+    ast.Subscript: _Walker.visit_subscript,
+    ast.Call: _Walker.visit_call,
+    ast.Compare: _Walker.visit_compare,
     ast.FunctionDef: _Walker.visit_function,
     ast.AsyncFunctionDef: _Walker.visit_function,
     ast.Lambda: _Walker.visit_function,
