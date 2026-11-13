@@ -1,7 +1,7 @@
 [![image](https://img.shields.io/pypi/v/unref.svg)](https://pypi.python.org/pypi/unref)
 [![image](https://img.shields.io/pypi/l/unref.svg)](https://github.com/Apakottur/unref/blob/main/LICENSE)
 [![image](https://img.shields.io/pypi/pyversions/unref.svg)](https://pypi.python.org/pypi/unref)
-[![Documentation](https://readthedocs.org/projects/unref/badge/?version=latest)](https://unref.readthedocs.io/)
+[![image](https://img.shields.io/readthedocs/unref.svg)](https://unref.readthedocs.io/)
 
 # unref
 
