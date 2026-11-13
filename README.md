@@ -72,5 +72,5 @@ Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/m
 
 ## Contributing
 
-False positives and other bugs are welcome as [issues](https://github.com/Apakottur/unref/issues). See
-[CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md) for more.
+False positives and other bugs are welcome as [issues](https://github.com/Apakottur/unref/issues). To
+contribute code, see [CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md).
