@@ -49,23 +49,26 @@ repos:
       - id: unref
 ```
 
-## Compared to vulture
+## How it works
 
-|                                      | unref                                                                     | [vulture](https://github.com/jendrikseipp/vulture)  |
-| ------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------- |
-| Functions, classes, variables        | Matched to their module, through imports, `module.name` and `__all__`.    | A name read anywhere counts every definition of it. |
-| Frameworks                           | Built-in rules for pytest, unittest, Pydantic and SQLAlchemy.             | Whitelist files and ignore options.                 |
-| Base classes from installed packages | Read from the project's environment, so overridden methods count as used. | Not followed.                                       |
-| Ignore comments                      | By rule code, and the ones that ignore nothing are reported.              | Whitelist files instead.                            |
+- **Matched by module**: a function, class or variable is used only when its own module reads it, or
+  another module reaches it through an import, `module.name` or `__all__`.
+- **Installed base classes**: base classes from the project's environment are followed, so the methods a
+  subclass overrides count as used.
+- **Ignore comments by code**: `# unref: ignore[...]` names the rule it ignores, and a comment that ignores
+  nothing is reported.
 
-Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.0, about 2,100 files),
-measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py):
+## Benchmark
 
-| Tool                | Time   |
-| ------------------- | ------ |
-| unref               | 3.96s  |
-| unref (one process) | 9.32s  |
-| vulture             | 14.87s |
+Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.0, about 2,100 files):
+
+| Tool                                               | Time   |
+| -------------------------------------------------- | ------ |
+| unref                                              | 3.96s  |
+| unref (one process)                                | 9.32s  |
+| [vulture](https://github.com/jendrikseipp/vulture) | 14.87s |
+
+Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py).
 
 ## Feedback
 
