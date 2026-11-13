@@ -28,6 +28,10 @@ _OBJECT_REFERENCE = re.compile(r"(?P<module>[\w.]+)\s*(:\s*(?P<attributes>[\w.]+
 _TYPED_DICTS = frozenset({"typing.TypedDict", "typing_extensions.TypedDict"})
 # `Enum`, which `IntEnum`, `StrEnum`, `Flag` and the other enums of `enum` inherit from.
 _ENUMS = frozenset({"enum.Enum"})
+# `ast.NodeVisitor`, whose `visit` calls the method named `visit_` and the class of the node, and
+# `ast.NodeTransformer`, which inherits from it.
+_NODE_VISITORS = frozenset({"ast.NodeVisitor", "ast.NodeTransformer"})
+_NODE_VISITOR_PREFIX = "visit_"
 
 
 @dataclass
@@ -407,6 +411,13 @@ def _roots(
                 or (
                     definition.owner is not None
                     and definition.name in hierarchy.external_members(path, definition.owner)
+                )
+                # A method of a node visitor of `ast`, which its `visit` calls by the name of the node.
+                or (
+                    definition.kind == "method"
+                    and definition.owner is not None
+                    and definition.name.startswith(_NODE_VISITOR_PREFIX)
+                    and not hierarchy.ancestors(path, definition.owner).isdisjoint(_NODE_VISITORS)
                 )
                 # The objects that the entry points name.
                 or definition.qualified_name in entry_objects.get(path, set())
