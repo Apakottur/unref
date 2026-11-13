@@ -21,7 +21,7 @@ top level. Paths are relative to the current directory, as in Ruff. The Python A
 | `exclude`            | Files and directories that are not part of the project.           |
 | `python`             | Python environment or interpreter that the project runs in.       |
 | `dummy-variable-rgx` | Names of the variables that are unused on purpose.                |
-| `frameworks`         | Test frameworks whose tests, fixtures and hooks count as used.    |
+| `frameworks`         | Frameworks whose built-in rules apply.                            |
 | `output-format`      | How the findings are printed.                                     |
 | `overrides`          | Options for some of the definitions, see [Overrides](#overrides). |
 
@@ -88,8 +88,9 @@ dummy-variable-rgx = "^_$|^unused_"
 
 ### `frameworks`
 
-Test frameworks whose tests, fixtures and hooks count as used, following each framework's defaults.
-Both are on by default; `frameworks = []` turns them off.
+Frameworks whose built-in rules apply: what the framework finds and calls by itself counts as used. The
+known frameworks are currently `pytest` and `unittest`, both on by default; `frameworks = []` turns them
+off.
 
 ```toml
 [tool.unref]
