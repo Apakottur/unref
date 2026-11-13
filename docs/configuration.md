@@ -97,11 +97,12 @@ framework that is not listed keeps its default. In a file that is not `pyproject
 unittest = false
 ```
 
-| Framework  | Enabled by default | Counts as used                                                                                                                                                                  |
-| ---------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pytest`   | `true`             | In `test_*.py` and `*_test.py` files: `test*` functions, `Test*` classes and their `test*` methods, setup and teardown functions. Anywhere: `pytest_*` hooks and fixtures. |
-| `unittest` | `true`             | Subclasses of `unittest.TestCase`, with their `test*`, `setUp` and `tearDown` methods.                                                                                         |
-| `pydantic` | `true`             | In subclasses of `pydantic.BaseModel`: fields and `model_config`. Anywhere: methods with Pydantic's validator and serializer decorators, and `computed_field`.              |
+| Framework    | Enabled by default | Counts as used                                                                                                                                                                                                                          |
+| ------------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pytest`     | `true`             | In `test_*.py` and `*_test.py` files: `test*` functions, `Test*` classes and their `test*` methods, setup and teardown functions. Anywhere: `pytest_*` hooks and fixtures.                                                              |
+| `unittest`   | `true`             | Subclasses of `unittest.TestCase`, with their `test*`, `setUp` and `tearDown` methods.                                                                                                                                                  |
+| `pydantic`   | `true`             | In subclasses of `pydantic.BaseModel`: fields and `model_config`. Anywhere: methods with Pydantic's validator and serializer decorators, and `computed_field`.                                                                          |
+| `sqlalchemy` | `true`             | In declarative models and their mixins: attributes annotated `Mapped`, or set to `mapped_column`, `Column`, `relationship` and the like. Anywhere: functions with `event.listens_for`, `validates`, `reconstructor` or `declared_attr`. |
 
 A project with custom pytest naming can add what these miss with an [override](#overrides).
 

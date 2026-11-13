@@ -27,6 +27,9 @@ class Definition:
             dotted name of the annotation as it is written, without its type arguments, such as
             `ClassVar` for `ClassVar[int]`. An empty string if the annotation is not a dotted name, such
             as `int | None`, and None if there is no annotation.
+        call: For a variable or an attribute that is first assigned the result of a call, the dotted
+            name of what it calls as it is written, such as `mapped_column` for `mapped_column(Integer)`,
+            or None if the value is not a call of a dotted name.
     """
 
     path: Path
@@ -39,6 +42,7 @@ class Definition:
     bases: tuple[str, ...] = ()
     unpacked: bool = False
     annotation: str | None = None
+    call: str | None = None
 
     @property
     def qualified_name(self) -> str:

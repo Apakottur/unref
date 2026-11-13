@@ -15,7 +15,7 @@ from unref._external import ExternalModules, environment_paths, star_imports
 from unref._files import FileFacts, analyze_files
 from unref._frameworks import FrameworkRules
 from unref._ignores import apply_ignore_comments, ignored_codes
-from unref._models import FRAMEWORKS, Finding, Override
+from unref._models import FRAMEWORKS, Finding, Framework, Override
 from unref._modules import ModuleName, import_root, module_name
 from unref._references import Owner
 
@@ -55,7 +55,7 @@ def find_unused(
     python: str | os.PathLike[str] | None,
     dummy_variable_rgx: str,
     entry_points: Iterable[str],
-    frameworks: Mapping[str, bool],
+    frameworks: Mapping[Framework, bool],
 ) -> list[Finding]:
     """
     Find the unused definitions of a Python project, which are those that nothing references.
@@ -81,10 +81,13 @@ def find_unused(
         ValueError: If a framework is not a known one, or if `jobs` is less than 1.
     """
     paths = list(paths)
-    unknown = sorted(set(frameworks).difference(FRAMEWORKS))
+    # A caller without type checks can give a name that is not a framework.
+    unknown = sorted(str(name) for name in frameworks if name not in FRAMEWORKS)
     if unknown:
-        raise ValueError(f"Unknown framework {unknown[0]!r}, expected one of {', '.join(map(repr, FRAMEWORKS))}")
-    enabled = {name for name, default in FRAMEWORKS.items() if frameworks.get(name, default)}
+        raise ValueError(
+            f"Unknown framework {unknown[0]!r}, expected one of {', '.join(repr(str(name)) for name in FRAMEWORKS)}"
+        )
+    enabled = {framework for framework, default in FRAMEWORKS.items() if frameworks.get(framework, default)}
 
     discovered = discover(paths, exclude=exclude)
     facts, syntax_errors = _analyze(discovered, jobs=jobs)

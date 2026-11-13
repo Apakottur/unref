@@ -382,7 +382,7 @@ def test_config_frameworks_unknown(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert result.stderr == (
         f"Error: Option 'frameworks' in the configuration file {config} has an unknown framework 'nose', "
-        "expected one of 'pytest', 'unittest', 'pydantic'\n"
+        "expected one of 'pytest', 'unittest', 'pydantic', 'sqlalchemy'\n"
     )
 
 

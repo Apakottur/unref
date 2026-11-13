@@ -44,10 +44,12 @@ pyproject
 pytest
 pytestmark
 pytype
+reconstructor
 Rozantsev
 showlocals
 shpyx
 softprops
+sqlalchemy
 strerror
 subclassing
 taplo

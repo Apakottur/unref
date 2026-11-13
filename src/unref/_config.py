@@ -6,7 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from unref._models import DEFAULT_DUMMY_VARIABLE_RGX, FRAMEWORKS, Override
+from unref._models import DEFAULT_DUMMY_VARIABLE_RGX, FRAMEWORKS, Framework, Override
 
 _PYPROJECT = "pyproject.toml"
 
@@ -57,7 +57,7 @@ class Config:
     python: Path | None = None
     dummy_variable_rgx: str = DEFAULT_DUMMY_VARIABLE_RGX
     entry_points: tuple[str, ...] = ()
-    frameworks: Mapping[str, bool] = field(default_factory=dict)
+    frameworks: Mapping[Framework, bool] = field(default_factory=dict)
     output_format: OutputFormat = OutputFormat.CONCISE
 
 
@@ -200,7 +200,7 @@ def _parse_override(options: dict[str, Any], path: Path) -> Override:
     )
 
 
-def _frameworks(options: dict[str, Any], where: str) -> dict[str, bool]:
+def _frameworks(options: dict[str, Any], where: str) -> dict[Framework, bool]:
     """
     Get the `frameworks` table, which maps the name of a framework to whether its rules apply.
     """
@@ -208,16 +208,16 @@ def _frameworks(options: dict[str, Any], where: str) -> dict[str, bool]:
     if not isinstance(table, dict):
         raise UnrefConfigError(f"Option 'frameworks' in {where} must be a table")
 
-    frameworks: dict[str, bool] = {}
+    frameworks: dict[Framework, bool] = {}
     for name, value in table.items():
         if name not in FRAMEWORKS:
             raise UnrefConfigError(
                 f"Option 'frameworks' in {where} has an unknown framework {name!r}, "
-                f"expected one of {', '.join(map(repr, FRAMEWORKS))}"
+                f"expected one of {', '.join(repr(str(name)) for name in FRAMEWORKS)}"
             )
         if not isinstance(value, bool):
             raise UnrefConfigError(f"Option 'frameworks.{name}' in {where} must be a boolean")
-        frameworks[name] = value
+        frameworks[Framework(name)] = value
     return frameworks
 
 
