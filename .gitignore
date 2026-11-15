@@ -21,3 +21,6 @@ tmp
 
 # Docs
 site
+
+# Rust
+target

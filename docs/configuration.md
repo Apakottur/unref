@@ -9,8 +9,7 @@ exclude = ["generated"]
 ```
 
 Another file can be given with `--config`. In a file not named `pyproject.toml`, the options are at the
-top level. Paths are relative to the current directory, as in Ruff. The Python API takes the same options as arguments of
-[`unref.check`](reference/api.md#unref.check).
+top level. Paths are relative to the current directory, as in Ruff.
 
 ## Options
 
@@ -145,10 +144,8 @@ show-transitive = true
 | `--python`        | The [`python`](#python) option. Overrides the configuration.         |
 | `--output-format` | The [`output-format`](#output-format) option. Overrides the configuration. |
 | `--show-transitive`, `--no-show-transitive` | The [`show-transitive`](#show-transitive) option. Overrides the configuration. |
-| `--jobs`, `-j`    | Number of processes. Defaults to one for each CPU.                   |
+| `--jobs`, `-j`    | Number of threads. Defaults to one for each CPU.                     |
 | `--version`       | Print the version and exit.                                          |
-
-The library uses one process by default. Pass `jobs` to `unref.check` for more.
 
 ## Entry points
 

@@ -20,7 +20,7 @@ Unused code piles up in every codebase, faster than ever now that AI tools write
 - **Just works**: built-in rules for pytest, unittest, Pydantic, SQLAlchemy and FastAPI, so most projects need
   little or no configuration.
 - **Ruff-style**: same conventions, options and output style, and it covers what Ruff leaves out.
-- **Fast**: checks all of CPython in seconds.
+- **Fast**: written in Rust on Ruff's parser, it checks all of CPython in under a second.
 - **Modern**: ty-style rule codes and configuration in `pyproject.toml`.
 
 ## Quick start
@@ -64,9 +64,10 @@ Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.
 
 | Tool                                               | Time   |
 | -------------------------------------------------- | ------ |
-| unref                                              | 3.96s  |
-| unref (one process)                                | 9.32s  |
-| [vulture](https://github.com/jendrikseipp/vulture) | 14.87s |
+| unref                                              | 0.94s  |
+| unref (one thread)                                 | 1.59s  |
+| unref 0.1.1, the last release written in Python    | 5.40s  |
+| [vulture](https://github.com/jendrikseipp/vulture) | 19.68s |
 
 Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py).
 

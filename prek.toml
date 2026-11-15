@@ -100,6 +100,27 @@ args = ["--config", "./linters/ruff.toml"]
 id = "ruff-format"
 args = ["--config", "./linters/ruff.toml"]
 
+########
+# RUST #
+########
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt"
+entry = "cargo fmt --all --"
+language = "system"
+types = ["rust"]
+
+[[repos.hooks]]
+id = "cargo-clippy"
+name = "cargo clippy"
+entry = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+language = "system"
+types = ["rust"]
+pass_filenames = false
+
 #########
 # UNREF #
 #########

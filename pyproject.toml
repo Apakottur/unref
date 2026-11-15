@@ -1,6 +1,6 @@
 [build-system]
-build-backend = "hatchling.build"
-requires = ["hatchling", "hatch-vcs"]
+build-backend = "maturin"
+requires = ["maturin>=1.9,<2.0"]
 
 [dependency-groups]
 dev = [
@@ -8,14 +8,12 @@ dev = [
   "mypy==2.4.1",
   "prek==0.5.10",
   "pytest==9.2.0",
-  "pytest-cov==7.1.0",
   "ruff==0.17.4",
   "shpyx==1.0.0",
   "ty==0.0.101",
 ]
 docs = [
   #
-  "mkdocstrings-python==2.0.10",
   "zensical==0.1.1",
 ]
 
@@ -38,23 +36,25 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Rust",
 ]
-dependencies = [
-  #
-  "pathspec>=0.12",
-  "typer>=0.15.4",
-]
-
-[project.scripts]
-unref = "unref._cli:app"
 
 [project.urls]
 homepage = "https://github.com/Apakottur/unref"
 repository = "https://github.com/Apakottur/unref"
 documentation = "https://unref.readthedocs.io/"
 
-[tool.hatch.version]
-source = "vcs"
+[tool.maturin]
+# The wheel holds the `unref` binary only, as ruff's does.
+bindings = "bin"
+strip = true
 
 [tool.uv]
 package = true
+# Rebuild the binary when its source changes.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "Cargo.toml" },
+  { file = "Cargo.lock" },
+  { file = "src/**/*.rs" },
+]

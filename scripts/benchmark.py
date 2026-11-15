@@ -2,8 +2,9 @@
 """
 Time unref and vulture on the CPython codebase.
 
-Run with `uv run scripts/benchmark.py`. It downloads the source of CPython, installs vulture into a
-temporary environment, runs each tool on the whole codebase a few times and prints the mean time of each.
+Run with `uv run scripts/benchmark.py`. It downloads the source of CPython, installs vulture and the last
+release of unref written in Python into a temporary environment, runs each tool on the whole codebase a
+few times and prints the mean time of each.
 """
 
 import io
@@ -18,6 +19,8 @@ import shpyx
 
 _CPYTHON_TAG = "v3.14.0"
 _VULTURE_VERSION = "2.16"
+# The last release of unref written in Python.
+_PYTHON_UNREF_VERSION = "0.1.1"
 _RUNS = 5
 
 
@@ -31,11 +34,22 @@ def _download_cpython(destination: Path) -> Path:
     return next(destination.iterdir())
 
 
-def _install_vulture(environment: Path) -> Path:
-    print(f"Installing vulture {_VULTURE_VERSION}...")
+def _install_tools(environment: Path) -> Path:
+    print(f"Installing vulture {_VULTURE_VERSION} and unref {_PYTHON_UNREF_VERSION}...")
     shpyx.run(["uv", "venv", "--quiet", environment])
-    shpyx.run(["uv", "pip", "install", "--quiet", "--python", environment, f"vulture=={_VULTURE_VERSION}"])
-    return environment / "bin" / "vulture"
+    shpyx.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--quiet",
+            "--python",
+            environment,
+            f"vulture=={_VULTURE_VERSION}",
+            f"unref=={_PYTHON_UNREF_VERSION}",
+        ]
+    )
+    return environment / "bin"
 
 
 def _time(command: list[str], cwd: Path) -> float:
@@ -52,13 +66,16 @@ def _time(command: list[str], cwd: Path) -> float:
 def main() -> None:
     with tempfile.TemporaryDirectory() as directory:
         cpython = _download_cpython(Path(directory) / "source")
-        vulture = _install_vulture(Path(directory) / "venv")
+        tools = _install_tools(Path(directory) / "venv")
         unref = str(Path(sys.executable).parent / "unref")
+        python_unref = str(tools / "unref")
 
         commands = {
             "unref": [unref],
-            "unref (one process)": [unref, "--jobs", "1"],
-            "vulture": [str(vulture), "."],
+            "unref (one thread)": [unref, "--jobs", "1"],
+            f"unref {_PYTHON_UNREF_VERSION} (Python)": [python_unref],
+            f"unref {_PYTHON_UNREF_VERSION} (Python, one process)": [python_unref, "--jobs", "1"],
+            "vulture": [str(tools / "vulture"), "."],
         }
         results = {}
         for name, command in commands.items():

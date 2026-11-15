@@ -35,9 +35,8 @@ import tokenize
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
-from unref._cli import app
+from tests._unref import run
 
 _CASES_DIR = Path(__file__).parent / "cases"
 _EXPECT_PREFIX = "# expect:"
@@ -45,7 +44,6 @@ _EXPECTED = re.compile(r"\s*(?P<column>\d+) \[(?P<code>[a-z-]+)\](?P<transitive>
 # A finding as the command prints it: `path:line:column: code 'name'`.
 _FINDING = re.compile(r"(?P<path>.+):(?P<line>\d+):(?P<column>\d+): (?P<code>[a-z-]+) '.*'")
 
-_runner = CliRunner()
 
 # A finding as compared by the tests: file path relative to the case, line, column and code.
 _Finding = tuple[str, int, int, str]
@@ -84,7 +82,7 @@ def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch, *, show_transi
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
     # A single process keeps the check in the process of the tests, which is faster for small cases.
-    result = _runner.invoke(app, ["--jobs", "1", "--show-transitive" if show_transitive else "--no-show-transitive"])
+    result = run(["--jobs", "1", "--show-transitive" if show_transitive else "--no-show-transitive"])
 
     findings: list[_Finding] = []
     for line in result.stdout.splitlines():

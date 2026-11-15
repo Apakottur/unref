@@ -1,0 +1,44 @@
+[package]
+name = "unref"
+# The release workflow sets the version from the tag that it releases.
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.91"
+description = "Find unreferenced Python code"
+license = "MIT"
+repository = "https://github.com/Apakottur/unref"
+readme = "README.md"
+publish = false
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+encoding_rs = "0.8"
+fancy-regex = "0.14"
+ignore = "0.4"
+rayon = "1.10"
+regex = "1.11"
+rustc-hash = "2.1"
+toml = { version = "0.8", features = ["preserve_order"] }
+
+# Ruff's crates are not published on crates.io, so they are pinned to a release of Ruff.
+ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.17.4" }
+ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.17.4" }
+ruff_source_file = { git = "https://github.com/astral-sh/ruff", tag = "0.17.4" }
+ruff_text_size = { git = "https://github.com/astral-sh/ruff", tag = "0.17.4" }
+
+# As ruff's.
+[profile.release]
+lto = "fat"
+codegen-units = 16
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+# The documentation names frameworks and Python names in prose, such as SQLAlchemy and TypedDict.
+doc_markdown = "allow"
+struct_excessive_bools = "allow"
+too_many_lines = "allow"
+too_many_arguments = "allow"
