@@ -160,11 +160,14 @@ class ClassHierarchy:
                 if imported is not None:
                     found |= self._follow(".".join(filter(None, [imported, rest])), seen)
             elif first not in module.bases:
-                # A name that the module may star import.
-                for source, level in module.stars:
-                    star_module = module.name.resolve(source, level)
-                    if star_module is not None:
-                        found |= self._follow(f"{star_module}.{symbol}", seen)
+                # A name that the module may star import. A star import of a submodule binds the
+                # submodule itself under its name, so that name is the submodule and not one that a star
+                # import gives out.
+                star_modules = {module.name.resolve(source, level) for source, level in module.stars}
+                if f"{module.name.name}.{first}" not in star_modules:
+                    for star_module in star_modules:
+                        if star_module is not None:
+                            found |= self._follow(f"{star_module}.{symbol}", seen)
                 # A name that the `__getattr__` of the module imports, which it gives out.
                 for binding in module.lazy.get(first, []):
                     imported = self._imported(path, binding)
