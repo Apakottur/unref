@@ -4,7 +4,7 @@ description: Install Python, uv and dependencies, which builds unref unless aske
 inputs:
   python-version:
     description: Python version to install.
-    default: "3.14"
+    default: "3.15"
   install-project:
     description: Whether to build and install unref. Jobs that only check the Python code do not need it.
     default: "true"
