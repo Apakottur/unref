@@ -57,7 +57,7 @@ def main() -> None:
 
         commands = {
             "unref": [unref],
-            "unref (one process)": [unref, "--jobs", "1"],
+            "unref (one thread)": [unref, "--jobs", "1"],
             "vulture": [str(vulture), "."],
         }
         results = {}

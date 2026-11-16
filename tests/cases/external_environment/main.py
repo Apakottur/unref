@@ -22,8 +22,8 @@ class FromEditable(editable_module.Base):
         return self
 
 
-# The environment of the project replaces the site-packages of the check: `typer` is installed with the
-# check, but not in the environment of the project.
+# Installed packages are read from the environment of the project only: `typer` is not installed in
+# it.
 class App(typer.Typer):
     def command(self):  # expect: 9 [unused-method]
         return self

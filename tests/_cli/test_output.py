@@ -3,18 +3,15 @@ import shutil
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
-from unref._cli import app
-
-_runner = CliRunner()
+from tests._unref import run
 
 _CASES_DIR = Path(__file__).parent.parent / "cases"
 
 
 def test_version() -> None:
     # The version is printed without checking anything, as with ruff and ty.
-    result = _runner.invoke(app, ["--version", str(_CASES_DIR / "function")])
+    result = run(["--version", str(_CASES_DIR / "function")])
 
     assert result.exit_code == 0
     assert result.stdout == f"unref {importlib.metadata.version('unref')}\n"
@@ -23,7 +20,7 @@ def test_version() -> None:
 def test_output_format_concise() -> None:
     case = _CASES_DIR / "function"
 
-    result = _runner.invoke(app, ["--output-format", "concise", str(case)])
+    result = run(["--output-format", "concise", str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == f"{case}/main.py:1:5: unused-function 'function'\n"
@@ -32,12 +29,12 @@ def test_output_format_concise() -> None:
 def test_output_format_github() -> None:
     case = _CASES_DIR / "syntax_error"
 
-    result = _runner.invoke(app, ["--output-format", "github", str(case)])
+    result = run(["--output-format", "github", str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == (
-        f"::error title=unref (invalid-syntax),file={case}/bad.py,line=6,col=1::{case}/bad.py:6:1: "
-        "invalid-syntax 'Missing parentheses in call to 'print'. Did you mean print(...)?'\n"
+        f"::error title=unref (invalid-syntax),file={case}/bad.py,line=7,col=7::{case}/bad.py:7:7: "
+        "invalid-syntax 'Simple statements must be separated by newlines or semicolons'\n"
         f"::error title=unref (unused-function),file={case}/good.py,line=1,col=5::{case}/good.py:1:5: "
         "unused-function 'unused'\n"
     )
@@ -50,7 +47,7 @@ def test_output_format_github_escaped(tmp_path: Path) -> None:
     shutil.copytree(_CASES_DIR / "function", case)
     escaped = str(case).replace("%", "%25").replace(":", "%3A").replace(",", "%2C")
 
-    result = _runner.invoke(app, ["--output-format", "github", str(case)])
+    result = run(["--output-format", "github", str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == (
@@ -60,12 +57,12 @@ def test_output_format_github_escaped(tmp_path: Path) -> None:
 
 
 def test_output_format_unknown() -> None:
-    result = _runner.invoke(app, ["--output-format", "json", str(_CASES_DIR / "function")])
+    result = run(["--output-format", "json", str(_CASES_DIR / "function")])
 
     assert result.exit_code == 2
     assert result.stdout == ""
     # The message is colored in some terminals, so only a part of it that has no color is checked.
-    assert "'concise', 'github'" in result.stderr
+    assert "[possible values: concise, github]" in result.stderr
 
 
 def test_output_format_config(tmp_path: Path) -> None:
@@ -73,7 +70,7 @@ def test_output_format_config(tmp_path: Path) -> None:
     config.write_text('output-format = "github"\n')
     case = _CASES_DIR / "function"
 
-    result = _runner.invoke(app, ["--config", str(config), str(case)])
+    result = run(["--config", str(config), str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == (
@@ -88,7 +85,7 @@ def test_output_format_option_over_config(tmp_path: Path) -> None:
     config.write_text('output-format = "github"\n')
     case = _CASES_DIR / "function"
 
-    result = _runner.invoke(app, ["--config", str(config), "--output-format", "concise", str(case)])
+    result = run(["--config", str(config), "--output-format", "concise", str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == f"{case}/main.py:1:5: unused-function 'function'\n"
@@ -99,7 +96,7 @@ def test_output_format_config_invalid(tmp_path: Path, value: str) -> None:
     config = tmp_path / "unref.toml"
     config.write_text(f"output-format = {value}\n")
 
-    result = _runner.invoke(app, ["--config", str(config), str(_CASES_DIR / "function")])
+    result = run(["--config", str(config), str(_CASES_DIR / "function")])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -112,7 +109,7 @@ def test_show_transitive() -> None:
     # The methods of the unused class are reached only from it.
     case = _CASES_DIR / "method"
 
-    result = _runner.invoke(app, ["--show-transitive", str(case)])
+    result = run(["--show-transitive", str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == (
@@ -125,7 +122,7 @@ def test_show_transitive() -> None:
 def test_show_transitive_github() -> None:
     case = _CASES_DIR / "method"
 
-    result = _runner.invoke(app, ["--output-format", "github", str(case)])
+    result = run(["--output-format", "github", str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == (
@@ -138,7 +135,7 @@ def test_show_transitive_config(tmp_path: Path) -> None:
     config.write_text("show-transitive = true\n")
     case = _CASES_DIR / "method"
 
-    result = _runner.invoke(app, ["--config", str(config), str(case)])
+    result = run(["--config", str(config), str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == (
@@ -154,7 +151,7 @@ def test_show_transitive_option_over_config(tmp_path: Path) -> None:
     config.write_text("show-transitive = true\n")
     case = _CASES_DIR / "method"
 
-    result = _runner.invoke(app, ["--config", str(config), "--no-show-transitive", str(case)])
+    result = run(["--config", str(config), "--no-show-transitive", str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == f"{case}/main.py:1:7: unused-class 'Class'\n"
@@ -164,7 +161,7 @@ def test_show_transitive_config_invalid(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('show-transitive = "yes"\n')
 
-    result = _runner.invoke(app, ["--config", str(config), str(_CASES_DIR / "method")])
+    result = run(["--config", str(config), str(_CASES_DIR / "method")])
 
     assert result.exit_code == 2
     assert result.stdout == ""

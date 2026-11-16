@@ -3,11 +3,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
-from unref._cli import app
-
-_runner = CliRunner()
+from tests._unref import run
 
 _CASE = Path(__file__).parent.parent / "cases" / "external_environment"
 
@@ -20,6 +17,7 @@ _WITHOUT_ENVIRONMENT = (
     f"{_CASE}/main.py:12:9: unused-method 'process_bind_param'\n"
     f"{_CASE}/main.py:15:9: unused-method 'own_method'\n"
     f"{_CASE}/main.py:21:9: unused-method 'hook'\n"
+    f"{_CASE}/main.py:28:9: unused-method 'command'\n"
 )
 
 # Removes the active environment for the run, so that the environment of the tests does not count.
@@ -40,8 +38,7 @@ def _no_config(tmp_path: Path) -> Path:
 def test_option(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, python: str) -> None:
     monkeypatch.chdir(tmp_path)
 
-    result = _runner.invoke(
-        app,
+    result = run(
         ["--config", str(_no_config(tmp_path)), "--python", str(_CASE / python), str(_CASE)],
         env=_NO_ACTIVE_ENVIRONMENT,
     )
@@ -57,8 +54,7 @@ def test_option_windows_system_python(monkeypatch: pytest.MonkeyPatch, tmp_path:
     (prefix / "python.exe").touch()
     monkeypatch.chdir(tmp_path)
 
-    result = _runner.invoke(
-        app,
+    result = run(
         ["--config", str(_no_config(tmp_path)), "--python", str(prefix / "python.exe"), str(_CASE)],
         env=_NO_ACTIVE_ENVIRONMENT,
     )
@@ -74,7 +70,7 @@ def test_option_windows_system_python(monkeypatch: pytest.MonkeyPatch, tmp_path:
 def test_option_missing(tmp_path: Path) -> None:
     missing = tmp_path / "missing"
 
-    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), "--python", str(missing), str(_CASE)])
+    result = run(["--config", str(_no_config(tmp_path)), "--python", str(missing), str(_CASE)])
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: The Python environment {missing} does not exist\n"
@@ -87,7 +83,7 @@ def test_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config.write_text(f'python = "{_CASE.name}/.venv"\n')
     monkeypatch.chdir(_CASE.parent)
 
-    result = _runner.invoke(app, ["--config", str(config), str(_CASE)], env=_NO_ACTIVE_ENVIRONMENT)
+    result = run(["--config", str(config), str(_CASE)], env=_NO_ACTIVE_ENVIRONMENT)
 
     assert result.stdout == _WITH_ENVIRONMENT
 
@@ -95,9 +91,7 @@ def test_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 def test_active_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
-    result = _runner.invoke(
-        app, ["--config", str(_no_config(tmp_path)), str(_CASE)], env={"VIRTUAL_ENV": str(_CASE / ".venv")}
-    )
+    result = run(["--config", str(_no_config(tmp_path)), str(_CASE)], env={"VIRTUAL_ENV": str(_CASE / ".venv")})
 
     assert result.stdout == _WITH_ENVIRONMENT
 
@@ -107,7 +101,7 @@ def test_venv_of_current_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     # the project.
     monkeypatch.chdir(_CASE)
 
-    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), str(_CASE)], env={"VIRTUAL_ENV": sys.prefix})
+    result = run(["--config", str(_no_config(tmp_path)), str(_CASE)], env={"VIRTUAL_ENV": sys.prefix})
 
     assert result.stdout == _WITH_ENVIRONMENT
 
@@ -115,6 +109,6 @@ def test_venv_of_current_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 def test_no_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
-    result = _runner.invoke(app, ["--config", str(_no_config(tmp_path)), str(_CASE)], env=_NO_ACTIVE_ENVIRONMENT)
+    result = run(["--config", str(_no_config(tmp_path)), str(_CASE)], env=_NO_ACTIVE_ENVIRONMENT)
 
     assert result.stdout == _WITHOUT_ENVIRONMENT

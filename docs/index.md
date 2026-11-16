@@ -42,17 +42,6 @@ uvx unref src scripts
 `unref` exits with a non-zero status if anything is found. See the [rules](rules.md) for what it reports
 and how to ignore a finding, and the [command line](configuration.md#command-line) for its options.
 
-### Python
-
-```python
-import unref
-
-for finding in unref.check(["src"]):
-    print(finding)
-```
-
-See the [Python API](reference/api.md).
-
 ### pre-commit and prek
 
 The hook in the [quick start](#quick-start) runs next to Ruff, which covers the unused imports and local
@@ -89,7 +78,7 @@ Unused code piles up in every codebase, faster than ever now that AI tools write
 - **Just works**: built-in rules for pytest, unittest, Pydantic, SQLAlchemy and FastAPI, so most projects need
   little or no configuration.
 - **Ruff-style**: same conventions, options and output style, and it covers what Ruff leaves out.
-- **Fast**: checks all of CPython in seconds.
-- **Modern**: ty-style rule codes, configuration in `pyproject.toml`, and a typed Python API.
+- **Fast**: checks all of CPython in under a second.
+- **Modern**: ty-style rule codes and configuration in `pyproject.toml`, written in Rust on Ruff's parser.
 
 The name is short for "unreferenced".

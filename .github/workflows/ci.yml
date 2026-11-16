@@ -63,21 +63,18 @@ jobs:
         run: ty check --project . --config-file linters/ty.toml --python-version ${{ matrix.python-version }}
 
   unit-tests:
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
-
-    name: Unit Tests - Python ${{ matrix.python-version }}
+    name: Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - uses: ./.github/workflows/util/setup_python
-        with:
-          python-version: ${{ matrix.python-version }}
 
-      - name: Run unit tests
+      - name: Run Rust unit tests
+        run: cargo test --locked
+
+      # The tests of the command run the unref that the setup installs in the environment.
+      - name: Run tests of the command
         run: pytest --showlocals -c tests/pytest.ini
 
   check:

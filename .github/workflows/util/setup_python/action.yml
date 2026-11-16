@@ -1,5 +1,5 @@
 name: Setup Python
-description: Install Python, uv and dependencies.
+description: Install Python, uv and dependencies, which builds unref.
 
 inputs:
   python-version:
@@ -13,10 +13,14 @@ runs:
   using: "composite"
   steps:
     - name: Setup uv
-      uses: astral-sh/setup-uv@v10.3.2
+      uses: astral-sh/setup-uv@v10.3.3
       with:
         python-version: ${{ inputs.python-version }}
         enable-cache: true
+
+    # The Rust toolchain of the runner builds unref, whose build is cached.
+    - name: Rust cache
+      uses: Swatinem/rust-cache@v2.9.3
 
     - name: Install Python dependencies
       shell: bash

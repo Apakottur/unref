@@ -2,11 +2,8 @@ import shutil
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
-from unref._cli import app
-
-_runner = CliRunner()
+from tests._unref import run
 
 _CASES_DIR = Path(__file__).parent.parent / "cases"
 
@@ -15,7 +12,7 @@ def test_config_in_current_directory(monkeypatch: pytest.MonkeyPatch) -> None:
     # Without `--config`, the `pyproject.toml` of the current directory is read.
     monkeypatch.chdir(_CASES_DIR / "used_decorator")
 
-    result = _runner.invoke(app, [])
+    result = run([])
 
     assert result.exit_code == 1
     assert result.stdout == (
@@ -34,7 +31,7 @@ def test_config_file(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('used-decorators = ["functools.cache"]\n')
 
-    result = _runner.invoke(app, ["--config", str(config), str(_CASES_DIR / "decorated_function")])
+    result = run(["--config", str(config), str(_CASES_DIR / "decorated_function")])
 
     assert result.exit_code == 0
     assert result.stdout == ""
@@ -44,7 +41,7 @@ def test_config_file_pyproject(tmp_path: Path) -> None:
     config = tmp_path / "pyproject.toml"
     config.write_text('[tool.unref]\nused-decorators = ["functools.cache"]\n')
 
-    result = _runner.invoke(app, ["--config", str(config), str(_CASES_DIR / "decorated_function")])
+    result = run(["--config", str(config), str(_CASES_DIR / "decorated_function")])
 
     assert result.exit_code == 0
     assert result.stdout == ""
@@ -55,7 +52,7 @@ def test_config_file_pyproject_without_table(tmp_path: Path) -> None:
     config.write_text('[project]\nname = "project"\n')
     case = _CASES_DIR / "decorated_function"
 
-    result = _runner.invoke(app, ["--config", str(config), str(case)])
+    result = run(["--config", str(config), str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == f"{case}/main.py:5:5: unused-function 'function'\n"
@@ -64,7 +61,7 @@ def test_config_file_pyproject_without_table(tmp_path: Path) -> None:
 def test_config_file_missing(tmp_path: Path) -> None:
     config = tmp_path / "missing.toml"
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -75,7 +72,7 @@ def test_config_file_invalid_toml(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text("used-decorators = [\n")
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr.startswith(f"Error: Invalid TOML in the configuration file {config}: ")
@@ -85,7 +82,7 @@ def test_config_unknown_option(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('used-decorator = ["functools.cache"]\n')
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: Unknown option 'used-decorator' in the configuration file {config}\n"
@@ -95,7 +92,7 @@ def test_config_decorator_with_at_sign(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('used-decorators = ["functools.cache", "@app.command"]\n')
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr == (
@@ -110,7 +107,7 @@ def test_config_wrong_type(tmp_path: Path, option: str, value: str) -> None:
     config = tmp_path / "unref.toml"
     config.write_text(f"{option} = {value}\n")
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: Option '{option}' in the configuration file {config} must be a list of strings\n"
@@ -122,7 +119,7 @@ def test_config_exclude_is_relative_to_current_directory(monkeypatch: pytest.Mon
     case = _CASES_DIR / "exclude"
     monkeypatch.chdir(case / "pkg")
 
-    result = _runner.invoke(app, ["--config", str(case / "pyproject.toml"), str(case)])
+    result = run(["--config", str(case / "pyproject.toml"), str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == (
@@ -137,7 +134,7 @@ def test_config_exclude_given_file() -> None:
     # A file that is excluded is still checked when it is given directly, as with ruff and ty.
     case = _CASES_DIR / "exclude"
 
-    result = _runner.invoke(app, ["--config", str(case / "pyproject.toml"), str(case / "single.py")])
+    result = run(["--config", str(case / "pyproject.toml"), str(case / "single.py")])
 
     assert result.exit_code == 1
     assert result.stdout == f"{case}/single.py:1:5: unused-function 'function'\n"
@@ -151,7 +148,7 @@ def test_config_exclude_given_directory(monkeypatch: pytest.MonkeyPatch, tmp_pat
     config.write_text('exclude = ["generated", "**/deep"]\n')
     monkeypatch.chdir(case)
 
-    result = _runner.invoke(app, ["--config", str(config), "generated"])
+    result = run(["--config", str(config), "generated"])
 
     assert result.exit_code == 1
     assert result.stdout == "generated/module.py:4:5: unused-function 'function'\n"
@@ -161,7 +158,7 @@ def test_config_exclude_under_given_directory_parent(monkeypatch: pytest.MonkeyP
     # A directory under an excluded one is checked when it is given directly.
     monkeypatch.chdir(_CASES_DIR.parent.parent)
 
-    result = _runner.invoke(app, ["--config", "linters/unref.toml", "tests/cases/function"])
+    result = run(["--config", "linters/unref.toml", "tests/cases/function"])
 
     assert result.exit_code == 1
     assert result.stdout == "tests/cases/function/main.py:1:5: unused-function 'function'\n"
@@ -171,7 +168,7 @@ def test_config_used_names(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('used-names = ["func*"]\n')
 
-    result = _runner.invoke(app, ["--config", str(config), str(_CASES_DIR / "function")])
+    result = run(["--config", str(config), str(_CASES_DIR / "function")])
 
     assert result.exit_code == 0
     assert result.stdout == ""
@@ -185,7 +182,7 @@ def test_config_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     shutil.copy(case / "pyproject.toml", config)
     monkeypatch.chdir(case)
 
-    result = _runner.invoke(app, ["--config", str(config), str(case / "tests")])
+    result = run(["--config", str(config), str(case / "tests")])
 
     assert result.exit_code == 1
     assert result.stdout == (
@@ -246,7 +243,7 @@ def test_config_overrides_invalid(tmp_path: Path, content: str, error: str) -> N
     config = tmp_path / "unref.toml"
     config.write_text(f"{content}\n")
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: {error.format(config=config)}\n"
@@ -256,7 +253,7 @@ def test_config_python_wrong_type(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('python = [".venv"]\n')
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: Option 'python' in the configuration file {config} must be a string\n"
@@ -266,7 +263,7 @@ def test_config_dummy_variable_rgx_wrong_type(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('dummy-variable-rgx = ["^_"]\n')
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr == (
@@ -278,7 +275,7 @@ def test_config_dummy_variable_rgx_invalid(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('dummy-variable-rgx = "^(_"\n')
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr.startswith(
@@ -291,7 +288,7 @@ def test_entry_points_from_config_file(tmp_path: Path) -> None:
     config = tmp_path / "pyproject.toml"
     config.write_text('[project.scripts]\ntool = "pkg.gui:stop"\n')
 
-    result = _runner.invoke(app, ["--config", str(config), str(_CASES_DIR / "entry_points" / "pkg" / "gui.py")])
+    result = run(["--config", str(config), str(_CASES_DIR / "entry_points" / "pkg" / "gui.py")])
 
     assert result.exit_code == 1
     assert result.stdout.endswith("gui.py:2:5: unused-function 'start'\n")
@@ -303,7 +300,7 @@ def test_entry_points_not_from_other_file(monkeypatch: pytest.MonkeyPatch, tmp_p
     config.write_text("")
     monkeypatch.chdir(_CASES_DIR / "entry_points")
 
-    result = _runner.invoke(app, ["--config", str(config), "main.py"])
+    result = run(["--config", str(config), "main.py"])
 
     assert result.exit_code == 1
     assert result.stdout == ("main.py:2:5: unused-function 'run'\nmain.py:10:5: unused-function 'unused'\n")
@@ -335,7 +332,7 @@ def test_entry_points_invalid(tmp_path: Path, content: str, error: str) -> None:
     config = tmp_path / "pyproject.toml"
     config.write_text(content)
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: {error.format(config=config)}\n"
@@ -348,7 +345,7 @@ def test_config_frameworks_table(tmp_path: Path) -> None:
 
     case = _CASES_DIR / "frameworks_selected"
 
-    result = _runner.invoke(app, ["--config", str(config), str(case)])
+    result = run(["--config", str(config), str(case)])
 
     # The rules of pytest are off, and those of unittest keep their default.
     assert result.exit_code == 1
@@ -364,7 +361,7 @@ def test_config_frameworks_wrong_type(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('frameworks = ["pytest"]\n')
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: Option 'frameworks' in the configuration file {config} must be a table\n"
@@ -374,7 +371,7 @@ def test_config_frameworks_unknown(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text("[frameworks]\nnose = true\n")
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr == (
@@ -387,9 +384,20 @@ def test_config_frameworks_not_boolean(tmp_path: Path) -> None:
     config = tmp_path / "unref.toml"
     config.write_text('[frameworks]\npytest = "false"\n')
 
-    result = _runner.invoke(app, ["--config", str(config)])
+    result = run(["--config", str(config)])
 
     assert result.exit_code == 2
     assert result.stderr == (
         f"Error: Option 'frameworks.pytest' in the configuration file {config} must be a boolean\n"
     )
+
+
+@pytest.mark.parametrize(("content", "table"), [('tool = "x"\n', "tool"), ('[tool]\nunref = "x"\n', "tool.unref")])
+def test_config_tool_not_table(tmp_path: Path, content: str, table: str) -> None:
+    config = tmp_path / "pyproject.toml"
+    config.write_text(content)
+
+    result = run(["--config", str(config)])
+
+    assert result.exit_code == 2
+    assert result.stderr == f"Error: Table '{table}' in the configuration file {config} must be a table\n"

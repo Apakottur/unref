@@ -100,6 +100,37 @@ args = ["--config", "./linters/ruff.toml"]
 id = "ruff-format"
 args = ["--config", "./linters/ruff.toml"]
 
+########
+# RUST #
+########
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt"
+entry = "cargo fmt --all --"
+language = "system"
+types = ["rust"]
+
+[[repos.hooks]]
+id = "cargo-clippy"
+name = "cargo clippy"
+entry = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+language = "system"
+types = ["rust"]
+pass_filenames = false
+
+# Dependencies that the code does not use, as ruff checks them.
+[[repos.hooks]]
+id = "cargo-shear"
+name = "cargo shear"
+entry = "cargo-shear --deny-warnings"
+language = "rust"
+additional_dependencies = ["cli:cargo-shear:1.14.1"]
+files = '(^|/)Cargo\.(toml|lock)$|\.rs$'
+pass_filenames = false
+
 #########
 # UNREF #
 #########

@@ -3,4 +3,5 @@ def function():  # unref: ignore[unused-function]
     pass
 
 
-print "Python 2"  # expect: 1 [invalid-syntax]
+# The finding is where the parser stops, as with ruff and ty.
+print "Python 2"  # expect: 7 [invalid-syntax]

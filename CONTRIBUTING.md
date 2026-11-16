@@ -7,13 +7,17 @@ All checks (linters, type checks, and tests) run automatically in CI through Git
 
 ## Development environment
 
-Local development is done with [uv](https://docs.astral.sh/uv/getting-started/installation/).
+`unref` is written in Rust, on [Ruff](https://github.com/astral-sh/ruff)'s parser, and ships in a Python
+wheel built with [maturin](https://www.maturin.rs/), as Ruff does. Local development needs a
+[Rust toolchain](https://rustup.rs/) and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
-Install all the development dependencies:
+Install the development dependencies, which builds `unref` and installs it in `.venv`:
 
 ```shell
 uv sync
 ```
+
+`uv run` rebuilds it when its Rust source changes.
 
 ## Running checks locally
 
@@ -23,10 +27,18 @@ Run the linters with `prek`:
 uv run prek run -a
 ```
 
-Run the unit tests with `pytest`:
+Run the Rust unit tests and the tests of the command, which run the `unref` installed in `.venv`:
 
 ```shell
+cargo test
 uv run pytest -c tests/pytest.ini tests
+```
+
+To run the tests of the command against a debug build, which builds faster, name it in `UNREF_BINARY`:
+
+```shell
+cargo build
+UNREF_BINARY=target/debug/unref uv run pytest -c tests/pytest.ini tests
 ```
 
 ### Test cases
@@ -58,7 +70,7 @@ entry points.
 
 ### Type checks
 
-Run the type checks with `mypy` and `ty` (both run in CI):
+Run the type checks of the tests and scripts with `mypy` and `ty` (both run in CI):
 
 ```shell
 uv run mypy --config-file linters/mypy.toml .
@@ -68,7 +80,7 @@ uv run ty check --project . --config-file linters/ty.toml
 ## Documentation
 
 The documentation site lives in `docs/`, is built with [Zensical](https://zensical.org/), and is hosted on
-[Read the Docs](https://unref.readthedocs.io/). The Python API reference is generated from the docstrings.
+[Read the Docs](https://unref.readthedocs.io/).
 
 Preview it locally with live reload:
 
