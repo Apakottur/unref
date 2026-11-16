@@ -6,6 +6,7 @@ appcontext
 asdict
 asname
 asyncio
+attribs
 capsys
 chunksize
 clippy
