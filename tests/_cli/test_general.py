@@ -96,6 +96,21 @@ def test_syntax_error() -> None:
     )
 
 
+@pytest.mark.parametrize("name", ["missing.py", "missing"])
+def test_missing_path(name: str) -> None:
+    # A given path that does not exist, whether a file or a directory, is reported as a file that
+    # cannot be read, as with ruff, and the rest of the project is still checked.
+    case = _CASES_DIR / "method"
+    missing = case / name
+
+    result = run([str(missing), str(case)])
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        f"{case}/main.py:1:7: unused-class 'Class'\n{missing}:1:1: io-error 'No such file or directory (os error 2)'\n"
+    )
+
+
 def test_syntax_warning() -> None:
     # The warnings of parsing, such as for an invalid escape sequence, are not shown. Pytest records the
     # warnings itself, so they are recorded here to see them.

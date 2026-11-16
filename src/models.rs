@@ -57,11 +57,12 @@ pub(crate) enum Rule {
     InvalidIgnoreComment,
     UnknownCode,
     InvalidSyntax,
+    IoError,
 }
 
 impl Rule {
     /// Every rule.
-    pub(crate) const ALL: [Rule; 9] = [
+    pub(crate) const ALL: [Rule; 10] = [
         Rule::UnusedFunction,
         Rule::UnusedClass,
         Rule::UnusedMethod,
@@ -71,6 +72,7 @@ impl Rule {
         Rule::InvalidIgnoreComment,
         Rule::UnknownCode,
         Rule::InvalidSyntax,
+        Rule::IoError,
     ];
 
     /// The code of the rule, such as `unused-function`.
@@ -85,6 +87,7 @@ impl Rule {
             Rule::InvalidIgnoreComment => "invalid-ignore-comment",
             Rule::UnknownCode => "ignore-comment-unknown-rule",
             Rule::InvalidSyntax => "invalid-syntax",
+            Rule::IoError => "io-error",
         }
     }
 
@@ -100,7 +103,8 @@ impl fmt::Display for Rule {
     }
 }
 
-/// An unused definition, a problem with an ignore comment, or a file that does not parse.
+/// An unused definition, a problem with an ignore comment, or a file that cannot be read or does not
+/// parse.
 ///
 /// Its `Display` gives the line that the command prints, `path:line:column: code 'name'`.
 #[derive(Debug, Clone, PartialEq, Eq)]

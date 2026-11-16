@@ -43,7 +43,7 @@ pub(crate) fn analyze_files(paths: &[Arc<Path>]) -> Vec<Result<FileFacts, Findin
     paths.par_iter().map(analyze_file).collect()
 }
 
-/// Find what a Python file defines and refers to, or a finding if it does not parse.
+/// Find what a Python file defines and refers to, or a finding if it cannot be read or does not parse.
 pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
     let syntax_error = |line: u32, column: u32, name: String| Finding {
         path: path.to_path_buf(),
@@ -53,8 +53,12 @@ pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
         name,
         transitive: false,
     };
-    let bytes = std::fs::read(path)
-        .map_err(|error| syntax_error(1, 1, format!("cannot read the file: {error}")))?;
+    // A file that cannot be read, such as a given path that does not exist, has its own code, as
+    // ruff's `io-error`. A file that is read but cannot be decoded is a syntax error, as in Python.
+    let bytes = std::fs::read(path).map_err(|error| Finding {
+        code: Rule::IoError,
+        ..syntax_error(1, 1, error.to_string())
+    })?;
     let text = decode_source(&bytes)
         .map_err(|error| syntax_error(error.line, error.column, error.message))?;
     let positions = SourcePositions::new(&text);
