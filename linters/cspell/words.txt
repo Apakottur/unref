@@ -32,6 +32,7 @@ ignorelist
 isenabled
 isort
 kwonlyargs
+longpaths
 lucide
 manylinux
 maturin

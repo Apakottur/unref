@@ -6,11 +6,12 @@ on:
 
   workflow_dispatch:
 
-# Only a version tag is released.
+# The wheels can be built from any branch by hand, but only a version tag is released.
 jobs:
   wheels:
-    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
+      # Every wheel is built, so that one failure shows whether the others build.
+      fail-fast: false
       matrix:
         include:
           - {runner: ubuntu-latest, target: x86_64, manylinux: auto}
@@ -24,10 +25,19 @@ jobs:
 
     name: Wheel - ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
+    env:
+      # The git command line fetches Ruff's crates, as it can check out the paths of Ruff's repository that
+      # are longer than Windows allows by default.
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
+      - name: Allow long paths in git on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+
       - uses: actions/checkout@v7
 
       - name: Set the version from the tag
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: sed -i.bak "s/^version = .*/version = \"${GITHUB_REF_NAME#v}\"/" Cargo.toml
 
@@ -44,13 +54,13 @@ jobs:
           path: dist
 
   sdist:
-    if: startsWith(github.ref, 'refs/tags/v')
     name: Source distribution
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - name: Set the version from the tag
+        if: startsWith(github.ref, 'refs/tags/v')
         run: sed -i "s/^version = .*/version = \"${GITHUB_REF_NAME#v}\"/" Cargo.toml
 
       - name: Build the source distribution
@@ -65,6 +75,7 @@ jobs:
           path: dist
 
   release:
+    if: startsWith(github.ref, 'refs/tags/v')
     name: Release
     needs: [wheels, sdist]
     runs-on: ubuntu-latest
