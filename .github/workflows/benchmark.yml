@@ -45,7 +45,7 @@ jobs:
           cargo build --release --locked --manifest-path base/Cargo.toml
 
       - name: Compare the head with the base
-        run: python scripts/compare_benchmark.py base/target/release/unref target/release/unref benchmark.md
+        run: python scripts/benchmark.py compare base/target/release/unref target/release/unref benchmark.md
 
       - name: Write the job summary
         run: cat benchmark.md >> "$GITHUB_STEP_SUMMARY"
