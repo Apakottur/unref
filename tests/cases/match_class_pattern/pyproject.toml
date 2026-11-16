@@ -1,0 +1,3 @@
+# The fields of data classes count as used only through the patterns that read them.
+[tool.unref.frameworks]
+dataclasses = false

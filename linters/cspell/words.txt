@@ -3,6 +3,7 @@ addopts
 anyio
 Apakottur
 appcontext
+asdict
 asname
 asyncio
 capsys
