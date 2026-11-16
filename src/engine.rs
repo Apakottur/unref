@@ -73,7 +73,8 @@ struct Uses {
     objects: FxHashSet<(usize, Vec<String>)>,
     /// The modules that the code star imports.
     stars: FxHashSet<usize>,
-    /// The functions and classes that are local variables of a function, that the code reads.
+    /// The functions and classes that are local variables of a function, and the members of a class
+    /// read in its class body, that the code reads.
     definitions: FxHashSet<DefinitionId>,
 }
 
@@ -771,12 +772,14 @@ impl<'a> Graph<'a> {
             .zip(&project.definitions)
             .enumerate()
         {
-            // A function or class that is a local variable of a function is read by its definition.
+            // Only a definition of the module itself is read by its name. A function or class that is a
+            // local variable of a function, and a member of a class read in its class body, are read
+            // by their definition.
             let is_local = project.facts[*file]
                 .references
                 .local_definitions
                 .contains(&(id - project.first_definition[*file]));
-            if !is_local {
+            if !is_local && definition.owner.is_none() {
                 by_name
                     .entry((*file, definition.name.clone()))
                     .or_default()
