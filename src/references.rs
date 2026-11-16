@@ -730,7 +730,8 @@ impl<'a> Walker<'_, '_> {
             })
             .cloned()
             .collect();
-        // Each variable that is assigned the result of a call is bound.
+        // A variable that is assigned the result of a call is bound, so it is local unless declared
+        // `global` or `nonlocal`.
         let calls = std::mem::take(&mut inner_scope.calls);
         if line != 0 {
             let calls = calls
