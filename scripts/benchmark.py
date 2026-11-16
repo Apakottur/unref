@@ -18,7 +18,7 @@ from pathlib import Path
 import httpx
 import shpyx
 
-_CPYTHON_TAG = "v3.15.0"
+CPYTHON_TAG = "v3.15.0"
 _TOOLS = {
     "vulture": ("vulture==2.16", ["."]),
     "deadcode": ("deadcode==2.6.3", ["."]),
@@ -29,9 +29,9 @@ _TIME_LIMIT = 30.0
 _CHART = Path(__file__).parent.parent / "assets" / "benchmark.svg"
 
 
-def _download_cpython(destination: Path) -> Path:
-    url = f"https://codeload.github.com/python/cpython/tar.gz/refs/tags/{_CPYTHON_TAG}"
-    print(f"Downloading CPython {_CPYTHON_TAG}...")
+def download_cpython(destination: Path) -> Path:
+    url = f"https://codeload.github.com/python/cpython/tar.gz/refs/tags/{CPYTHON_TAG}"
+    print(f"Downloading CPython {CPYTHON_TAG}...")
     response = httpx.get(url, follow_redirects=True, timeout=120)
     response.raise_for_status()
     with tarfile.open(fileobj=io.BytesIO(response.content)) as archive:
@@ -112,7 +112,7 @@ def _chart(results: dict[str, float | None]) -> str:
 
 def main() -> None:
     with tempfile.TemporaryDirectory() as directory:
-        cpython = _download_cpython(Path(directory) / "source")
+        cpython = download_cpython(Path(directory) / "source")
         commands = {"unref": [str(Path(sys.executable).parent / "unref")]}
         for name, (requirement, arguments) in _TOOLS.items():
             executable = _install(name, requirement, Path(directory) / name)
@@ -123,7 +123,7 @@ def main() -> None:
             print(f"Timing {name}...")
             results[name] = _time(command, cpython)
 
-    print(f"\n| Tool | Time to check CPython {_CPYTHON_TAG} |")
+    print(f"\n| Tool | Time to check CPython {CPYTHON_TAG} |")
     print("| --- | --- |")
     for name, seconds in results.items():
         print(f"| {name} | {_label(seconds)} |")
