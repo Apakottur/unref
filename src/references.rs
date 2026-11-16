@@ -147,6 +147,8 @@ struct Scope {
     bound: FxHashSet<String>,
     /// The names that the scope declares `global`.
     global_names: FxHashSet<String>,
+    /// The names that the scope declares `nonlocal`.
+    nonlocal_names: FxHashSet<String>,
     /// The names that the scope imports, each with what it stands for.
     imports: FxHashMap<String, Binding>,
     /// In a function, the functions and classes that it defines, by their name, each with its index
@@ -175,6 +177,7 @@ impl Scope {
             kind,
             bound: FxHashSet::default(),
             global_names: FxHashSet::default(),
+            nonlocal_names: FxHashSet::default(),
             imports: FxHashMap::default(),
             functions_and_classes: FxHashMap::default(),
             reads: FxHashSet::default(),
@@ -233,6 +236,13 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 self.scopes[binder]
                     .global_names
                     .extend(global.names.iter().map(ToString::to_string));
+            }
+            Stmt::Nonlocal(nonlocal) => {
+                // The names are variables of an enclosing function.
+                let binder = self.binder;
+                self.scopes[binder]
+                    .nonlocal_names
+                    .extend(nonlocal.names.iter().map(ToString::to_string));
             }
             Stmt::Assign(assign) => {
                 self.visit_assign(&assign.targets, Some(&assign.value), None, true);
@@ -473,7 +483,10 @@ impl<'a> Walker<'_, '_> {
             inner_scope
                 .bound
                 .iter()
-                .filter(|name| !inner_scope.global_names.contains(*name))
+                .filter(|name| {
+                    !inner_scope.global_names.contains(*name)
+                        && !inner_scope.nonlocal_names.contains(*name)
+                })
                 .cloned(),
         );
         self.close(inner, &local_names, Target::Scope(scope));
@@ -795,12 +808,24 @@ impl<'a> Walker<'_, '_> {
     /// the scope.
     fn close(&mut self, inner: usize, local_names: &FxHashSet<String>, target: Target) {
         let reads = std::mem::take(&mut self.scopes[inner].reads);
-        let defined = std::mem::take(&mut self.scopes[inner].functions_and_classes);
-        // A function or class whose name is declared `global` is a definition of the module.
-        let defined: FxHashMap<String, Vec<usize>> = defined
-            .into_iter()
-            .filter(|(name, _)| local_names.contains(name))
-            .collect();
+        let (defined, other): (FxHashMap<String, Vec<usize>>, FxHashMap<_, _>) =
+            std::mem::take(&mut self.scopes[inner].functions_and_classes)
+                .into_iter()
+                .partition(|(name, _)| local_names.contains(name));
+        // A function or class whose name is declared `global` is a definition of the module. One whose
+        // name is declared `nonlocal`, or is not local in a scope that it was passed on to, is a
+        // variable of an enclosing function.
+        if let Target::Scope(scope) = target {
+            for (name, indexes) in other {
+                if !self.scopes[inner].global_names.contains(&name) {
+                    self.scopes[scope]
+                        .functions_and_classes
+                        .entry(name)
+                        .or_default()
+                        .extend(indexes);
+                }
+            }
+        }
         self.references
             .local_definitions
             .extend(defined.values().flatten().copied());
