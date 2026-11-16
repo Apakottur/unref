@@ -33,6 +33,7 @@ pub(crate) struct ClassHierarchy {
     inherited: Cache,
     resolved_decorators: Cache,
     resolved: Cache,
+    followed: RefCell<FxHashMap<String, Names>>,
 }
 
 impl ClassHierarchy {
@@ -58,6 +59,7 @@ impl ClassHierarchy {
             inherited: RefCell::default(),
             resolved_decorators: RefCell::default(),
             resolved: RefCell::default(),
+            followed: RefCell::default(),
         }
     }
 
@@ -125,6 +127,19 @@ impl ClassHierarchy {
         cached(&self.resolved, module, written, || {
             self.resolve_written(module, written, &mut FxHashSet::default())
         })
+    }
+
+    /// Get the dotted names that a dotted name stands for: the name itself, the origin of an imported
+    /// name, and the base classes of a class, directly or not.
+    pub(crate) fn follow_name(&self, name: &str) -> Names {
+        if let Some(found) = self.followed.borrow().get(name) {
+            return found.clone();
+        }
+        let found = Rc::new(self.follow(name, &mut FxHashSet::default()));
+        self.followed
+            .borrow_mut()
+            .insert(name.to_string(), found.clone());
+        found
     }
 
     /// Get the dotted names of a base class or decorator, as it is written in a module, and of the
@@ -278,7 +293,7 @@ fn imported(module: &ModuleSymbols, binding: &Binding) -> Option<String> {
 }
 
 /// Join two dotted names, either of which can be empty.
-fn join(first: &str, second: &str) -> String {
+pub(crate) fn join(first: &str, second: &str) -> String {
     match (first.is_empty(), second.is_empty()) {
         (_, true) => first.to_string(),
         (true, false) => second.to_string(),

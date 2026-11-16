@@ -60,6 +60,9 @@ pub(crate) struct Definition {
     /// For a class, the dotted names of its base classes as they are written, without their type
     /// arguments. A base class that is not a dotted name is left out.
     pub bases: Vec<String>,
+    /// For a class, whether one of its base classes is not a dotted name, such as a call that makes
+    /// one, so that what it inherits from is not known.
+    pub other_bases: bool,
     /// For a variable or a class attribute, whether it is first assigned by its name in an unpacking,
     /// such as `second` in `first, second = pair()`, where Python needs a name to bind.
     pub unpacked: bool,
