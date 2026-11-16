@@ -14,6 +14,12 @@
 //!   than class variables and private attributes, and their `model_config`, or their `Config` class in
 //!   Pydantic 1. It calls the methods that its validator and serializer decorators register, and reads
 //!   the properties that `computed_field` registers.
+//! - The dataclasses of `dataclasses`, Pydantic and attrs, and the subclasses of `typing.NamedTuple`,
+//!   read their fields in the methods that they generate, such as `__eq__` and `__repr__`, and in
+//!   functions such as `dataclasses.asdict`. A field is a name that the class annotates other than a
+//!   class variable, or, in a class of attrs, a name that is set to a call of `attr.ib` or
+//!   `attrs.field`. A class is a dataclass when it has one of their decorators itself, so a subclass
+//!   of a dataclass without one has no fields of its own.
 //! - SQLAlchemy maps the attributes of its declarative models: the subclasses of
 //!   `sqlalchemy.orm.DeclarativeBase`, `DeclarativeBaseNoMeta` or `MappedAsDataclass`, of a class that
 //!   `declarative_base()` makes or that `as_declarative()` decorates, and the classes, such as mixins,
@@ -124,6 +130,39 @@ const PYDANTIC_CONFIG: &str = "model_config";
 /// The configuration class of a model in Pydantic 1.
 const PYDANTIC_V1_CONFIG: &str = "Config";
 const CLASS_VARIABLES: [&str; 2] = ["typing.ClassVar", "typing_extensions.ClassVar"];
+
+/// The decorators that make a dataclass, as `dataclasses`, Pydantic and attrs give them out, and
+/// where they are defined. `attrs` gives out the decorators of `attr`.
+const DATACLASS_DECORATORS: [&str; 16] = [
+    "dataclasses.dataclass",
+    "pydantic.dataclasses.dataclass",
+    "attr.s",
+    "attr.attrs",
+    "attr.attributes",
+    "attr.dataclass",
+    "attr._make.attrs",
+    "attr.define",
+    "attr._next_gen.define",
+    "attr.mutable",
+    "attr._next_gen.mutable",
+    "attr.frozen",
+    "attr._next_gen.frozen",
+    "attrs.define",
+    "attrs.mutable",
+    "attrs.frozen",
+];
+/// The classes whose subclasses are named tuples, with a field for each name they annotate.
+const NAMED_TUPLES: [&str; 2] = ["typing.NamedTuple", "typing_extensions.NamedTuple"];
+/// The functions of attrs that make a field without an annotation, such as `x = attr.ib()`.
+const ATTRS_FIELDS: [&str; 7] = [
+    "attr.ib",
+    "attr.attr",
+    "attr.attrib",
+    "attr._make.attrib",
+    "attr.field",
+    "attr._next_gen.field",
+    "attrs.field",
+];
 
 // SQLAlchemy's names are matched anywhere under `sqlalchemy`, by their end from a dot, as it gives most
 // of them out from several modules, such as `sqlalchemy.Column` and `sqlalchemy.schema.Column`.
@@ -248,6 +287,7 @@ pub(crate) struct FrameworkRules<'a> {
     pytest: bool,
     unittest: bool,
     pydantic: bool,
+    dataclasses: bool,
     sqlalchemy: bool,
     fastapi: bool,
     flask: bool,
@@ -292,6 +332,7 @@ impl<'a> FrameworkRules<'a> {
             pytest: frameworks.contains(&Framework::Pytest),
             unittest: frameworks.contains(&Framework::Unittest),
             pydantic: frameworks.contains(&Framework::Pydantic),
+            dataclasses: frameworks.contains(&Framework::Dataclasses),
             sqlalchemy: frameworks.contains(&Framework::Sqlalchemy),
             fastapi: frameworks.contains(&Framework::Fastapi),
             flask: frameworks.contains(&Framework::Flask),
@@ -364,6 +405,7 @@ impl<'a> FrameworkRules<'a> {
         (self.pytest && self.pytest_uses(definition, module))
             || (self.unittest && self.unittest_uses(definition, module))
             || (self.pydantic && self.pydantic_uses(definition, module))
+            || (self.dataclasses && self.dataclasses_uses(definition, module))
             || (self.sqlalchemy && self.sqlalchemy_uses(definition, module))
             || (self.fastapi
                 && self.registers(
@@ -468,6 +510,34 @@ impl<'a> FrameworkRules<'a> {
     /// Check whether a class of a module is a subclass of `pydantic.BaseModel`.
     fn is_model(&self, module: usize, name: &str) -> bool {
         has_any(&self.hierarchy.ancestors(module, name), &PYDANTIC_MODELS)
+    }
+
+    /// Check whether a dataclass, a named tuple or a class of attrs reads a definition by itself: one
+    /// of its fields.
+    fn dataclasses_uses(&self, definition: &Definition, module: usize) -> bool {
+        let Some(owner) = &definition.owner else {
+            return false;
+        };
+        if definition.kind != Kind::Attribute {
+            return false;
+        }
+        let decorators = self.hierarchy.decorators(module, owner);
+        if !has_any(&decorators, &DATACLASS_DECORATORS)
+            && !has_any(&self.hierarchy.ancestors(module, owner), &NAMED_TUPLES)
+        {
+            return false;
+        }
+        match &definition.annotation {
+            Some(annotation) => !has_any(
+                &self.hierarchy.resolve(module, annotation),
+                &CLASS_VARIABLES,
+            ),
+            // A field of attrs without an annotation.
+            None => definition
+                .call
+                .as_ref()
+                .is_some_and(|call| has_any(&self.hierarchy.resolve(module, call), &ATTRS_FIELDS)),
+        }
     }
 
     /// Check whether SQLAlchemy maps or calls a definition by itself.

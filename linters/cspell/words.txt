@@ -3,8 +3,10 @@ addopts
 anyio
 Apakottur
 appcontext
+asdict
 asname
 asyncio
+attribs
 capsys
 chunksize
 clippy

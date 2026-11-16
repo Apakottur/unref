@@ -101,16 +101,59 @@ framework that is not listed keeps its default. In a file that is not `pyproject
 unittest = false
 ```
 
-| Framework    | Enabled by default | Counts as used                                                                                                                                                                                                                                                                         |
-| ------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pytest`     | `true`             | In `test_*.py` and `*_test.py` files: `test*` functions, `Test*` classes and their `test*` methods, setup and teardown functions. Anywhere: `pytest_*` hooks and fixtures.                                                                                                             |
-| `unittest`   | `true`             | Subclasses of `unittest.TestCase`, with their `test*`, `setUp` and `tearDown` methods.                                                                                                                                                                                                 |
-| `pydantic`   | `true`             | In subclasses of `pydantic.BaseModel`: fields and `model_config`. Anywhere: methods with Pydantic's validator and serializer decorators, and `computed_field`.                                                                                                                         |
-| `sqlalchemy` | `true`             | In declarative models and their mixins: attributes annotated `Mapped`, or set to `mapped_column`, `Column`, `relationship` and the like. Anywhere: functions with `event.listens_for`, `validates`, `reconstructor` or `declared_attr`.                                                |
-| `fastapi`    | `true`             | Functions and methods with a route or event decorator, such as `app.get` or `router.websocket`, of a `FastAPI()` or `APIRouter()`, or an instance of a subclass, set at module level or in the same function.                                                                          |
-| `flask`      | `true`             | Functions and methods with a route, error or request decorator, such as `app.route` or `bp.errorhandler`, of a module-level `Flask()` or `Blueprint()`, or of an instance of a subclass. HTTP method handlers of `MethodView` subclasses, and `dispatch_request` of `View` subclasses. |
+#### `pytest`
+
+Enabled by default: yes.
+
+- In `test_*.py` and `*_test.py` files: `test*` functions, `Test*` classes and their `test*` methods,
+  setup and teardown functions.
+- Anywhere: `pytest_*` hooks and fixtures.
 
 A project with custom pytest naming can add what these miss with an [override](#overrides).
+
+#### `unittest`
+
+Enabled by default: yes.
+
+- Subclasses of `unittest.TestCase`, with their `test*`, `setUp` and `tearDown` methods.
+
+#### `pydantic`
+
+Enabled by default: yes.
+
+- In subclasses of `pydantic.BaseModel`: fields and `model_config`.
+- Anywhere: methods with Pydantic's validator and serializer decorators, and `computed_field`.
+
+#### `dataclasses`
+
+Enabled by default: yes.
+
+- Fields of classes with `dataclasses.dataclass`, Pydantic's `dataclass` or an attrs decorator such as
+  `attrs.define`.
+- Fields of `NamedTuple` subclasses.
+
+#### `sqlalchemy`
+
+Enabled by default: yes.
+
+- In declarative models and their mixins: attributes annotated `Mapped`, or set to `mapped_column`,
+  `Column`, `relationship` and the like.
+- Anywhere: functions with `event.listens_for`, `validates`, `reconstructor` or `declared_attr`.
+
+#### `fastapi`
+
+Enabled by default: yes.
+
+- Functions and methods with a route or event decorator, such as `app.get` or `router.websocket`, of a
+  `FastAPI()` or `APIRouter()`, or an instance of a subclass, set at module level or in the same function.
+
+#### `flask`
+
+Enabled by default: yes.
+
+- Functions and methods with a route, error or request decorator, such as `app.route` or
+  `bp.errorhandler`, of a module-level `Flask()` or `Blueprint()`, or of an instance of a subclass.
+- HTTP method handlers of `MethodView` subclasses, and `dispatch_request` of `View` subclasses.
 
 ### `output-format`
 

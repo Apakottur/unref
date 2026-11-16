@@ -15,7 +15,7 @@ with open(__file__) as _:
 @dataclass
 class Point:
     _: KW_ONLY
-    x: int  # expect: 5 [unused-attribute]
+    x: int
 
 
 class Holder:

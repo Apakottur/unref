@@ -1,3 +1,7 @@
+# The fields of data classes count as used only through the override.
+[tool.unref.frameworks]
+dataclasses = false
+
 [[tool.unref.overrides]]
 class-decorators = ["dataclasses.dataclass", "decorators.record"]
 used-names = ["*"]
