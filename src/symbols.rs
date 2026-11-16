@@ -73,10 +73,10 @@ impl ModuleSymbols {
                     .decorators
                     .insert(definition.qualified_name(), definition.decorators.clone());
             }
-            if let Some(owner) = &definition.owner {
+            if let Some(class) = &definition.class {
                 symbols
                     .members
-                    .entry(owner.clone())
+                    .entry(class.clone())
                     .or_default()
                     .insert(definition.name.clone());
             }

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use ruff_python_ast::{Decorator, Expr};
 
 use crate::models::Rule;
+use crate::references::Owner;
 
 /// What is defined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,10 +54,10 @@ pub(crate) struct Definition {
     pub decorators: Vec<String>,
     /// The class that the definition is in, by its name in the module (`Outer.Inner` for a nested
     /// class), or None if it is not in a class.
-    pub owner: Option<String>,
+    pub class: Option<String>,
     /// The function that the definition is in, by the line of its name, or None if it is not in a
     /// function. A class in a function is in it, and so are the methods of the class.
-    pub function: Option<u32>,
+    pub owner: Owner,
     /// For a class, the dotted names of its base classes as they are written, without their type
     /// arguments. A base class that is not a dotted name is left out.
     pub bases: Vec<String>,
@@ -80,9 +81,9 @@ pub(crate) struct Definition {
 impl Definition {
     /// The name of the definition in its module, such as `Outer.Inner` for a nested class.
     pub(crate) fn qualified_name(&self) -> String {
-        match &self.owner {
+        match &self.class {
             None => self.name.clone(),
-            Some(owner) => format!("{owner}.{}", self.name),
+            Some(class) => format!("{class}.{}", self.name),
         }
     }
 }

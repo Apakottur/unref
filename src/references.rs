@@ -27,8 +27,8 @@ pub(crate) struct Binding {
     pub name: Option<String>,
 }
 
-/// The code that a reference is made from: the line of the name of the function that the reference
-/// is in, or None for code that runs when the module is imported.
+/// The code that a reference or a definition is in: the line of the name of the function that it is
+/// in, or None for code that runs when the module is imported.
 pub(crate) type Owner = Option<u32>;
 
 /// A read of a name, or of a chain of attributes that starts with one (`package.module.name`).
@@ -751,7 +751,7 @@ impl<'a> Walker<'_, '_> {
     /// The functions in it do not see them.
     fn visit_class(&mut self, class: &'a ast::StmtClassDef) {
         let binder = &self.scopes[self.binder];
-        let owner = if binder.kind == ScopeKind::Class {
+        let enclosing_class = if binder.kind == ScopeKind::Class {
             binder.class_name.clone()
         } else {
             None
@@ -768,7 +768,7 @@ impl<'a> Walker<'_, '_> {
         let other_bases = bases.len() < written_bases.len();
         let definition = Definition {
             decorators: decorator_names(&class.decorator_list),
-            owner,
+            class: enclosing_class,
             bases,
             other_bases,
             ..self.definition(Kind::Class, &class.name, class.name.start())
@@ -917,7 +917,7 @@ impl<'a> Walker<'_, '_> {
         let enclosing = &self.scopes[self.binder];
         let mut kind = Kind::Function;
         let mut scope = Scope::new(ScopeKind::Function);
-        let mut owner = None;
+        let mut class = None;
         if enclosing.kind == ScopeKind::Class {
             kind = Kind::Method;
             let parameters = &function.parameters;
@@ -934,11 +934,11 @@ impl<'a> Walker<'_, '_> {
                 .map(|parameter| parameter.parameter.name.to_string());
             scope.defined_in = enclosing.defined_in;
             scope.class_name.clone_from(&enclosing.class_name);
-            owner.clone_from(&enclosing.class_name);
+            class.clone_from(&enclosing.class_name);
         }
         let definition = Definition {
             decorators: decorator_names(&function.decorator_list),
-            owner,
+            class,
             ..self.definition(kind, &function.name, function.name.start())
         };
         let line = definition.line;
@@ -1019,7 +1019,7 @@ impl<'a> Walker<'_, '_> {
                 .push(index);
         }
         self.definitions.push(Definition {
-            owner: class_name,
+            class: class_name,
             unpacked,
             annotation: annotation.cloned(),
             call: call.cloned(),
@@ -1038,8 +1038,8 @@ impl<'a> Walker<'_, '_> {
             kind,
             name: name.to_string(),
             decorators: Vec::new(),
-            owner: None,
-            function: self.owner,
+            class: None,
+            owner: self.owner,
             bases: Vec::new(),
             other_bases: false,
             unpacked: false,

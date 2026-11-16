@@ -447,7 +447,7 @@ impl<'a> FrameworkRules<'a> {
             return true;
         }
 
-        let Some(owner) = &definition.owner else {
+        let Some(class) = &definition.class else {
             if file_name(path) == PYTEST_CONFTEST {
                 return kind == Kind::Variable
                     && (PYTEST_MODULE_VARIABLES.contains(&name)
@@ -466,8 +466,8 @@ impl<'a> FrameworkRules<'a> {
         ((kind == Kind::Method
             && (name.starts_with("test") || PYTEST_CLASS_METHODS.contains(&name)))
             || (kind == Kind::Attribute && name == "pytestmark"))
-            && (is_pytest_class(path, owner)
-                || self.pytest_bases.contains(&self.dotted_name(module, owner)))
+            && (is_pytest_class(path, class)
+                || self.pytest_bases.contains(&self.dotted_name(module, class)))
     }
 
     /// Check whether unittest finds and calls a definition by itself.
@@ -476,22 +476,22 @@ impl<'a> FrameworkRules<'a> {
             return self.is_test_case(module, &definition.qualified_name());
         }
         let name = definition.name.as_str();
-        let Some(owner) = &definition.owner else {
+        let Some(class) = &definition.class else {
             return definition.kind == Kind::Function
                 && UNITTEST_MODULE_FUNCTIONS.contains(&name)
                 && fnmatch(file_name(&definition.path), UNITTEST_FILES);
         };
         definition.kind == Kind::Method
             && (name.starts_with("test") || UNITTEST_METHODS.contains(&name))
-            && (self.is_test_case(module, owner)
+            && (self.is_test_case(module, class)
                 || self
                     .unittest_bases
-                    .contains(&self.dotted_name(module, owner)))
+                    .contains(&self.dotted_name(module, class)))
     }
 
     /// Check whether Pydantic calls or reads a definition by itself.
     fn pydantic_uses(&self, definition: &Definition, module: usize) -> bool {
-        let Some(owner) = &definition.owner else {
+        let Some(class) = &definition.class else {
             return false;
         };
         if definition.kind == Kind::Method {
@@ -499,15 +499,15 @@ impl<'a> FrameworkRules<'a> {
             return self.is_decorated(definition, module, &PYDANTIC_DECORATORS);
         }
         if definition.kind == Kind::Class {
-            return definition.name == PYDANTIC_V1_CONFIG && self.is_model(module, owner);
+            return definition.name == PYDANTIC_V1_CONFIG && self.is_model(module, class);
         }
 
         // An attribute.
-        let (model, last) = owner.rsplit_once('.').unwrap_or(("", owner));
+        let (model, last) = class.rsplit_once('.').unwrap_or(("", class));
         if last == PYDANTIC_V1_CONFIG && !model.is_empty() && self.is_model(module, model) {
             return true;
         }
-        self.is_model(module, owner)
+        self.is_model(module, class)
             && (definition.name == PYDANTIC_CONFIG
                 // A field that is not a private attribute.
                 || (!definition.name.starts_with('_') && self.is_field(definition, module)))
@@ -521,15 +521,15 @@ impl<'a> FrameworkRules<'a> {
     /// Check whether a dataclass, a named tuple or a class of attrs reads a definition by itself: one
     /// of its fields.
     fn dataclasses_uses(&self, definition: &Definition, module: usize) -> bool {
-        let Some(owner) = &definition.owner else {
+        let Some(class) = &definition.class else {
             return false;
         };
         if definition.kind != Kind::Attribute {
             return false;
         }
-        let decorators = self.hierarchy.decorators(module, owner);
+        let decorators = self.hierarchy.decorators(module, class);
         if !has_any(&decorators, &DATACLASS_DECORATORS)
-            && !self.inherits(module, owner, &NAMED_TUPLES)
+            && !self.inherits(module, class, &NAMED_TUPLES)
         {
             return false;
         }
@@ -560,14 +560,14 @@ impl<'a> FrameworkRules<'a> {
                 )
             });
         }
-        let Some(owner) = &definition.owner else {
+        let Some(class) = &definition.class else {
             return false;
         };
         if definition.kind != Kind::Attribute {
             return false;
         }
         self.mapped_classes
-            .contains(&self.dotted_name(module, owner))
+            .contains(&self.dotted_name(module, class))
             && (definition.annotation.as_ref().is_some_and(|annotation| {
                 is_sqlalchemy(
                     &self.hierarchy.resolve(module, annotation),
@@ -584,11 +584,11 @@ impl<'a> FrameworkRules<'a> {
     /// Check whether Flask calls a definition by itself.
     fn flask_uses(&self, definition: &Definition, module: usize) -> bool {
         if definition.kind == Kind::Method
-            && let Some(owner) = &definition.owner
+            && let Some(class) = &definition.class
         {
             let name = definition.name.as_str();
-            if (HTTP_METHODS.contains(&name) && self.inherits(module, owner, &[FLASK_METHOD_VIEW]))
-                || (name == "dispatch_request" && self.inherits(module, owner, &FLASK_VIEWS))
+            if (HTTP_METHODS.contains(&name) && self.inherits(module, class, &[FLASK_METHOD_VIEW]))
+                || (name == "dispatch_request" && self.inherits(module, class, &FLASK_VIEWS))
             {
                 return true;
             }
@@ -619,7 +619,7 @@ impl<'a> FrameworkRules<'a> {
                             && (instances
                                 .variables
                                 .contains(&self.dotted_name(module, instance))
-                                || definition.function.is_some_and(|function| {
+                                || definition.owner.is_some_and(|function| {
                                     instances.locals.contains(&(
                                         module,
                                         function,
@@ -739,7 +739,7 @@ fn file_name(path: &Path) -> &str {
 
 /// Check whether a definition is at the top level of its module, in no class or function.
 fn is_top_level(definition: &Definition) -> bool {
-    definition.owner.is_none() && definition.function.is_none()
+    definition.class.is_none() && definition.owner.is_none()
 }
 
 /// Check whether a file is the configuration file of Sphinx: a `conf.py` that sets one of Sphinx's
