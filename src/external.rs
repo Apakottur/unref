@@ -383,10 +383,16 @@ fn environment_directory(environment: &Path) -> PathBuf {
     if !environment.is_file() {
         return environment.to_path_buf();
     }
-    // An interpreter is in the `bin` or `Scripts` directory of its environment, or, for a system Python
-    // on Windows, directly in it. Its link is not followed: the interpreter of a virtual environment
-    // links to the one it was created from.
-    let parent = environment.parent().unwrap_or(Path::new(""));
+    interpreter_environment(environment)
+}
+
+/// The environment of an interpreter, or of a command installed with it.
+///
+/// An interpreter is in the `bin` or `Scripts` directory of its environment, or, for a system Python
+/// on Windows, directly in it. Its link is not followed: the interpreter of a virtual environment
+/// links to the one it was created from.
+pub(crate) fn interpreter_environment(interpreter: &Path) -> PathBuf {
+    let parent = interpreter.parent().unwrap_or(Path::new(""));
     if parent
         .file_name()
         .is_some_and(|name| name == "bin" || name == "Scripts")

@@ -32,8 +32,8 @@
 //!   decorated function is defined in.
 //! - Flask calls the functions that the decorators of an application or a blueprint register, such as
 //!   `app.route` or `bp.errorhandler`, of a variable at the top level of a module that is set to
-//!   `Flask()` or `Blueprint()`, or to an instance of a subclass of them. It calls the methods of a `MethodView` named after HTTP methods, and the
-//!   `dispatch_request` method of a `View`.
+//!   `Flask()` or `Blueprint()`, or to an instance of a subclass of them. It calls the methods of a
+//!   `MethodView` named after HTTP methods, and the `dispatch_request` method of a `View`.
 //! - Sphinx runs its configuration file, `conf.py`, and reads the settings it sets at the top level,
 //!   its own and those of its extensions, which are open-ended, such as `myst_enable_extensions`. It
 //!   calls the `setup` function of the file as that of an extension, and `sphinx.ext.linkcode` calls
@@ -81,15 +81,11 @@ const PYTEST_CLASS_METHODS: [&str; 4] = [
     "setup_method",
     "teardown_method",
 ];
-/// The variables that pytest reads from a test module or `conftest.py`, and from a test class.
+/// The variables that pytest reads from a test module or `conftest.py`, of which it reads
+/// `pytestmark` from a test class too.
 const PYTEST_MODULE_VARIABLES: [&str; 2] = ["pytestmark", "pytest_plugins"];
-const PYTEST_CONFTEST_VARIABLES: [&str; 4] = [
-    "pytestmark",
-    "pytest_plugins",
-    "collect_ignore",
-    "collect_ignore_glob",
-];
-const PYTEST_CLASS_VARIABLES: [&str; 1] = ["pytestmark"];
+/// The variables that pytest reads from `conftest.py` only.
+const PYTEST_CONFTEST_VARIABLES: [&str; 2] = ["collect_ignore", "collect_ignore_glob"];
 
 const UNITTEST_FILES: &str = "test*.py";
 /// `unittest.TestCase` as `unittest` gives it out, and where it is defined.
@@ -206,6 +202,12 @@ const SQLALCHEMY_DECORATORS: [&str; 6] = [
     ".declared_attr.cascading",
 ];
 
+/// The HTTP methods, which name methods of FastAPI's applications and routers, and of Flask's
+/// `MethodView`.
+const HTTP_METHODS: [&str; 8] = [
+    "get", "put", "post", "delete", "options", "head", "patch", "trace",
+];
+
 /// The classes of FastAPI's applications and routers, as `fastapi` gives them out, and where they are
 /// defined.
 const FASTAPI_ROUTERS: [&str; 4] = [
@@ -214,16 +216,9 @@ const FASTAPI_ROUTERS: [&str; 4] = [
     "fastapi.APIRouter",
     "fastapi.routing.APIRouter",
 ];
-/// The methods of an application or a router that register the function they decorate.
-const FASTAPI_DECORATORS: [&str; 13] = [
-    "get",
-    "put",
-    "post",
-    "delete",
-    "options",
-    "head",
-    "patch",
-    "trace",
+/// The methods of an application or a router that register the function they decorate, besides
+/// those named after HTTP methods.
+const FASTAPI_DECORATORS: [&str; 5] = [
     "api_route",
     "websocket",
     "on_event",
@@ -277,13 +272,10 @@ const FLASK_DECORATORS: [&str; 33] = [
     "before_first_request",
     "before_app_first_request",
 ];
-/// The class views of Flask, and the methods of them that Flask calls.
-const FLASK_VIEWS: [&str; 1] = ["flask.views.View"];
-const FLASK_VIEW_METHODS: [&str; 1] = ["dispatch_request"];
-const FLASK_METHOD_VIEWS: [&str; 1] = ["flask.views.MethodView"];
-const FLASK_METHOD_VIEW_METHODS: [&str; 8] = [
-    "get", "post", "head", "options", "delete", "put", "trace", "patch",
-];
+/// The class views of Flask, whose `dispatch_request` method it calls. `MethodView` inherits from
+/// `View`, and its `dispatch_request` calls its methods named after HTTP methods.
+const FLASK_VIEWS: [&str; 2] = ["flask.views.View", FLASK_METHOD_VIEW];
+const FLASK_METHOD_VIEW: &str = "flask.views.MethodView";
 
 /// The name of Sphinx's configuration file, which it reads from its configuration directory.
 const SPHINX_CONF: &str = "conf.py";
@@ -299,14 +291,8 @@ fn has_any(names: &FxHashSet<String>, wanted: &[&str]) -> bool {
 
 /// The rules of the frameworks of a project.
 pub(crate) struct FrameworkRules<'a> {
-    pytest: bool,
-    unittest: bool,
-    pydantic: bool,
-    dataclasses: bool,
-    sqlalchemy: bool,
-    fastapi: bool,
-    flask: bool,
-    sphinx: bool,
+    /// The frameworks whose rules apply.
+    frameworks: &'a FxHashSet<Framework>,
     /// The module name of each file of the project, by its index.
     module_names: &'a [String],
     hierarchy: &'a ClassHierarchy,
@@ -343,21 +329,14 @@ impl<'a> FrameworkRules<'a> {
     /// The configuration files of Sphinx are the given ones, as resolved paths, or else are found by
     /// their contents.
     pub(crate) fn new(
-        frameworks: &FxHashSet<Framework>,
+        frameworks: &'a FxHashSet<Framework>,
         files: &[ProjectFile],
         module_names: &'a [String],
         hierarchy: &'a ClassHierarchy,
         sphinx_configuration: Option<&FxHashSet<PathBuf>>,
     ) -> Self {
         let mut rules = Self {
-            pytest: frameworks.contains(&Framework::Pytest),
-            unittest: frameworks.contains(&Framework::Unittest),
-            pydantic: frameworks.contains(&Framework::Pydantic),
-            dataclasses: frameworks.contains(&Framework::Dataclasses),
-            sqlalchemy: frameworks.contains(&Framework::Sqlalchemy),
-            fastapi: frameworks.contains(&Framework::Fastapi),
-            flask: frameworks.contains(&Framework::Flask),
-            sphinx: frameworks.contains(&Framework::Sphinx),
+            frameworks,
             module_names,
             hierarchy,
             pytest_bases: FxHashSet::default(),
@@ -367,7 +346,7 @@ impl<'a> FrameworkRules<'a> {
             flask_apps: Instances::default(),
             sphinx_configs: FxHashSet::default(),
         };
-        if rules.fastapi {
+        if rules.enabled(Framework::Fastapi) {
             rules.fastapi_routers.locals = local_instances(files, hierarchy, &FASTAPI_ROUTERS);
         }
 
@@ -376,7 +355,7 @@ impl<'a> FrameworkRules<'a> {
         let mut classes: Vec<(usize, String)> = Vec::new();
         let mut made: FxHashSet<String> = FxHashSet::default();
         for (module, (path, definitions, _)) in files.iter().enumerate() {
-            if rules.sphinx
+            if rules.enabled(Framework::Sphinx)
                 && match sphinx_configuration {
                     Some(configuration) => configuration.contains(&resolve(path)),
                     None => is_sphinx_config(path, definitions),
@@ -387,17 +366,14 @@ impl<'a> FrameworkRules<'a> {
             for definition in *definitions {
                 let name = definition.qualified_name();
                 if definition.kind == Kind::Class {
-                    if rules.pytest && is_pytest_class(path, &name) {
-                        rules
-                            .pytest_bases
-                            .extend(hierarchy.ancestors(module, &name).iter().cloned());
+                    let ancestors = || hierarchy.ancestors(module, &name);
+                    if rules.enabled(Framework::Pytest) && is_pytest_class(path, &name) {
+                        rules.pytest_bases.extend(ancestors().iter().cloned());
                     }
-                    if rules.unittest && rules.is_test_case(module, &name) {
-                        rules
-                            .unittest_bases
-                            .extend(hierarchy.ancestors(module, &name).iter().cloned());
+                    if rules.enabled(Framework::Unittest) && rules.is_test_case(module, &name) {
+                        rules.unittest_bases.extend(ancestors().iter().cloned());
                     }
-                    if rules.sqlalchemy
+                    if rules.enabled(Framework::Sqlalchemy)
                         && is_sqlalchemy(
                             &hierarchy.decorators(module, &name),
                             &SQLALCHEMY_BASE_DECORATORS,
@@ -410,14 +386,16 @@ impl<'a> FrameworkRules<'a> {
                     && let Some(call) = &definition.call
                 {
                     let called = hierarchy.resolve(module, call);
-                    if rules.sqlalchemy && is_sqlalchemy(&called, &SQLALCHEMY_BASE_FUNCTIONS) {
+                    if rules.enabled(Framework::Sqlalchemy)
+                        && is_sqlalchemy(&called, &SQLALCHEMY_BASE_FUNCTIONS)
+                    {
                         made.insert(rules.dotted_name(module, &name));
                     }
-                    if rules.fastapi && has_any(&called, &FASTAPI_ROUTERS) {
+                    if rules.enabled(Framework::Fastapi) && has_any(&called, &FASTAPI_ROUTERS) {
                         let router = rules.dotted_name(module, &name);
                         rules.fastapi_routers.variables.insert(router);
                     }
-                    if rules.flask && has_any(&called, &FLASK_APPS) {
+                    if rules.enabled(Framework::Flask) && has_any(&called, &FLASK_APPS) {
                         let app = rules.dotted_name(module, &name);
                         rules.flask_apps.variables.insert(app);
                     }
@@ -425,7 +403,7 @@ impl<'a> FrameworkRules<'a> {
             }
         }
 
-        if rules.sqlalchemy {
+        if rules.enabled(Framework::Sqlalchemy) {
             rules.mapped_classes = rules.sqlalchemy_classes(&classes, &made);
         }
         rules
@@ -433,20 +411,20 @@ impl<'a> FrameworkRules<'a> {
 
     /// Check whether a framework finds, calls or reads a definition of a module by itself.
     pub(crate) fn uses(&self, definition: &Definition, module: usize) -> bool {
-        (self.pytest && self.pytest_uses(definition, module))
-            || (self.unittest && self.unittest_uses(definition, module))
-            || (self.pydantic && self.pydantic_uses(definition, module))
-            || (self.dataclasses && self.dataclasses_uses(definition, module))
-            || (self.sqlalchemy && self.sqlalchemy_uses(definition, module))
-            || (self.fastapi
+        (self.enabled(Framework::Pytest) && self.pytest_uses(definition, module))
+            || (self.enabled(Framework::Unittest) && self.unittest_uses(definition, module))
+            || (self.enabled(Framework::Pydantic) && self.pydantic_uses(definition, module))
+            || (self.enabled(Framework::Dataclasses) && self.dataclasses_uses(definition, module))
+            || (self.enabled(Framework::Sqlalchemy) && self.sqlalchemy_uses(definition, module))
+            || (self.enabled(Framework::Fastapi)
                 && self.registers(
                     definition,
                     module,
                     &self.fastapi_routers,
-                    &FASTAPI_DECORATORS,
+                    &[&HTTP_METHODS, &FASTAPI_DECORATORS],
                 ))
-            || (self.flask && self.flask_uses(definition, module))
-            || (self.sphinx && self.sphinx_uses(definition, module))
+            || (self.enabled(Framework::Flask) && self.flask_uses(definition, module))
+            || (self.enabled(Framework::Sphinx) && self.sphinx_uses(definition, module))
     }
 
     /// Check whether Sphinx reads or calls a definition of its configuration file by itself.
@@ -464,16 +442,16 @@ impl<'a> FrameworkRules<'a> {
         // The hooks of a plugin, which can be any module or object that pytest registers, and the
         // fixtures.
         if (kind.is_function() && name.starts_with("pytest_"))
-            || definition.decorators.iter().any(|decorator| {
-                has_any(&self.hierarchy.resolve(module, decorator), &PYTEST_FIXTURES)
-            })
+            || self.is_decorated(definition, module, &PYTEST_FIXTURES)
         {
             return true;
         }
 
         let Some(owner) = &definition.owner else {
             if file_name(path) == PYTEST_CONFTEST {
-                return kind == Kind::Variable && PYTEST_CONFTEST_VARIABLES.contains(&name);
+                return kind == Kind::Variable
+                    && (PYTEST_MODULE_VARIABLES.contains(&name)
+                        || PYTEST_CONFTEST_VARIABLES.contains(&name));
             }
             return is_pytest_file(path)
                 && ((kind == Kind::Function
@@ -487,7 +465,7 @@ impl<'a> FrameworkRules<'a> {
         }
         ((kind == Kind::Method
             && (name.starts_with("test") || PYTEST_CLASS_METHODS.contains(&name)))
-            || (kind == Kind::Attribute && PYTEST_CLASS_VARIABLES.contains(&name)))
+            || (kind == Kind::Attribute && name == "pytestmark"))
             && (is_pytest_class(path, owner)
                 || self.pytest_bases.contains(&self.dotted_name(module, owner)))
     }
@@ -518,12 +496,7 @@ impl<'a> FrameworkRules<'a> {
         };
         if definition.kind == Kind::Method {
             // A decorator registers the method with Pydantic, in a model or a Pydantic dataclass.
-            return definition.decorators.iter().any(|decorator| {
-                has_any(
-                    &self.hierarchy.resolve(module, decorator),
-                    &PYDANTIC_DECORATORS,
-                )
-            });
+            return self.is_decorated(definition, module, &PYDANTIC_DECORATORS);
         }
         if definition.kind == Kind::Class {
             return definition.name == PYDANTIC_V1_CONFIG && self.is_model(module, owner);
@@ -536,21 +509,13 @@ impl<'a> FrameworkRules<'a> {
         }
         self.is_model(module, owner)
             && (definition.name == PYDANTIC_CONFIG
-                || (
-                    // A field: an annotated name that is not a private attribute or a class variable.
-                    definition.annotation.as_ref().is_some_and(|annotation| {
-                        !definition.name.starts_with('_')
-                            && !has_any(
-                                &self.hierarchy.resolve(module, annotation),
-                                &CLASS_VARIABLES,
-                            )
-                    })
-                ))
+                // A field that is not a private attribute.
+                || (!definition.name.starts_with('_') && self.is_field(definition, module)))
     }
 
     /// Check whether a class of a module is a subclass of `pydantic.BaseModel`.
     fn is_model(&self, module: usize, name: &str) -> bool {
-        has_any(&self.hierarchy.ancestors(module, name), &PYDANTIC_MODELS)
+        self.inherits(module, name, &PYDANTIC_MODELS)
     }
 
     /// Check whether a dataclass, a named tuple or a class of attrs reads a definition by itself: one
@@ -564,21 +529,25 @@ impl<'a> FrameworkRules<'a> {
         }
         let decorators = self.hierarchy.decorators(module, owner);
         if !has_any(&decorators, &DATACLASS_DECORATORS)
-            && !has_any(&self.hierarchy.ancestors(module, owner), &NAMED_TUPLES)
+            && !self.inherits(module, owner, &NAMED_TUPLES)
         {
             return false;
         }
-        match &definition.annotation {
-            Some(annotation) => !has_any(
-                &self.hierarchy.resolve(module, annotation),
-                &CLASS_VARIABLES,
-            ),
+        self.is_field(definition, module)
             // A field of attrs without an annotation.
-            None => definition
-                .call
-                .as_ref()
-                .is_some_and(|call| has_any(&self.hierarchy.resolve(module, call), &ATTRS_FIELDS)),
-        }
+            || (definition.annotation.is_none()
+                && definition
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| self.resolves_to(module, call, &ATTRS_FIELDS)))
+    }
+
+    /// Check whether an attribute of a module is annotated, and not as a class variable.
+    fn is_field(&self, definition: &Definition, module: usize) -> bool {
+        definition
+            .annotation
+            .as_ref()
+            .is_some_and(|annotation| !self.resolves_to(module, annotation, &CLASS_VARIABLES))
     }
 
     /// Check whether SQLAlchemy maps or calls a definition by itself.
@@ -618,27 +587,23 @@ impl<'a> FrameworkRules<'a> {
             && let Some(owner) = &definition.owner
         {
             let name = definition.name.as_str();
-            let ancestors = self.hierarchy.ancestors(module, owner);
-            if (FLASK_METHOD_VIEW_METHODS.contains(&name)
-                && has_any(&ancestors, &FLASK_METHOD_VIEWS))
-                || (FLASK_VIEW_METHODS.contains(&name)
-                    && (has_any(&ancestors, &FLASK_VIEWS)
-                        || has_any(&ancestors, &FLASK_METHOD_VIEWS)))
+            if (HTTP_METHODS.contains(&name) && self.inherits(module, owner, &[FLASK_METHOD_VIEW]))
+                || (name == "dispatch_request" && self.inherits(module, owner, &FLASK_VIEWS))
             {
                 return true;
             }
         }
-        self.registers(definition, module, &self.flask_apps, &FLASK_DECORATORS)
+        self.registers(definition, module, &self.flask_apps, &[&FLASK_DECORATORS])
     }
 
     /// Check whether a definition is a function that a decorator of one of the given instances, such
-    /// as the applications of a web framework, registers, with one of the given methods.
+    /// as the applications of a web framework, registers, with a method of one of the given lists.
     fn registers(
         &self,
         definition: &Definition,
         module: usize,
         instances: &Instances,
-        methods: &[&str],
+        methods: &[&[&str]],
     ) -> bool {
         if !definition.kind.is_function() {
             return false;
@@ -648,7 +613,7 @@ impl<'a> FrameworkRules<'a> {
                 let (instance, method) = name.rsplit_once('.').unwrap_or(("", name));
                 // An instance of the module itself is left as it is written, and is named by its
                 // module, or is a local variable of the function that the definition is in.
-                if methods.contains(&method)
+                if methods.iter().any(|methods| methods.contains(&method))
                     && (instances.variables.contains(instance)
                         || (name == decorator
                             && (instances
@@ -709,10 +674,32 @@ impl<'a> FrameworkRules<'a> {
 
     /// Check whether a class of a module is a subclass of `unittest.TestCase`.
     fn is_test_case(&self, module: usize, name: &str) -> bool {
-        has_any(
-            &self.hierarchy.ancestors(module, name),
-            &UNITTEST_TEST_CASES,
-        )
+        self.inherits(module, name, &UNITTEST_TEST_CASES)
+    }
+
+    /// Check whether the rules of a framework apply.
+    fn enabled(&self, framework: Framework) -> bool {
+        self.frameworks.contains(&framework)
+    }
+
+    /// Check whether a class of a module inherits from one of the given classes, by their dotted
+    /// names.
+    fn inherits(&self, module: usize, class: &str, bases: &[&str]) -> bool {
+        has_any(&self.hierarchy.ancestors(module, class), bases)
+    }
+
+    /// Check whether an expression of a module resolves to one of the given dotted names.
+    fn resolves_to(&self, module: usize, expression: &str, names: &[&str]) -> bool {
+        has_any(&self.hierarchy.resolve(module, expression), names)
+    }
+
+    /// Check whether a definition of a module has a decorator that resolves to one of the given
+    /// dotted names.
+    fn is_decorated(&self, definition: &Definition, module: usize, names: &[&str]) -> bool {
+        definition
+            .decorators
+            .iter()
+            .any(|decorator| self.resolves_to(module, decorator, names))
     }
 
     /// Get the dotted name of a class or variable of a module, as it is among the base classes of a

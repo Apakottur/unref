@@ -45,13 +45,8 @@ pub(crate) fn analyze_files(paths: &[Arc<Path>]) -> Vec<Result<FileFacts, Findin
 
 /// Find what a Python file defines and refers to, or a finding if it cannot be read or does not parse.
 pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
-    let syntax_error = |line: u32, column: u32, name: String| Finding {
-        path: path.to_path_buf(),
-        line,
-        column,
-        code: Rule::InvalidSyntax,
-        name,
-        transitive: false,
+    let syntax_error = |line: u32, column: u32, name: String| {
+        Finding::new(path.to_path_buf(), line, column, Rule::InvalidSyntax, name)
     };
     // A file that cannot be read, such as a given path that does not exist, has its own code, as
     // ruff's `io-error`. A file that is read but cannot be decoded is a syntax error, as in Python.

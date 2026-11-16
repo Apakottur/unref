@@ -24,7 +24,8 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use crate::config::{OutputFormat, load_config};
-use crate::engine::{Options, find_unused};
+use crate::engine::find_unused;
+use crate::external::interpreter_environment;
 use crate::models::Finding;
 use crate::modules::resolve;
 
@@ -76,7 +77,7 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> ExitCode {
-    let options = match load_config(cli.config.as_deref()) {
+    let mut options = match load_config(cli.config.as_deref()) {
         Ok(options) => options,
         Err(error) => return fail(&error),
     };
@@ -101,24 +102,13 @@ fn run(cli: Cli) -> ExitCode {
         Err(error) => return fail(&format!("Cannot start the threads of the check: {error}")),
     };
 
-    let engine_options = Options {
-        paths: if cli.paths.is_empty() {
-            vec![options.root.clone()]
-        } else {
-            cli.paths
-        },
-        used_names: options.used_names,
-        used_decorators: options.used_decorators,
-        exclude: options.exclude,
-        root: options.root,
-        overrides: options.overrides,
-        python: environment,
-        dummy_variable_rgx: options.dummy_variable_rgx,
-        entry_points: options.entry_points,
-        frameworks: options.frameworks,
-        sphinx_configuration: options.sphinx_configuration,
+    options.python = environment;
+    let paths = if cli.paths.is_empty() {
+        vec![options.root.clone()]
+    } else {
+        cli.paths
     };
-    let findings = pool.install(|| find_unused(&engine_options));
+    let findings = pool.install(|| find_unused(&options, &paths));
 
     let output_format = cli.output_format.unwrap_or(options.output_format);
     let show_transitive = if cli.show_transitive {
@@ -192,16 +182,7 @@ fn find_environment(root: &Path) -> Option<PathBuf> {
 /// The environment that the command is installed in, the one above its `bin` or `Scripts` directory.
 fn own_environment() -> Option<PathBuf> {
     let executable = std::env::current_exe().ok()?;
-    let directory = executable.parent()?;
-    let environment = if directory
-        .file_name()
-        .is_some_and(|name| name == "bin" || name == "Scripts")
-    {
-        directory.parent()?
-    } else {
-        directory
-    };
-    Some(resolve(environment))
+    Some(resolve(&interpreter_environment(&executable)))
 }
 
 /// Format a finding as a GitHub Actions workflow command, which shows it as an annotation, laid out as

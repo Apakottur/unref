@@ -133,6 +133,20 @@ pub(crate) struct Finding {
     pub transitive: bool,
 }
 
+impl Finding {
+    /// Make a finding that is not transitive.
+    pub(crate) fn new(path: PathBuf, line: u32, column: u32, code: Rule, name: String) -> Self {
+        Self {
+            path,
+            line,
+            column,
+            code,
+            name,
+            transitive: false,
+        }
+    }
+}
+
 impl fmt::Display for Finding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -150,7 +164,7 @@ impl fmt::Display for Finding {
 /// Options that apply only to some of the definitions of a project, on top of those of the project.
 ///
 /// An override needs at least one selector, and applies to what matches all of its selectors.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct Override {
     /// Selects the definitions in these files and directories.
     pub paths: Vec<PathBuf>,
