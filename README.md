@@ -8,7 +8,7 @@
 An extremely fast Python dead code finder, written in Rust.
 
 <p align="center">
-  <img alt="Time to check CPython: unref 0.91s, vulture 18.47s, deadcode and skylos over 30s" src="https://raw.githubusercontent.com/Apakottur/unref/main/assets/benchmark.svg">
+  <img alt="Time to check CPython with unref and other dead code finders" src="https://raw.githubusercontent.com/Apakottur/unref/main/assets/benchmark.svg">
 </p>
 
 <p align="center">
