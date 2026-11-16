@@ -1,7 +1,6 @@
 # unref
 
-Find dead code in Python projects: the unused functions, classes, methods, variables and attributes that
-nothing references.
+Find dead code in Python projects.
 
 ## Quick start
 
@@ -77,8 +76,10 @@ Unused code piles up in every codebase, faster than ever now that AI tools write
 
 - **Just works**: built-in rules for pytest, unittest, Pydantic, SQLAlchemy and FastAPI, so most projects need
   little or no configuration.
-- **Ruff-style**: same conventions, options and output style, and it covers what Ruff leaves out.
-- **Fast**: checks all of CPython in under a second.
-- **Modern**: ty-style rule codes and configuration in `pyproject.toml`, written in Rust on Ruff's parser.
+- **Accurate**: names are matched by module, so a used `parse` in one module does not hide an unused `parse`
+  in another.
+- **Ruff-style**: same conventions, options and output style, ty-style rule codes and configuration in
+  `pyproject.toml`.
+- **Fast**: written in Rust on Ruff's parser, it checks all of CPython in under a second.
 
 The name is short for "unreferenced".
