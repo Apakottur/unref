@@ -32,7 +32,7 @@ repos:
 
 ### Command line
 
-`unref` checks the project in the current directory, or only the files and directories it is given:
+`unref` checks the project that the current directory is in, or only the files and directories it is given:
 
 ```shell
 uvx unref src scripts

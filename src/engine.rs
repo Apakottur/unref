@@ -47,6 +47,8 @@ pub(crate) struct Options {
     pub used_decorators: Vec<String>,
     /// The patterns of the files and directories that are not part of the project.
     pub exclude: Vec<String>,
+    /// The directory that the `exclude` patterns are anchored at.
+    pub root: PathBuf,
     /// The options that apply only to some of the files of the project.
     pub overrides: Vec<Override>,
     /// The Python environment or interpreter of the project, if there is one.
@@ -106,7 +108,7 @@ pub(crate) fn find_unused(options: &Options) -> Vec<Finding> {
         .filter(|framework| options.frameworks.get(framework).copied().unwrap_or(true))
         .collect();
 
-    let discovered: Vec<Arc<Path>> = discover(&options.paths, &options.exclude)
+    let discovered: Vec<Arc<Path>> = discover(&options.paths, &options.exclude, &options.root)
         .into_iter()
         .map(Arc::from)
         .collect();
