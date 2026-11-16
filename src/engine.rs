@@ -545,7 +545,7 @@ fn find_roots(
                 });
             if is_kept {
                 kept.push(id);
-            } else if ignored_in_file.contains(&(definition.line, definition.kind.code())) {
+            } else if ignored_in_file.contains(&(definition.line, definition.kind.code().name())) {
                 ignored.push(id);
             }
         }
@@ -694,7 +694,7 @@ fn findings(
                     path: definition.path.to_path_buf(),
                     line: definition.line,
                     column: definition.column,
-                    code: definition.kind.code().to_string(),
+                    code: definition.kind.code(),
                     name: definition.name.clone(),
                     transitive: is_transitive.contains(&id),
                 }
@@ -707,7 +707,7 @@ fn findings(
             .filter(|id| project.definition_files[**id] == file)
             .map(|id| {
                 let definition = &project.definitions[*id];
-                (definition.line, definition.kind.code())
+                (definition.line, definition.kind.code().name())
             })
             .collect();
         let file_facts = &project.facts[file];
@@ -741,11 +741,17 @@ struct Graph<'a> {
     used: Vec<bool>,
     pending: Vec<(usize, Owner)>,
     seen_owners: FxHashSet<(usize, Owner)>,
-    seen_names: FxHashSet<(usize, String)>,
-    seen_attributes: FxHashSet<String>,
-    seen_keys: FxHashSet<String>,
-    seen_objects: FxHashSet<(usize, Vec<String>)>,
-    seen_stars: FxHashSet<usize>,
+    seen: Seen,
+}
+
+/// What the uses of the owners followed so far read, so that each is looked up once.
+#[derive(Default)]
+struct Seen {
+    names: FxHashSet<(usize, String)>,
+    attributes: FxHashSet<String>,
+    keys: FxHashSet<String>,
+    objects: FxHashSet<(usize, Vec<String>)>,
+    stars: FxHashSet<usize>,
 }
 
 impl<'a> Graph<'a> {
@@ -812,11 +818,7 @@ impl<'a> Graph<'a> {
             // The code of every module runs.
             pending: (0..project.files.len()).map(|file| (file, None)).collect(),
             seen_owners: FxHashSet::default(),
-            seen_names: FxHashSet::default(),
-            seen_attributes: FxHashSet::default(),
-            seen_keys: FxHashSet::default(),
-            seen_objects: FxHashSet::default(),
-            seen_stars: FxHashSet::default(),
+            seen: Seen::default(),
         }
     }
 
@@ -835,33 +837,10 @@ impl<'a> Graph<'a> {
             if !self.seen_owners.insert(owner) {
                 continue;
             }
+            let mut seen = std::mem::take(&mut self.seen);
             let mut found: Vec<DefinitionId> = Vec::new();
-            for name in &uses.names {
-                if self.seen_names.insert(name.clone()) {
-                    found.extend(self.by_name.get(name).into_iter().flatten());
-                }
-            }
-            for attribute in &uses.attributes {
-                if self.seen_attributes.insert(attribute.clone()) {
-                    found.extend(self.by_attribute.get(attribute).into_iter().flatten());
-                }
-            }
-            for key in &uses.keys {
-                if self.seen_keys.insert(key.clone()) {
-                    found.extend(self.by_key.get(key).into_iter().flatten());
-                }
-            }
-            for read in &uses.objects {
-                if self.seen_objects.insert(read.clone()) {
-                    found.extend(self.enums_read(read.0, &read.1));
-                }
-            }
-            for star in &uses.stars {
-                if self.seen_stars.insert(*star) {
-                    found.extend(self.public.get(star).into_iter().flatten());
-                }
-            }
-            found.extend(&uses.definitions);
+            self.look_up(uses, Some(&mut seen), &mut found);
+            self.seen = seen;
             self.add(found);
         }
         self.used.clone()
@@ -881,23 +860,66 @@ impl<'a> Graph<'a> {
         let Some(uses) = self.uses.get(&(*file, Some(definition.line))) else {
             return reached;
         };
+        self.look_up(uses, None, &mut reached);
+        reached
+    }
+
+    /// Find the definitions that the uses of an owner can stand for: the names by their module, the
+    /// attributes and keys by their name, the members of the enums that are read as a whole, and the
+    /// public names of the modules that are star imported, and the functions and classes defined in
+    /// a function that the code reads.
+    ///
+    /// With `seen`, a use that is in it already is skipped, and the others are added to it.
+    fn look_up(
+        &self,
+        uses: &Uses,
+        mut seen: Option<&mut Seen>,
+        found: &mut impl Extend<DefinitionId>,
+    ) {
         for name in &uses.names {
-            reached.extend(self.by_name.get(name).into_iter().flatten());
+            if seen
+                .as_mut()
+                .is_none_or(|seen| seen.names.insert(name.clone()))
+            {
+                found.extend(self.by_name.get(name).into_iter().flatten().copied());
+            }
         }
         for attribute in &uses.attributes {
-            reached.extend(self.by_attribute.get(attribute).into_iter().flatten());
+            if seen
+                .as_mut()
+                .is_none_or(|seen| seen.attributes.insert(attribute.clone()))
+            {
+                found.extend(
+                    self.by_attribute
+                        .get(attribute)
+                        .into_iter()
+                        .flatten()
+                        .copied(),
+                );
+            }
         }
         for key in &uses.keys {
-            reached.extend(self.by_key.get(key).into_iter().flatten());
+            if seen
+                .as_mut()
+                .is_none_or(|seen| seen.keys.insert(key.clone()))
+            {
+                found.extend(self.by_key.get(key).into_iter().flatten().copied());
+            }
         }
-        for (file, parts) in &uses.objects {
-            reached.extend(self.enums_read(*file, parts));
+        for read in &uses.objects {
+            if seen
+                .as_mut()
+                .is_none_or(|seen| seen.objects.insert(read.clone()))
+            {
+                found.extend(self.enums_read(read.0, &read.1));
+            }
         }
         for star in &uses.stars {
-            reached.extend(self.public.get(star).into_iter().flatten());
+            if seen.as_mut().is_none_or(|seen| seen.stars.insert(*star)) {
+                found.extend(self.public.get(star).into_iter().flatten().copied());
+            }
         }
-        reached.extend(&uses.definitions);
-        reached
+        found.extend(uses.definitions.iter().copied());
     }
 
     /// Find the members of the enums that an object read uses as a whole.

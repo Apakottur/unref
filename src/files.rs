@@ -12,7 +12,7 @@ use rustc_hash::FxHashMap;
 
 use crate::definitions::Definition;
 use crate::ignores::{IgnoreComment, find_ignore_comments};
-use crate::models::Finding;
+use crate::models::{Finding, Rule};
 use crate::positions::{SourcePositions, to_u32};
 use crate::references::{Binding, References, walk_module};
 
@@ -49,7 +49,7 @@ pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
         path: path.to_path_buf(),
         line,
         column,
-        code: "invalid-syntax".to_string(),
+        code: Rule::InvalidSyntax,
         name,
         transitive: false,
     };
@@ -81,13 +81,8 @@ pub(crate) type Module = (Vec<Definition>, References, FxHashMap<String, Vec<Bin
 
 /// Read a module and parse it, as for a module outside the project, which has no findings.
 pub(crate) fn read_module(path: &Arc<Path>) -> Option<Module> {
-    let bytes = std::fs::read(path).ok()?;
-    let text = decode_source(&bytes).ok()?;
-    let parsed = ruff_python_parser::parse_module(&text).ok()?;
-    let positions = SourcePositions::new(&text);
-    let (definitions, references) = walk_module(path, parsed.syntax(), &positions);
-    let lazy = lazy_imports(&parsed, &positions, &references);
-    Some((definitions, references, lazy))
+    let facts = analyze_file(path).ok()?;
+    Some((facts.definitions, facts.references, facts.lazy))
 }
 
 /// Why the source of a module cannot be decoded, with the line and the column where it fails.

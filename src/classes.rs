@@ -29,10 +29,10 @@ pub(crate) struct ClassHierarchy {
     by_path: RefCell<FxHashMap<PathBuf, usize>>,
     files_by_name: FxHashMap<String, Vec<usize>>,
     external: RefCell<ExternalModules>,
-    ancestors: RefCell<FxHashMap<(usize, String), Names>>,
-    inherited: RefCell<FxHashMap<(usize, String), Names>>,
-    resolved_decorators: RefCell<FxHashMap<(usize, String), Names>>,
-    resolved: RefCell<FxHashMap<(usize, String), Names>>,
+    ancestors: Cache,
+    inherited: Cache,
+    resolved_decorators: Cache,
+    resolved: Cache,
 }
 
 impl ClassHierarchy {
@@ -70,19 +70,15 @@ impl ClassHierarchy {
     ///
     /// `module` is the module of the class and `name` its name in the module.
     pub(crate) fn ancestors(&self, module: usize, name: &str) -> Names {
-        let key = (module, name.to_string());
-        if let Some(found) = self.ancestors.borrow().get(&key) {
-            return found.clone();
-        }
-        let mut seen = FxHashSet::default();
-        let mut found = FxHashSet::default();
-        let symbols = self.module(module);
-        for base in symbols.bases.get(name).into_iter().flatten() {
-            found.extend(self.resolve_written(module, base, &mut seen));
-        }
-        let found = Rc::new(found);
-        self.ancestors.borrow_mut().insert(key, found.clone());
-        found
+        cached(&self.ancestors, module, name, || {
+            let mut seen = FxHashSet::default();
+            let mut found = FxHashSet::default();
+            let symbols = self.module(module);
+            for base in symbols.bases.get(name).into_iter().flatten() {
+                found.extend(self.resolve_written(module, base, &mut seen));
+            }
+            found
+        })
     }
 
     /// Get the names of the members that a class inherits from the base classes outside the project.
@@ -93,56 +89,42 @@ impl ClassHierarchy {
     /// Returns the names of the methods and attributes that the base classes outside the project
     /// define, in their body or on their instances.
     pub(crate) fn external_members(&self, module: usize, name: &str) -> Names {
-        let key = (module, name.to_string());
-        if let Some(found) = self.inherited.borrow().get(&key) {
-            return found.clone();
-        }
-        let mut found = FxHashSet::default();
-        for ancestor in self.ancestors(module, name).iter() {
-            for (file, symbol) in self.locate(ancestor) {
-                // The members of the modules of the project are not collected.
-                if file >= self.project_count
-                    && let Some(members) = self.module(file).members.get(&symbol)
-                {
-                    found.extend(members.iter().cloned());
+        cached(&self.inherited, module, name, || {
+            let mut found = FxHashSet::default();
+            for ancestor in self.ancestors(module, name).iter() {
+                for (file, symbol) in self.locate(ancestor) {
+                    // The members of the modules of the project are not collected.
+                    if file >= self.project_count
+                        && let Some(members) = self.module(file).members.get(&symbol)
+                    {
+                        found.extend(members.iter().cloned());
+                    }
                 }
             }
-        }
-        let found = Rc::new(found);
-        self.inherited.borrow_mut().insert(key, found.clone());
-        found
+            found
+        })
     }
 
     /// Get the decorators of a class, by their dotted names, such as `dataclasses.dataclass`. A
     /// decorator that is imported through several modules has the name of each.
     pub(crate) fn decorators(&self, module: usize, name: &str) -> Names {
-        let key = (module, name.to_string());
-        if let Some(found) = self.resolved_decorators.borrow().get(&key) {
-            return found.clone();
-        }
-        let mut found = FxHashSet::default();
-        let symbols = self.module(module);
-        for decorator in symbols.decorators.get(name).into_iter().flatten() {
-            found.extend(self.resolve(module, decorator).iter().cloned());
-        }
-        let found = Rc::new(found);
-        self.resolved_decorators
-            .borrow_mut()
-            .insert(key, found.clone());
-        found
+        cached(&self.resolved_decorators, module, name, || {
+            let mut found = FxHashSet::default();
+            let symbols = self.module(module);
+            for decorator in symbols.decorators.get(name).into_iter().flatten() {
+                found.extend(self.resolve(module, decorator).iter().cloned());
+            }
+            found
+        })
     }
 
     /// Get the dotted names of a name as it is written in a module, such as the decorator of a
     /// function: `pytest.fixture` for `fixture` after `from pytest import fixture`. A name that is
     /// imported through several modules has the name of each.
     pub(crate) fn resolve(&self, module: usize, written: &str) -> Names {
-        let key = (module, written.to_string());
-        if let Some(found) = self.resolved.borrow().get(&key) {
-            return found.clone();
-        }
-        let found = Rc::new(self.resolve_written(module, written, &mut FxHashSet::default()));
-        self.resolved.borrow_mut().insert(key, found.clone());
-        found
+        cached(&self.resolved, module, written, || {
+            self.resolve_written(module, written, &mut FxHashSet::default())
+        })
     }
 
     /// Get the dotted names of a base class or decorator, as it is written in a module, and of the
@@ -260,6 +242,28 @@ impl ClassHierarchy {
         self.by_path.borrow_mut().insert(path, index);
         Some(index)
     }
+}
+
+/// A cache of sets of dotted names, by a module and a name in it.
+type Cache = RefCell<FxHashMap<(usize, String), Names>>;
+
+/// Get the names cached for a name of a module, or compute them and cache them.
+///
+/// The cache is not borrowed while the names are computed, since computing them can read this cache
+/// and the others.
+fn cached(
+    cache: &Cache,
+    module: usize,
+    name: &str,
+    compute: impl FnOnce() -> FxHashSet<String>,
+) -> Names {
+    let key = (module, name.to_string());
+    if let Some(found) = cache.borrow().get(&key) {
+        return found.clone();
+    }
+    let found = Rc::new(compute());
+    cache.borrow_mut().insert(key, found.clone());
+    found
 }
 
 /// Get the dotted name that an imported name of a module stands for.
