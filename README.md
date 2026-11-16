@@ -8,11 +8,11 @@
 An extremely fast Python dead code finder, written in Rust.
 
 <p align="center">
-  <img alt="Time to check CPython: unref 0.88s, vulture 18.73s, deadcode and skylos over 30s" src="https://raw.githubusercontent.com/Apakottur/unref/main/assets/benchmark.svg">
+  <img alt="Time to check CPython with unref and other dead code finders" src="https://raw.githubusercontent.com/Apakottur/unref/main/assets/benchmark.svg">
 </p>
 
 <p align="center">
-  <i>Checking the whole <a href="https://github.com/python/cpython">CPython</a> codebase (v3.14.0, about 2,100 files),
+  <i>Checking the whole <a href="https://github.com/python/cpython">CPython</a> codebase (v3.15.0, about 2,300 files),
   measured with <a href="https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py"><code>scripts/benchmark.py</code></a>.</i>
 </p>
 

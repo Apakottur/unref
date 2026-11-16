@@ -280,7 +280,7 @@ pub(crate) fn standard_library(environment: Option<&Path>) -> Vec<PathBuf> {
     Vec::new()
 }
 
-/// Find the standard library under a `sys.prefix`, preferring a given version such as `3.14`.
+/// Find the standard library under a `sys.prefix`, preferring a given version such as `3.15`.
 fn standard_library_of(prefix: &Path, version: Option<&str>) -> Vec<PathBuf> {
     // `Lib` on Windows.
     let windows = prefix.join("Lib");
@@ -323,7 +323,7 @@ fn standard_library_of(prefix: &Path, version: Option<&str>) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// Read the `home` and the version of Python, such as `3.14`, of a virtual environment.
+/// Read the `home` and the version of Python, such as `3.15`, of a virtual environment.
 fn read_pyvenv(environment: &Path) -> Option<(PathBuf, Option<String>)> {
     let text = std::fs::read_to_string(environment.join("pyvenv.cfg")).ok()?;
     let mut home = None;
