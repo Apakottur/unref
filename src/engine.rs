@@ -772,8 +772,11 @@ impl<'a> Graph<'a> {
             .enumerate()
         {
             // A function or class that is a local variable of a function is read by its definition.
-            let local = &project.facts[*file].references.local_definitions;
-            if !local.contains(&(id - project.first_definition[*file])) {
+            let is_local = project.facts[*file]
+                .references
+                .local_definitions
+                .contains(&(id - project.first_definition[*file]));
+            if !is_local {
                 by_name
                     .entry((*file, definition.name.clone()))
                     .or_default()
@@ -790,8 +793,14 @@ impl<'a> Graph<'a> {
                     .push(id);
             }
             // A star import imports the names in `__all__`, which are references of the module
-            // already, or every public name if there is no `__all__`.
-            if !project.facts[*file].references.has_all && !definition.name.starts_with('_') {
+            // already, or every public name of the module if there is no `__all__`. A method, an
+            // attribute, or a function or class that is a local variable of a function is not a name
+            // of the module.
+            if !project.facts[*file].references.has_all
+                && !definition.name.starts_with('_')
+                && definition.owner.is_none()
+                && !is_local
+            {
                 public.entry(*file).or_default().push(id);
             }
         }
