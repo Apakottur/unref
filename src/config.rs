@@ -258,7 +258,6 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
             "python",
             "dummy-variable-rgx",
             "frameworks",
-            "sphinx",
             "output-format",
             "show-transitive",
         ],
@@ -325,6 +324,8 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
         }
     };
 
+    let (frameworks, sphinx_configuration) = parse_frameworks(options, &place)?;
+
     Ok(Config {
         used_names: string_list(options, "used-names", &place)?,
         used_decorators: decorators(options, "used-decorators", &place)?,
@@ -336,8 +337,8 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
         python,
         dummy_variable_rgx,
         entry_points: Vec::new(),
-        frameworks: parse_frameworks(options, &place)?,
-        sphinx_configuration: parse_sphinx(options, &place)?,
+        frameworks,
+        sphinx_configuration,
         output_format,
         show_transitive,
         root: PathBuf::from("."),
@@ -386,11 +387,16 @@ fn parse_override(options: &Table, path: &Path) -> Result<Override, String> {
     })
 }
 
-/// Get the `frameworks` table, which maps the name of a framework to whether its rules apply.
-fn parse_frameworks(options: &Table, place: &str) -> Result<FxHashMap<Framework, bool>, String> {
+/// The frameworks whose rules apply or not, and the configuration files of Sphinx, if they are set.
+type Frameworks = (FxHashMap<Framework, bool>, Option<Vec<PathBuf>>);
+
+/// Get the `frameworks` table, which maps the name of a framework to whether its rules apply. Sphinx
+/// can instead have a table of its settings, which turns its rules on.
+fn parse_frameworks(options: &Table, place: &str) -> Result<Frameworks, String> {
     let mut frameworks = FxHashMap::default();
+    let mut sphinx_configuration = None;
     let table = match options.get("frameworks") {
-        None => return Ok(frameworks),
+        None => return Ok((frameworks, sphinx_configuration)),
         Some(Value::Table(table)) => table,
         Some(_) => return Err(format!("Option 'frameworks' in {place} must be a table")),
     };
@@ -405,25 +411,33 @@ fn parse_frameworks(options: &Table, place: &str) -> Result<FxHashMap<Framework,
                 known.join(", ")
             ));
         };
-        let Value::Boolean(value) = value else {
-            return Err(format!(
-                "Option 'frameworks.{name}' in {place} must be a boolean"
-            ));
-        };
-        frameworks.insert(framework, *value);
+        match value {
+            Value::Boolean(value) => {
+                frameworks.insert(framework, *value);
+            }
+            Value::Table(settings) if framework == Framework::Sphinx => {
+                frameworks.insert(framework, true);
+                sphinx_configuration = parse_sphinx(settings, place)?;
+            }
+            _ if framework == Framework::Sphinx => {
+                return Err(format!(
+                    "Option 'frameworks.{name}' in {place} must be a boolean or a table"
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "Option 'frameworks.{name}' in {place} must be a boolean"
+                ));
+            }
+        }
     }
-    Ok(frameworks)
+    Ok((frameworks, sphinx_configuration))
 }
 
-/// Get the `configuration` option of the `sphinx` table: the configuration files of Sphinx, or None if
-/// it is not set.
-fn parse_sphinx(options: &Table, place: &str) -> Result<Option<Vec<PathBuf>>, String> {
-    let table = match options.get("sphinx") {
-        None => return Ok(None),
-        Some(Value::Table(table)) => table,
-        Some(_) => return Err(format!("Option 'sphinx' in {place} must be a table")),
-    };
-    let place = format!("the 'sphinx' table of {place}");
+/// Get the `configuration` option of the `frameworks.sphinx` table: the configuration files of Sphinx,
+/// or None if it is not set.
+fn parse_sphinx(table: &Table, place: &str) -> Result<Option<Vec<PathBuf>>, String> {
+    let place = format!("the 'frameworks.sphinx' table of {place}");
     check_names(table, &["configuration"], &place)?;
     if !table.contains_key("configuration") {
         return Ok(None);

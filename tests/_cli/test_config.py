@@ -395,14 +395,18 @@ def test_config_frameworks_not_boolean(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("content", "error"),
     [
-        ('sphinx = "docs/conf.py"\n', "Option 'sphinx' in the configuration file {config} must be a table"),
         (
-            '[sphinx]\nconfiguration = "docs/conf.py"\n',
-            "Option 'configuration' in the 'sphinx' table of the configuration file {config} must be a list of strings",
+            '[frameworks]\nsphinx = "docs/conf.py"\n',
+            "Option 'frameworks.sphinx' in the configuration file {config} must be a boolean or a table",
         ),
         (
-            '[sphinx]\nconf = ["docs/conf.py"]\n',
-            "Unknown option 'conf' in the 'sphinx' table of the configuration file {config}",
+            '[frameworks.sphinx]\nconfiguration = "docs/conf.py"\n',
+            "Option 'configuration' in the 'frameworks.sphinx' table of the configuration file {config} must be a "
+            "list of strings",
+        ),
+        (
+            '[frameworks.sphinx]\nconf = ["docs/conf.py"]\n',
+            "Unknown option 'conf' in the 'frameworks.sphinx' table of the configuration file {config}",
         ),
     ],
 )

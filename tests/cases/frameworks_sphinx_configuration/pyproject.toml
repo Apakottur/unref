@@ -1,2 +1,2 @@
-[tool.unref.sphinx]
+[tool.unref.frameworks.sphinx]
 configuration = ["docs/source/conf.py"]

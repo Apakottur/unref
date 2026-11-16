@@ -25,7 +25,6 @@ top level. Its paths are relative to the current directory, as in Ruff.
 | `python`             | Python environment or interpreter that the project runs in.       |
 | `dummy-variable-rgx` | Names of the variables that are unused on purpose.                |
 | `frameworks`         | Frameworks whose built-in rules apply.                            |
-| `sphinx`             | Sphinx's configuration files, see [`sphinx`](#sphinx).            |
 | `output-format`      | How the findings are printed.                                     |
 | `show-transitive`    | Also print what only other unused definitions reach.              |
 | `overrides`          | Options for some of the definitions, see [Overrides](#overrides). |
@@ -164,10 +163,10 @@ Enabled by default: yes.
   `linkcode_resolve` functions.
 
 The configuration files are each `conf.py` that sets `project`, `extensions` or `html_theme`, or those that
-`configuration` names:
+`configuration` names. A table turns the rules on:
 
 ```toml
-[tool.unref.sphinx]
+[tool.unref.frameworks.sphinx]
 configuration = ["docs/conf.py"]
 ```
 

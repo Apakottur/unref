@@ -37,10 +37,10 @@
 //! - Sphinx runs its configuration file, `conf.py`, and reads the settings it sets at the top level,
 //!   its own and those of its extensions, which are open-ended, such as `myst_enable_extensions`. It
 //!   calls the `setup` function of the file as that of an extension, and `sphinx.ext.linkcode` calls
-//!   its `linkcode_resolve` function. Its configuration files are those that the `sphinx.configuration`
-//!   option names, or else each `conf.py` that sets `project`, `extensions` or `html_theme` at the top
-//!   level, as `sphinx-quickstart` writes. No setting starts with an underscore, so such a name is
-//!   left to be reported.
+//!   its `linkcode_resolve` function. Its configuration files are those that the `configuration`
+//!   option of the `frameworks.sphinx` table names, or else each `conf.py` that sets `project`,
+//!   `extensions` or `html_theme` at the top level, as `sphinx-quickstart` writes. No setting starts
+//!   with an underscore, so such a name is left to be reported.
 //!
 //! pytest and unittest find the methods of a test class through its base classes as well, so a base
 //! class of a test class, wherever it is, holds tests.
