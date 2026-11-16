@@ -242,14 +242,14 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
             let owner_uses = uses.entry((file, read.owner)).or_default();
             owner_uses.names.insert((file, read.root.clone()));
             let mut parts = vec![read.root.clone()];
-            for attribute in read.attributes.iter().chain(&read.called) {
-                let written = join(module, &parts.join("."));
+            parts.extend(read.attributes.iter().cloned());
+            // Each attribute, and the one read from the result of the call, is read from the chain
+            // before it.
+            for (index, attribute) in read.attributes.iter().chain(&read.called).enumerate() {
+                let written = join(module, &parts[..=index].join("."));
                 owner_uses.add_member(classes.read_from(&written, attribute), attribute);
-                parts.push(attribute.clone());
             }
             if read.reads_object {
-                let mut parts = vec![read.root.clone()];
-                parts.extend(read.attributes.iter().cloned());
                 owner_uses.objects.insert((file, parts));
             }
         }
@@ -324,10 +324,9 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
                 .insert(name.clone());
         }
         for (owner, receiver, name) in &references.members {
-            let found = match receiver {
-                Receiver::Own(class) => classes.read_from_own(file, class, name, false),
-                Receiver::Super(class) => classes.read_from_own(file, class, name, true),
-            };
+            let (Receiver::Own(class) | Receiver::Super(class)) = receiver;
+            let is_super = matches!(receiver, Receiver::Super(_));
+            let found = classes.read_from_own(file, class, name, is_super);
             uses.entry((file, *owner))
                 .or_default()
                 .add_member(found, name);
