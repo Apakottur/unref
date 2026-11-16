@@ -13,6 +13,7 @@
 | `invalid-ignore-comment`      | An ignore comment that names no code, or that does not parse.         |
 | `ignore-comment-unknown-rule` | A code of an ignore comment that unref does not know.                 |
 | `invalid-syntax`              | A file that does not parse. It is skipped, the rest is still checked. |
+| `io-error`                    | A file that cannot be read, such as a given path that does not exist. |
 
 Unused imports and local variables are left to [Ruff](https://docs.astral.sh/ruff/).
 
