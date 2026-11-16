@@ -14,7 +14,7 @@ const SELECTORS: [&str; 3] = ["paths", "base-classes", "class-decorators"];
 
 /// How the findings are printed, named as ruff's `output-format` option names them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
-pub enum OutputFormat {
+pub(crate) enum OutputFormat {
     /// One line for each finding: `path:line:column: code 'name'`.
     #[default]
     Concise,
@@ -24,7 +24,7 @@ pub enum OutputFormat {
 
 /// The configuration of a check.
 #[derive(Debug, Clone)]
-pub struct Config {
+pub(crate) struct Config {
     /// The names, as patterns, of the definitions that count as used.
     pub used_names: Vec<String>,
     /// The decorators that make the definitions they decorate count as used.
@@ -71,7 +71,7 @@ impl Default for Config {
 /// a file, the `pyproject.toml` of the current directory is read, if there is one.
 ///
 /// Returns an error message if the file cannot be read or is not valid.
-pub fn load_config(path: Option<&Path>) -> Result<Config, String> {
+pub(crate) fn load_config(path: Option<&Path>) -> Result<Config, String> {
     let path = if let Some(path) = path {
         path.to_path_buf()
     } else {

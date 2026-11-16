@@ -184,7 +184,7 @@ fn has_any(names: &FxHashSet<String>, wanted: &[&str]) -> bool {
 }
 
 /// The rules of the frameworks of a project.
-pub struct FrameworkRules<'a> {
+pub(crate) struct FrameworkRules<'a> {
     pytest: bool,
     unittest: bool,
     pydantic: bool,
@@ -205,7 +205,7 @@ pub struct FrameworkRules<'a> {
 
 impl<'a> FrameworkRules<'a> {
     /// Make the rules of the given frameworks, for the files of a project, each with its definitions.
-    pub fn new(
+    pub(crate) fn new(
         frameworks: &FxHashSet<Framework>,
         files: &[(&Path, &[Definition])],
         module_names: &'a [String],
@@ -274,7 +274,7 @@ impl<'a> FrameworkRules<'a> {
     }
 
     /// Check whether a framework finds, calls or reads a definition of a module by itself.
-    pub fn uses(&self, definition: &Definition, module: usize) -> bool {
+    pub(crate) fn uses(&self, definition: &Definition, module: usize) -> bool {
         (self.pytest && self.pytest_uses(definition, module))
             || (self.unittest && self.unittest_uses(definition, module))
             || (self.pydantic && self.pydantic_uses(definition, module))

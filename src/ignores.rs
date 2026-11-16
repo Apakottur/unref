@@ -24,7 +24,7 @@ const NO_CODES: &str = "expected the codes to ignore, in brackets";
 
 /// A code that an ignore comment names.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IgnoredCode {
+pub(crate) struct IgnoredCode {
     /// The code, which may not be known.
     pub code: String,
     /// The column of the code, starting at 1.
@@ -34,7 +34,7 @@ pub struct IgnoredCode {
 /// An `# unref: ignore[...]` comment, which ignores the findings of its line that have one of its
 /// codes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IgnoreComment {
+pub(crate) struct IgnoreComment {
     /// The line of the comment, starting at 1.
     pub line: u32,
     /// The column of the `#` of the comment, starting at 1.
@@ -61,7 +61,7 @@ struct InvalidComment {
 /// nothing and is a finding, as is a code that is not known.
 ///
 /// Returns the comments that parse, and the findings about the comments.
-pub fn find_ignore_comments(
+pub(crate) fn find_ignore_comments(
     text: &str,
     tokens: &Tokens,
     positions: &SourcePositions,
@@ -211,7 +211,7 @@ fn skip_spaces(text: &[char], mut position: usize) -> usize {
 }
 
 /// Get the codes that ignore comments ignore, each with the line that it is ignored on.
-pub fn ignored_codes(comments: &[IgnoreComment]) -> FxHashSet<(u32, &str)> {
+pub(crate) fn ignored_codes(comments: &[IgnoreComment]) -> FxHashSet<(u32, &str)> {
     comments
         .iter()
         .flat_map(|comment| {
@@ -235,7 +235,7 @@ pub fn ignored_codes(comments: &[IgnoreComment]) -> FxHashSet<(u32, &str)> {
 ///
 /// Returns the findings about the ignore comments that are left, and one for each code that ignores
 /// nothing.
-pub fn apply_ignore_comments(
+pub(crate) fn apply_ignore_comments(
     path: &Path,
     comments: &[IgnoreComment],
     findings: &[Finding],

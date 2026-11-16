@@ -38,7 +38,7 @@ const NODE_VISITOR_PREFIX: &str = "visit_";
 type DefinitionId = usize;
 
 /// The options of a check.
-pub struct Options {
+pub(crate) struct Options {
     /// The files and directories that make up the project.
     pub paths: Vec<PathBuf>,
     /// The names, as patterns, of the definitions that count as used.
@@ -97,7 +97,7 @@ struct Project {
 ///
 /// Returns a finding for each unused definition, for each problem with an ignore comment, and for each
 /// file that does not parse, sorted by file, line and column.
-pub fn find_unused(options: &Options) -> Vec<Finding> {
+pub(crate) fn find_unused(options: &Options) -> Vec<Finding> {
     let enabled: FxHashSet<Framework> = Framework::ALL
         .into_iter()
         .filter(|framework| options.frameworks.get(framework).copied().unwrap_or(true))

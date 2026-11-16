@@ -12,7 +12,7 @@ use crate::references::Binding;
 use crate::symbols::ModuleSymbols;
 
 /// A set of dotted names that is cached and shared.
-pub type Names = Rc<FxHashSet<String>>;
+pub(crate) type Names = Rc<FxHashSet<String>>;
 
 /// The classes of a project, with the base classes that they inherit from and their decorators.
 ///
@@ -23,7 +23,7 @@ pub type Names = Rc<FxHashSet<String>>;
 ///
 /// A module is known by its index: the modules of the project come first, by the index of their file,
 /// and the modules outside the project that are read are added after them.
-pub struct ClassHierarchy {
+pub(crate) struct ClassHierarchy {
     project_count: usize,
     modules: RefCell<Vec<Arc<ModuleSymbols>>>,
     by_path: RefCell<FxHashMap<PathBuf, usize>>,
@@ -38,7 +38,7 @@ pub struct ClassHierarchy {
 impl ClassHierarchy {
     /// Make the hierarchy from the symbols of each module of the project, by the index of its file, the
     /// files of the project by their module name, and the modules outside the project.
-    pub fn new(
+    pub(crate) fn new(
         modules: Vec<Arc<ModuleSymbols>>,
         files_by_name: FxHashMap<String, Vec<usize>>,
         external: ExternalModules,
@@ -69,7 +69,7 @@ impl ClassHierarchy {
     /// `pydantic.BaseModel`. A base class that is imported through several modules has the name of each.
     ///
     /// `module` is the module of the class and `name` its name in the module.
-    pub fn ancestors(&self, module: usize, name: &str) -> Names {
+    pub(crate) fn ancestors(&self, module: usize, name: &str) -> Names {
         let key = (module, name.to_string());
         if let Some(found) = self.ancestors.borrow().get(&key) {
             return found.clone();
@@ -92,7 +92,7 @@ impl ClassHierarchy {
     ///
     /// Returns the names of the methods and attributes that the base classes outside the project
     /// define, in their body or on their instances.
-    pub fn external_members(&self, module: usize, name: &str) -> Names {
+    pub(crate) fn external_members(&self, module: usize, name: &str) -> Names {
         let key = (module, name.to_string());
         if let Some(found) = self.inherited.borrow().get(&key) {
             return found.clone();
@@ -115,7 +115,7 @@ impl ClassHierarchy {
 
     /// Get the decorators of a class, by their dotted names, such as `dataclasses.dataclass`. A
     /// decorator that is imported through several modules has the name of each.
-    pub fn decorators(&self, module: usize, name: &str) -> Names {
+    pub(crate) fn decorators(&self, module: usize, name: &str) -> Names {
         let key = (module, name.to_string());
         if let Some(found) = self.resolved_decorators.borrow().get(&key) {
             return found.clone();
@@ -135,7 +135,7 @@ impl ClassHierarchy {
     /// Get the dotted names of a name as it is written in a module, such as the decorator of a
     /// function: `pytest.fixture` for `fixture` after `from pytest import fixture`. A name that is
     /// imported through several modules has the name of each.
-    pub fn resolve(&self, module: usize, written: &str) -> Names {
+    pub(crate) fn resolve(&self, module: usize, written: &str) -> Names {
         let key = (module, written.to_string());
         if let Some(found) = self.resolved.borrow().get(&key) {
             return found.clone();

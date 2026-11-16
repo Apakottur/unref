@@ -7,7 +7,7 @@ use ruff_python_ast::{Decorator, Expr};
 
 /// What is defined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Kind {
+pub(crate) enum Kind {
     Function,
     Class,
     Method,
@@ -17,7 +17,7 @@ pub enum Kind {
 
 impl Kind {
     /// The code of the finding of a definition of this kind that is unused, such as `unused-function`.
-    pub fn code(self) -> &'static str {
+    pub(crate) fn code(self) -> &'static str {
         match self {
             Kind::Function => "unused-function",
             Kind::Class => "unused-class",
@@ -28,14 +28,14 @@ impl Kind {
     }
 
     /// Whether the definition has code of its own that runs when it is called.
-    pub fn is_function(self) -> bool {
+    pub(crate) fn is_function(self) -> bool {
         matches!(self, Kind::Function | Kind::Method)
     }
 }
 
 /// Something that a Python module defines.
 #[derive(Debug, Clone)]
-pub struct Definition {
+pub(crate) struct Definition {
     /// The file that holds the definition.
     pub path: Arc<Path>,
     /// The line of the name of the definition in the file, starting at 1.
@@ -74,7 +74,7 @@ pub struct Definition {
 
 impl Definition {
     /// The name of the definition in its module, such as `Outer.Inner` for a nested class.
-    pub fn qualified_name(&self) -> String {
+    pub(crate) fn qualified_name(&self) -> String {
         match &self.owner {
             None => self.name.clone(),
             Some(owner) => format!("{owner}.{}", self.name),
@@ -84,7 +84,7 @@ impl Definition {
 
 /// The kind of expression that a dotted name is unwrapped from.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Unwrap {
+pub(crate) enum Unwrap {
     /// A decorator, such as `app.command` for `@app.command("name")`.
     Call,
     /// A base class or an annotation, such as `pydantic.BaseModel` for `pydantic.BaseModel[int]`.
@@ -92,7 +92,7 @@ pub enum Unwrap {
 }
 
 /// Get the dotted names of the decorators of a class or function.
-pub fn decorator_names(decorators: &[Decorator]) -> Vec<String> {
+pub(crate) fn decorator_names(decorators: &[Decorator]) -> Vec<String> {
     decorators
         .iter()
         .filter_map(|decorator| dotted_name(&decorator.expression, Unwrap::Call))
@@ -101,7 +101,7 @@ pub fn decorator_names(decorators: &[Decorator]) -> Vec<String> {
 
 /// Get the dotted name of an annotation, without its type arguments, such as `ClassVar` for
 /// `ClassVar[int]`, also when the annotation is quoted. An empty string if it is not a dotted name.
-pub fn annotation_name(annotation: &Expr) -> String {
+pub(crate) fn annotation_name(annotation: &Expr) -> String {
     if let Expr::StringLiteral(literal) = annotation {
         return match ruff_python_parser::parse_expression(literal.value.to_str().trim()) {
             Ok(parsed) => dotted_name(parsed.expr(), Unwrap::Subscript).unwrap_or_default(),
@@ -114,7 +114,7 @@ pub fn annotation_name(annotation: &Expr) -> String {
 /// Get the dotted name of a decorator or a base class.
 ///
 /// Returns None if the expression is not a dotted name, for example `@decorators[0]` or `make_base()`.
-pub fn dotted_name(expression: &Expr, unwrap: Unwrap) -> Option<String> {
+pub(crate) fn dotted_name(expression: &Expr, unwrap: Unwrap) -> Option<String> {
     match expression {
         Expr::Call(call) if unwrap == Unwrap::Call => dotted_name(&call.func, unwrap),
         Expr::Subscript(subscript) if unwrap == Unwrap::Subscript => {

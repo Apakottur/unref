@@ -17,7 +17,7 @@ use crate::positions::SourcePositions;
 /// leading dots, and the imported name. The name is None for `import module`, which binds the module
 /// itself.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Binding {
+pub(crate) struct Binding {
     pub module: Option<String>,
     pub level: u32,
     pub name: Option<String>,
@@ -25,11 +25,11 @@ pub struct Binding {
 
 /// The code that a reference is made from: the line of the name of the function that the reference
 /// is in, or None for code that runs when the module is imported.
-pub type Owner = Option<u32>;
+pub(crate) type Owner = Option<u32>;
 
 /// A read of a name, or of a chain of attributes that starts with one (`package.module.name`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Read {
+pub(crate) struct Read {
     pub owner: Owner,
     pub root: String,
     /// The attributes, in order.
@@ -40,7 +40,7 @@ pub struct Read {
 
 /// A read of an imported name, or of a chain of attributes that starts with one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ImportedRead {
+pub(crate) struct ImportedRead {
     pub owner: Owner,
     pub binding: Binding,
     pub attributes: Vec<String>,
@@ -49,7 +49,7 @@ pub struct ImportedRead {
 
 /// A name that is imported from another module (`from module import name`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Import {
+pub(crate) struct Import {
     pub owner: Owner,
     /// The module, as it is written.
     pub module: Option<String>,
@@ -66,7 +66,7 @@ const KEY_METHODS: [&str; 3] = ["get", "pop", "setdefault"];
 ///
 /// Each reference is made from an owner: the function that it is in, or the module itself.
 #[derive(Debug, Default)]
-pub struct References {
+pub(crate) struct References {
     /// The reads of the names of the module itself, without the local variables and parameters. A name
     /// that is listed in `__all__` is read as a plain name. A plain read of a name that the module
     /// imports, at its top level or declared `global`, also reads its own name, without the object,
@@ -98,7 +98,7 @@ pub struct References {
 /// variables and imports are left out.
 ///
 /// Returns the definitions, in the order of the file, and the references.
-pub fn walk_module(
+pub(crate) fn walk_module(
     path: &Arc<Path>,
     module: &ast::ModModule,
     positions: &SourcePositions,

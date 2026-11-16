@@ -43,6 +43,7 @@ musllinux
 mypy
 pathlib
 pathspec
+peekable
 platlib
 posonlyargs
 prek

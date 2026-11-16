@@ -157,6 +157,7 @@ fn parse_jobs(value: &str) -> Result<NonZeroUsize, String> {
 }
 
 /// Print an error and give the exit status of an error.
+#[expect(clippy::print_stderr, reason = "the error is for the user")]
 fn fail(message: &str) -> ExitCode {
     eprintln!("Error: {message}");
     ExitCode::from(2)

@@ -12,7 +12,7 @@ use crate::references::{Binding, References};
 /// What a module defines and imports at its top level, as the base classes and decorators of its
 /// classes are followed through it, whether it is a module of the project or one outside it.
 #[derive(Debug)]
-pub struct ModuleSymbols {
+pub(crate) struct ModuleSymbols {
     /// The file of the module.
     pub path: Arc<Path>,
     /// The name that the module is imported by.
@@ -36,7 +36,7 @@ pub struct ModuleSymbols {
 
 impl ModuleSymbols {
     /// Collect what a module defines and imports at its top level.
-    pub fn of(
+    pub(crate) fn of(
         path: Arc<Path>,
         name: ModuleName,
         definitions: &[Definition],

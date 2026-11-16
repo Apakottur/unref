@@ -23,7 +23,7 @@ static CODING: LazyLock<Regex> = LazyLock::new(|| {
 
 /// What a Python file defines and refers to.
 #[derive(Debug)]
-pub struct FileFacts {
+pub(crate) struct FileFacts {
     /// The definitions of the file.
     pub definitions: Vec<Definition>,
     /// What the file refers to.
@@ -39,12 +39,12 @@ pub struct FileFacts {
 /// Find what each Python file defines and refers to, or a finding for a file that does not parse.
 ///
 /// Each file is analyzed on its own, in the thread pool that the call runs in.
-pub fn analyze_files(paths: &[Arc<Path>]) -> Vec<Result<FileFacts, Finding>> {
+pub(crate) fn analyze_files(paths: &[Arc<Path>]) -> Vec<Result<FileFacts, Finding>> {
     paths.par_iter().map(analyze_file).collect()
 }
 
 /// Find what a Python file defines and refers to, or a finding if it does not parse.
-pub fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
+pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
     let syntax_error = |line: u32, column: u32, name: String| Finding {
         path: path.to_path_buf(),
         line,
@@ -77,10 +77,10 @@ pub fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
 }
 
 /// What a module defines and refers to, and the names that it gives out from its `__getattr__`.
-pub type Module = (Vec<Definition>, References, FxHashMap<String, Vec<Binding>>);
+pub(crate) type Module = (Vec<Definition>, References, FxHashMap<String, Vec<Binding>>);
 
 /// Read a module and parse it, as for a module outside the project, which has no findings.
-pub fn read_module(path: &Arc<Path>) -> Option<Module> {
+pub(crate) fn read_module(path: &Arc<Path>) -> Option<Module> {
     let bytes = std::fs::read(path).ok()?;
     let text = decode_source(&bytes).ok()?;
     let parsed = ruff_python_parser::parse_module(&text).ok()?;
@@ -92,7 +92,7 @@ pub fn read_module(path: &Arc<Path>) -> Option<Module> {
 
 /// Why the source of a module cannot be decoded, with the line and the column where it fails.
 #[derive(Debug)]
-pub struct DecodeError {
+pub(crate) struct DecodeError {
     pub line: u32,
     pub column: u32,
     pub message: String,
@@ -100,7 +100,7 @@ pub struct DecodeError {
 
 /// Decode the source of a module as Python does: UTF-8, or the encoding that it declares (PEP 263).
 /// A byte order mark is dropped, and then only UTF-8 can be declared.
-pub fn decode_source(bytes: &[u8]) -> Result<String, DecodeError> {
+pub(crate) fn decode_source(bytes: &[u8]) -> Result<String, DecodeError> {
     let (bom, bytes) = match bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         Some(rest) => (true, rest),
         None => (false, bytes),

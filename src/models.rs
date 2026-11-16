@@ -4,11 +4,11 @@ use std::fmt;
 use std::path::PathBuf;
 
 /// The default of the `dummy-variable-rgx` option, the same as Ruff's.
-pub const DEFAULT_DUMMY_VARIABLE_RGX: &str = r"^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$";
+pub(crate) const DEFAULT_DUMMY_VARIABLE_RGX: &str = r"^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$";
 
 /// A framework whose built-in rules can apply, by its name in the `frameworks` option.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Framework {
+pub(crate) enum Framework {
     Pytest,
     Unittest,
     Pydantic,
@@ -18,7 +18,7 @@ pub enum Framework {
 
 impl Framework {
     /// Every framework, each enabled by default.
-    pub const ALL: [Framework; 5] = [
+    pub(crate) const ALL: [Framework; 5] = [
         Framework::Pytest,
         Framework::Unittest,
         Framework::Pydantic,
@@ -27,7 +27,7 @@ impl Framework {
     ];
 
     /// The name of the framework in the `frameworks` option.
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Framework::Pytest => "pytest",
             Framework::Unittest => "unittest",
@@ -38,7 +38,7 @@ impl Framework {
     }
 
     /// The framework of a name in the `frameworks` option.
-    pub fn from_name(name: &str) -> Option<Framework> {
+    pub(crate) fn from_name(name: &str) -> Option<Framework> {
         Framework::ALL
             .into_iter()
             .find(|framework| framework.name() == name)
@@ -46,7 +46,7 @@ impl Framework {
 }
 
 /// The codes of the findings, which an ignore comment can name.
-pub const CODES: [&str; 9] = [
+pub(crate) const CODES: [&str; 9] = [
     "unused-function",
     "unused-class",
     "unused-method",
@@ -62,7 +62,7 @@ pub const CODES: [&str; 9] = [
 ///
 /// Its `Display` gives the line that the command prints, `path:line:column: code 'name'`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Finding {
+pub(crate) struct Finding {
     /// The file of the finding.
     pub path: PathBuf,
     /// The line of the finding, starting at 1.
@@ -96,7 +96,7 @@ impl fmt::Display for Finding {
 ///
 /// An override needs at least one selector, and applies to what matches all of its selectors.
 #[derive(Debug, Clone, Default)]
-pub struct Override {
+pub(crate) struct Override {
     /// Selects the definitions in these files and directories.
     pub paths: Vec<PathBuf>,
     /// Selects the definitions in subclasses of these classes, such as `ast.NodeVisitor`.
@@ -111,7 +111,7 @@ pub struct Override {
 
 /// Check whether a name matches a pattern of the shell, as Python's `fnmatch.fnmatchcase` does: `*`
 /// matches anything, `?` any one character, `[seq]` any character in `seq` and `[!seq]` any other.
-pub fn fnmatch(name: &str, pattern: &str) -> bool {
+pub(crate) fn fnmatch(name: &str, pattern: &str) -> bool {
     let name: Vec<char> = name.chars().collect();
     let pattern: Vec<char> = pattern.chars().collect();
     fnmatch_chars(&name, &pattern)

@@ -21,7 +21,7 @@ type Located = Option<(Option<PathBuf>, bool)>;
 /// A module is found on a search path the way Python finds it, and read from its source, but it is
 /// never imported: its code does not run. A module without a Python source, such as a builtin or a
 /// compiled module, is not read.
-pub struct ExternalModules {
+pub(crate) struct ExternalModules {
     /// The directories that modules are imported from, in order.
     search_path: Vec<PathBuf>,
     modules: FxHashMap<String, Option<Arc<ModuleSymbols>>>,
@@ -31,7 +31,7 @@ pub struct ExternalModules {
 }
 
 impl ExternalModules {
-    pub fn new(search_path: Vec<PathBuf>) -> Self {
+    pub(crate) fn new(search_path: Vec<PathBuf>) -> Self {
         Self {
             search_path,
             modules: FxHashMap::default(),
@@ -42,12 +42,12 @@ impl ExternalModules {
 
     /// Tell whether a module is found, whether or not it has a source that can be read, such as a
     /// compiled module or a namespace package.
-    pub fn exists(&mut self, name: &str) -> bool {
+    pub(crate) fn exists(&mut self, name: &str) -> bool {
         self.locate(name).is_some()
     }
 
     /// Get a module by its dotted name, or None if it is not found or does not parse.
-    pub fn get(&mut self, name: &str) -> Option<Arc<ModuleSymbols>> {
+    pub(crate) fn get(&mut self, name: &str) -> Option<Arc<ModuleSymbols>> {
         if let Some(module) = self.modules.get(name) {
             return module.clone();
         }
@@ -196,7 +196,7 @@ impl ExternalModules {
 /// as `/usr`, or an interpreter such as `.venv/bin/python`.
 ///
 /// Returns the directories that exist, in order.
-pub fn environment_paths(environment: &Path) -> Vec<PathBuf> {
+pub(crate) fn environment_paths(environment: &Path) -> Vec<PathBuf> {
     let environment = environment_directory(environment);
     let mut site_packages_directories = Vec::new();
     // `lib/python3.X/site-packages` on POSIX, and `Lib/site-packages` on Windows.
@@ -252,7 +252,7 @@ pub fn environment_paths(environment: &Path) -> Vec<PathBuf> {
 /// The Python of the environment of the project is used when there is one: the one that a virtual
 /// environment is made from, which its `pyvenv.cfg` names, or the environment itself if it is a
 /// `sys.prefix`. Otherwise it is the first `python3` or `python` on the `PATH`.
-pub fn standard_library(environment: Option<&Path>) -> Vec<PathBuf> {
+pub(crate) fn standard_library(environment: Option<&Path>) -> Vec<PathBuf> {
     let (prefixes, version) = match environment {
         Some(environment) => {
             let environment = environment_directory(environment);
@@ -285,7 +285,7 @@ fn standard_library_of(prefix: &Path, version: Option<&str>) -> Vec<PathBuf> {
     // `Lib` on Windows.
     let windows = prefix.join("Lib");
     if windows.join("os.py").is_file() {
-        return vec![windows.clone(), prefix.join("DLLs")]
+        return vec![windows, prefix.join("DLLs")]
             .into_iter()
             .filter(|path| path.is_dir())
             .collect();

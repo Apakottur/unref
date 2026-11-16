@@ -6,7 +6,7 @@ const INIT: &str = "__init__.py";
 
 /// The name that a Python file is imported by.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModuleName {
+pub(crate) struct ModuleName {
     /// The dotted name, such as `package.module`. The `__init__.py` of a package has the name of the
     /// package.
     pub name: String,
@@ -22,7 +22,7 @@ impl ModuleName {
     /// leading dots of the import, 0 for an absolute import.
     ///
     /// Returns None if the import has more dots than there are packages.
-    pub fn resolve(&self, module: Option<&str>, level: u32) -> Option<String> {
+    pub(crate) fn resolve(&self, module: Option<&str>, level: u32) -> Option<String> {
         if level == 0 {
             return module.map(ToString::to_string);
         }
@@ -57,7 +57,7 @@ impl ModuleName {
 ///
 /// `roots` are the directories given to the check, resolved. A namespace package is only looked for
 /// under them, so that a package outside the project does not pull directories in.
-pub fn module_name(path: &Path, roots: &[PathBuf]) -> ModuleName {
+pub(crate) fn module_name(path: &Path, roots: &[PathBuf]) -> ModuleName {
     let path = resolve(path);
     let is_package = path.file_name().is_some_and(|name| name == INIT);
     let mut parts: Vec<String> = Vec::new();
@@ -99,7 +99,7 @@ fn is_namespace_package(directory: &Path, roots: &[PathBuf]) -> bool {
 
 /// Get the directory on the import path that a Python file is imported from: the directory that holds
 /// the first package of the name, or the directory of the file if it is not in a package.
-pub fn import_root(path: &Path, name: &ModuleName) -> PathBuf {
+pub(crate) fn import_root(path: &Path, name: &ModuleName) -> PathBuf {
     let depth = name.name.matches('.').count() + usize::from(name.is_package);
     let path = resolve(path);
     path.ancestors()
@@ -117,7 +117,7 @@ fn stem(path: &Path) -> String {
 
 /// Make a path absolute and resolve its links, as Python's `Path.resolve` does, also for a path that
 /// does not exist.
-pub fn resolve(path: &Path) -> PathBuf {
+pub(crate) fn resolve(path: &Path) -> PathBuf {
     if let Ok(resolved) = path.canonicalize() {
         return resolved;
     }

@@ -41,7 +41,7 @@ type IgnoreFile = (PathBuf, Gitignore);
 /// ones, in the syntax of `.gitignore`. They are anchored at the current directory.
 ///
 /// Returns the Python files, sorted.
-pub fn discover(paths: &[PathBuf], exclude: &[String]) -> Vec<PathBuf> {
+pub(crate) fn discover(paths: &[PathBuf], exclude: &[String]) -> Vec<PathBuf> {
     let excluded = Exclude::new(exclude);
     let mut files = Vec::new();
     for path in paths {
@@ -59,7 +59,7 @@ pub fn discover(paths: &[PathBuf], exclude: &[String]) -> Vec<PathBuf> {
 }
 
 /// Remove the `.` parts of a path, as Python's `pathlib` does: `./main.py` is `main.py`.
-pub fn clean(path: &Path) -> PathBuf {
+pub(crate) fn clean(path: &Path) -> PathBuf {
     let cleaned: PathBuf = path
         .components()
         .filter(|component| *component != Component::CurDir)
@@ -294,7 +294,7 @@ const PLACEHOLDER: &str = "\u{1}unref";
 
 /// Check whether a path is one of the given files, or is under one of the given directories, which
 /// are resolved.
-pub fn is_under(path: &Path, roots: &[PathBuf]) -> bool {
+pub(crate) fn is_under(path: &Path, roots: &[PathBuf]) -> bool {
     let absolute = resolve(path);
     roots.iter().any(|root| absolute.starts_with(root))
 }

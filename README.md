@@ -66,7 +66,6 @@ Checking the whole [CPython](https://github.com/python/cpython) codebase (v3.14.
 | -------------------------------------------------- | ------ |
 | unref                                              | 0.94s  |
 | unref (one thread)                                 | 1.59s  |
-| unref 0.1.1, the last release written in Python    | 5.40s  |
 | [vulture](https://github.com/jendrikseipp/vulture) | 19.68s |
 
 Measured with [`scripts/benchmark.py`](https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py).

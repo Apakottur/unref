@@ -8,7 +8,7 @@
 /// removing the roots, and then what they alone reached, in turn, removes them.
 ///
 /// `successors[node]` holds the nodes that each node reaches, by their index.
-pub fn transitive(successors: &[Vec<usize>]) -> Vec<bool> {
+pub(crate) fn transitive(successors: &[Vec<usize>]) -> Vec<bool> {
     let component = components(successors);
     let mut reached = vec![false; successors.len()];
     for (node, nodes) in successors.iter().enumerate() {
