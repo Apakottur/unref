@@ -86,6 +86,12 @@ pub(crate) struct References {
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
     pub bindings: FxHashMap<String, Binding>,
+    /// The functions and classes that are local variables of a function, by their index in the
+    /// definitions of the module. A read of their name elsewhere is not a reference to them.
+    pub local_definitions: FxHashSet<usize>,
+    /// The reads of the functions and classes that are local variables of a function, each with the
+    /// index of the definition in the definitions of the module.
+    pub local_reads: FxHashSet<(Owner, usize)>,
 }
 
 /// Find what a Python module defines and refers to.
@@ -143,6 +149,9 @@ struct Scope {
     global_names: FxHashSet<String>,
     /// The names that the scope imports, each with what it stands for.
     imports: FxHashMap<String, Binding>,
+    /// In a function, the functions and classes that it defines, by their name, each with its index
+    /// in the definitions of the module.
+    functions_and_classes: FxHashMap<String, Vec<usize>>,
     /// The reads of names in the scope, or in a scope nested in it, that are not local to the scopes
     /// in between.
     reads: FxHashSet<Read>,
@@ -167,6 +176,7 @@ impl Scope {
             bound: FxHashSet::default(),
             global_names: FxHashSet::default(),
             imports: FxHashMap::default(),
+            functions_and_classes: FxHashMap::default(),
             reads: FxHashSet::default(),
             enclosing: None,
             defined_in: None,
@@ -387,6 +397,7 @@ impl<'a> Walker<'_, '_> {
 
     fn visit_function_def(&mut self, function: &'a ast::StmtFunctionDef) {
         let (body_scope, line) = self.define_function(function);
+        self.bind_definition(function.name.as_str());
         self.visit_function(
             Some(&function.parameters),
             &function.decorator_list,
@@ -508,6 +519,7 @@ impl<'a> Walker<'_, '_> {
         let mut class_scope = Scope::new(ScopeKind::Class);
         class_scope.class_name = Some(definition.qualified_name());
         self.definitions.push(definition);
+        self.bind_definition(class.name.as_str());
 
         let binder = self.binder;
         self.binder = self.push_scope(class_scope);
@@ -744,6 +756,23 @@ impl<'a> Walker<'_, '_> {
         }
     }
 
+    /// Bind the name of the function or class that was just added, if it is a local variable of a
+    /// function. The name of a function or class of a module or of a class body is not bound, since it
+    /// is a definition that is matched by its name.
+    fn bind_definition(&mut self, name: &str) {
+        let binder = self.binder;
+        if self.scopes[binder].kind != ScopeKind::Function {
+            return;
+        }
+        self.bind(name);
+        let index = self.definitions.len() - 1;
+        self.scopes[binder]
+            .functions_and_classes
+            .entry(name.to_string())
+            .or_default()
+            .push(index);
+    }
+
     /// Bind the names that a statement imports.
     ///
     /// When a name is imported more than once, as by an `import` in a `try` and a fallback in its
@@ -761,9 +790,20 @@ impl<'a> Walker<'_, '_> {
     }
 
     /// End a scope: drop the reads of its local variables, resolve the reads of the names that it
-    /// imports, which are matched once every module is known, and pass the rest on.
+    /// imports, which are matched once every module is known, and pass the rest on. A read of a
+    /// function or class that is a local variable is a reference to the definitions of that name in
+    /// the scope.
     fn close(&mut self, inner: usize, local_names: &FxHashSet<String>, target: Target) {
         let reads = std::mem::take(&mut self.scopes[inner].reads);
+        let defined = std::mem::take(&mut self.scopes[inner].functions_and_classes);
+        // A function or class whose name is declared `global` is a definition of the module.
+        let defined: FxHashMap<String, Vec<usize>> = defined
+            .into_iter()
+            .filter(|(name, _)| local_names.contains(name))
+            .collect();
+        self.references
+            .local_definitions
+            .extend(defined.values().flatten().copied());
         let mut passed = Vec::new();
         for read in reads {
             if let Some(binding) = self.scopes[inner].imports.get(&read.root) {
@@ -784,6 +824,9 @@ impl<'a> Walker<'_, '_> {
                     reads_object: read.reads_object,
                 });
             } else if local_names.contains(&read.root) {
+                for &index in defined.get(&read.root).into_iter().flatten() {
+                    self.references.local_reads.insert((read.owner, index));
+                }
                 for attribute in read.attributes {
                     self.references.attributes.insert((read.owner, attribute));
                 }
