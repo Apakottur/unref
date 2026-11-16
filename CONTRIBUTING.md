@@ -44,29 +44,17 @@ UNREF_BINARY=target/debug/unref uv run pytest -c tests/pytest.ini tests
 ### Test cases
 
 The behavior of the check is tested with case projects. Each directory under `tests/cases` is a small
-Python project, and `tests/test_cases.py` runs the check on each of them.
-
-A finding is expected with a comment on the line it is reported on, which gives its column and its code,
-as the assertions of ty's tests do:
+Python project on one theme, and `tests/test_cases.py` runs the check on each of them. A finding is
+expected with an `# expect:` comment on its line, and the docstring of `tests/test_cases.py` gives the
+full syntax:
 
 ```python
 def unused():  # expect: 5 [unused-function]
     return 1
 ```
 
-Several findings on one line are separated by commas:
-
-```python
-first, second = 1, 2  # expect: 1 [unused-variable], 8 [unused-variable]
-```
-
-The comment can follow another comment on the line, such as a `# type: ignore[...]`.
-
-The findings must match exactly, so a line without the comment must not have a finding. To test a new
-behavior, add a directory with the files that show it.
-
-A case is configured with a `pyproject.toml` in its directory, as a project is, which also gives its
-entry points.
+To test a new behavior, add files to the case whose theme fits. Add a new directory only when the case
+needs its own `pyproject.toml` or layout.
 
 ### Type checks
 

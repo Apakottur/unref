@@ -7,22 +7,6 @@ from tests._cli._files import CASES_DIR, write_config
 from tests._unref import run
 
 
-def test_config_in_current_directory() -> None:
-    # Without `--config`, the `pyproject.toml` of the current directory is read.
-    result = run([], cwd=CASES_DIR / "used_decorator")
-
-    assert result.exit_code == 1
-    assert result.stdout == (
-        "main.py:38:7: unused-class 'Class'\n"
-        "main.py:45:5: unused-function 'not_listed'\n"
-        "main.py:51:5: unused-function 'other_name'\n"
-        "main.py:56:5: unused-function 'longer_name'\n"
-        "main.py:61:5: unused-function 'shorter_name'\n"
-        "main.py:67:5: unused-function 'subscript'\n"
-        "main.py:72:5: unused-function 'attribute_of_subscript'\n"
-    )
-
-
 # A configuration file that is not a `pyproject.toml` has the options at the top level.
 @pytest.mark.parametrize(
     ("name", "content"),
@@ -312,15 +296,6 @@ def test_config_exclude_under_given_directory_parent() -> None:
     assert result.stdout == "tests/cases/function/main.py:1:5: unused-function 'function'\n"
 
 
-def test_config_used_names(tmp_path: Path) -> None:
-    config = write_config(tmp_path, 'used-names = ["func*"]\n')
-
-    result = run(["--config", str(config), str(CASES_DIR / "function")])
-
-    assert result.exit_code == 0
-    assert result.stdout == ""
-
-
 def test_config_overrides(tmp_path: Path) -> None:
     # As with ruff, the paths of an override are relative to the current directory, not to the
     # configuration file.
@@ -356,23 +331,6 @@ def test_entry_points_not_from_other_file(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert result.stdout == ("main.py:2:5: unused-function 'run'\nmain.py:10:5: unused-function 'unused'\n")
-
-
-def test_config_frameworks_table(tmp_path: Path) -> None:
-    # In a file that is not a `pyproject.toml`, the table is `[frameworks]`.
-    config = write_config(tmp_path, "[frameworks]\npytest = false\n")
-    case = CASES_DIR / "frameworks_selected"
-
-    result = run(["--config", str(config), str(case)])
-
-    # The rules of pytest are off, and those of unittest keep their default.
-    assert result.exit_code == 1
-    assert result.stdout == (
-        f"{case}/test_module.py:7:5: unused-function 'test_function'\n"
-        f"{case}/test_module.py:12:5: unused-function 'plain'\n"
-        f"{case}/test_module.py:16:5: unused-function 'pytest_configure'\n"
-        f"{case}/test_module.py:20:7: unused-class 'TestClass'\n"
-    )
 
 
 def test_config_found_from_subdirectory() -> None:

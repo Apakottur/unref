@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from tests._cli._files import write_config
+from tests._cli._files import CASES_DIR, write_config
 from tests._unref import run
 
-_CASE = Path(__file__).parent.parent / "cases" / "external_environment"
+_CASE = CASES_DIR / "external_environment"
 
 # The findings with the environment of the case, and without it, which is when the check only looks in
 # its own environment.

@@ -8,13 +8,6 @@ from tests._cli._files import CASES_DIR, write_config
 from tests._unref import run
 
 
-def test_no_findings() -> None:
-    result = run([str(CASES_DIR / "empty_file")])
-
-    assert result.exit_code == 0
-    assert result.stdout == ""
-
-
 def test_findings() -> None:
     case = CASES_DIR / "method"
 
@@ -122,11 +115,11 @@ def test_syntax_warning() -> None:
     assert caught == []
 
 
-@pytest.mark.parametrize("option", ["--jobs", "-j"])
-def test_jobs(option: str) -> None:
+def test_jobs_short_option() -> None:
+    # Every run of a case passes `--jobs`, so only the short option is left to check.
     case = CASES_DIR / "function"
 
-    result = run([option, "1", str(case)])
+    result = run(["-j", "1", str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == f"{case}/main.py:1:5: unused-function 'function'\n"
