@@ -25,6 +25,7 @@ top level. Its paths are relative to the current directory, as in Ruff.
 | `python`             | Python environment or interpreter that the project runs in.       |
 | `dummy-variable-rgx` | Names of the variables that are unused on purpose.                |
 | `frameworks`         | Frameworks whose built-in rules apply.                            |
+| `sphinx`             | Sphinx's configuration files, see [`sphinx`](#sphinx).            |
 | `output-format`      | How the findings are printed.                                     |
 | `show-transitive`    | Also print what only other unused definitions reach.              |
 | `overrides`          | Options for some of the definitions, see [Overrides](#overrides). |
@@ -154,6 +155,21 @@ Enabled by default: yes.
 - Functions and methods with a route, error or request decorator, such as `app.route` or
   `bp.errorhandler`, of a module-level `Flask()` or `Blueprint()`, or of an instance of a subclass.
 - HTTP method handlers of `MethodView` subclasses, and `dispatch_request` of `View` subclasses.
+
+#### `sphinx`
+
+Enabled by default: yes.
+
+- In Sphinx's configuration files: module-level variables not starting with `_`, and the `setup` and
+  `linkcode_resolve` functions.
+
+The configuration files are each `conf.py` that sets `project`, `extensions` or `html_theme`, or those that
+`configuration` names:
+
+```toml
+[tool.unref.sphinx]
+configuration = ["docs/conf.py"]
+```
 
 ### `output-format`
 

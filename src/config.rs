@@ -41,6 +41,8 @@ pub(crate) struct Config {
     pub entry_points: Vec<String>,
     /// Whether the rules of each framework apply, for the frameworks that the file sets.
     pub frameworks: FxHashMap<Framework, bool>,
+    /// The configuration files of Sphinx, or None to find them by their contents.
+    pub sphinx_configuration: Option<Vec<PathBuf>>,
     /// How the findings are printed.
     pub output_format: OutputFormat,
     /// Whether the unused definitions that only other unused definitions reach are printed too.
@@ -61,6 +63,7 @@ impl Default for Config {
             dummy_variable_rgx: DEFAULT_DUMMY_VARIABLE_RGX.to_string(),
             entry_points: Vec::new(),
             frameworks: FxHashMap::default(),
+            sphinx_configuration: None,
             output_format: OutputFormat::Concise,
             show_transitive: false,
             root: PathBuf::from("."),
@@ -94,6 +97,9 @@ pub(crate) fn load_config(path: Option<&Path>) -> Result<Config, String> {
             item.paths = item.paths.iter().map(|path| root.join(path)).collect();
         }
         config.python = config.python.map(|python| root.join(python));
+        if let Some(files) = &mut config.sphinx_configuration {
+            *files = files.iter().map(|file| root.join(file)).collect();
+        }
         config.root = root;
     }
     Ok(config)
@@ -252,6 +258,7 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
             "python",
             "dummy-variable-rgx",
             "frameworks",
+            "sphinx",
             "output-format",
             "show-transitive",
         ],
@@ -330,6 +337,7 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
         dummy_variable_rgx,
         entry_points: Vec::new(),
         frameworks: parse_frameworks(options, &place)?,
+        sphinx_configuration: parse_sphinx(options, &place)?,
         output_format,
         show_transitive,
         root: PathBuf::from("."),
@@ -405,6 +413,27 @@ fn parse_frameworks(options: &Table, place: &str) -> Result<FxHashMap<Framework,
         frameworks.insert(framework, *value);
     }
     Ok(frameworks)
+}
+
+/// Get the `configuration` option of the `sphinx` table: the configuration files of Sphinx, or None if
+/// it is not set.
+fn parse_sphinx(options: &Table, place: &str) -> Result<Option<Vec<PathBuf>>, String> {
+    let table = match options.get("sphinx") {
+        None => return Ok(None),
+        Some(Value::Table(table)) => table,
+        Some(_) => return Err(format!("Option 'sphinx' in {place} must be a table")),
+    };
+    let place = format!("the 'sphinx' table of {place}");
+    check_names(table, &["configuration"], &place)?;
+    if !table.contains_key("configuration") {
+        return Ok(None);
+    }
+    Ok(Some(
+        string_list(table, "configuration", &place)?
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+    ))
 }
 
 /// Check that every option is a known one.

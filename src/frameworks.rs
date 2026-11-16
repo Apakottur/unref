@@ -34,17 +34,25 @@
 //!   `app.route` or `bp.errorhandler`, of a variable at the top level of a module that is set to
 //!   `Flask()` or `Blueprint()`, or to an instance of a subclass of them. It calls the methods of a `MethodView` named after HTTP methods, and the
 //!   `dispatch_request` method of a `View`.
+//! - Sphinx runs its configuration file, `conf.py`, and reads the settings it sets at the top level,
+//!   its own and those of its extensions, which are open-ended, such as `myst_enable_extensions`. It
+//!   calls the `setup` function of the file as that of an extension, and `sphinx.ext.linkcode` calls
+//!   its `linkcode_resolve` function. Its configuration files are those that the `sphinx.configuration`
+//!   option names, or else each `conf.py` that sets `project`, `extensions` or `html_theme` at the top
+//!   level, as `sphinx-quickstart` writes. No setting starts with an underscore, so such a name is
+//!   left to be reported.
 //!
 //! pytest and unittest find the methods of a test class through its base classes as well, so a base
 //! class of a test class, wherever it is, holds tests.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
 use crate::classes::ClassHierarchy;
 use crate::definitions::{Definition, Kind};
 use crate::models::{Framework, fnmatch};
+use crate::modules::resolve;
 use crate::references::LocalCalls;
 
 const PYTEST_FILES: [&str; 2] = ["test_*.py", "*_test.py"];
@@ -277,6 +285,13 @@ const FLASK_METHOD_VIEW_METHODS: [&str; 8] = [
     "get", "post", "head", "options", "delete", "put", "trace", "patch",
 ];
 
+/// The name of Sphinx's configuration file, which it reads from its configuration directory.
+const SPHINX_CONF: &str = "conf.py";
+/// The settings that make a `conf.py` that of Sphinx when it sets one at the top level.
+const SPHINX_MARKERS: [&str; 3] = ["project", "extensions", "html_theme"];
+/// The functions of the configuration file that Sphinx and its extensions call.
+const SPHINX_FUNCTIONS: [&str; 2] = ["setup", "linkcode_resolve"];
+
 /// Check whether a set of dotted names has one of the given names.
 fn has_any(names: &FxHashSet<String>, wanted: &[&str]) -> bool {
     wanted.iter().any(|name| names.contains(*name))
@@ -291,6 +306,7 @@ pub(crate) struct FrameworkRules<'a> {
     sqlalchemy: bool,
     fastapi: bool,
     flask: bool,
+    sphinx: bool,
     /// The module name of each file of the project, by its index.
     module_names: &'a [String],
     hierarchy: &'a ClassHierarchy,
@@ -304,6 +320,8 @@ pub(crate) struct FrameworkRules<'a> {
     fastapi_routers: Instances,
     /// The applications and blueprints of Flask.
     flask_apps: Instances,
+    /// The configuration files of Sphinx, by their indices.
+    sphinx_configs: FxHashSet<usize>,
 }
 
 /// The instances of some classes, such as the applications of a web framework.
@@ -322,11 +340,14 @@ pub(crate) type ProjectFile<'a> = (&'a Path, &'a [Definition], &'a LocalCalls);
 
 impl<'a> FrameworkRules<'a> {
     /// Make the rules of the given frameworks, for the files of a project, each with its definitions.
+    /// The configuration files of Sphinx are the given ones, as resolved paths, or else are found by
+    /// their contents.
     pub(crate) fn new(
         frameworks: &FxHashSet<Framework>,
         files: &[ProjectFile],
         module_names: &'a [String],
         hierarchy: &'a ClassHierarchy,
+        sphinx_configuration: Option<&FxHashSet<PathBuf>>,
     ) -> Self {
         let mut rules = Self {
             pytest: frameworks.contains(&Framework::Pytest),
@@ -336,6 +357,7 @@ impl<'a> FrameworkRules<'a> {
             sqlalchemy: frameworks.contains(&Framework::Sqlalchemy),
             fastapi: frameworks.contains(&Framework::Fastapi),
             flask: frameworks.contains(&Framework::Flask),
+            sphinx: frameworks.contains(&Framework::Sphinx),
             module_names,
             hierarchy,
             pytest_bases: FxHashSet::default(),
@@ -343,6 +365,7 @@ impl<'a> FrameworkRules<'a> {
             mapped_classes: FxHashSet::default(),
             fastapi_routers: Instances::default(),
             flask_apps: Instances::default(),
+            sphinx_configs: FxHashSet::default(),
         };
         if rules.fastapi {
             rules.fastapi_routers.locals = local_instances(files, hierarchy, &FASTAPI_ROUTERS);
@@ -353,6 +376,14 @@ impl<'a> FrameworkRules<'a> {
         let mut classes: Vec<(usize, String)> = Vec::new();
         let mut made: FxHashSet<String> = FxHashSet::default();
         for (module, (path, definitions, _)) in files.iter().enumerate() {
+            if rules.sphinx
+                && match sphinx_configuration {
+                    Some(configuration) => configuration.contains(&resolve(path)),
+                    None => is_sphinx_config(path, definitions),
+                }
+            {
+                rules.sphinx_configs.insert(module);
+            }
             for definition in *definitions {
                 let name = definition.qualified_name();
                 if definition.kind == Kind::Class {
@@ -415,6 +446,16 @@ impl<'a> FrameworkRules<'a> {
                     &FASTAPI_DECORATORS,
                 ))
             || (self.flask && self.flask_uses(definition, module))
+            || (self.sphinx && self.sphinx_uses(definition, module))
+    }
+
+    /// Check whether Sphinx reads or calls a definition of its configuration file by itself.
+    fn sphinx_uses(&self, definition: &Definition, module: usize) -> bool {
+        let name = definition.name.as_str();
+        self.sphinx_configs.contains(&module)
+            && is_top_level(definition)
+            && ((definition.kind == Kind::Variable && !name.starts_with('_'))
+                || (definition.kind == Kind::Function && SPHINX_FUNCTIONS.contains(&name)))
     }
 
     /// Check whether pytest finds and calls a definition by itself.
@@ -707,6 +748,22 @@ fn file_name(path: &Path) -> &str {
     path.file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default()
+}
+
+/// Check whether a definition is at the top level of its module, in no class or function.
+fn is_top_level(definition: &Definition) -> bool {
+    definition.owner.is_none() && definition.function.is_none()
+}
+
+/// Check whether a file is the configuration file of Sphinx: a `conf.py` that sets one of Sphinx's
+/// marker settings at the top level.
+fn is_sphinx_config(path: &Path, definitions: &[Definition]) -> bool {
+    file_name(path) == SPHINX_CONF
+        && definitions.iter().any(|definition| {
+            definition.kind == Kind::Variable
+                && is_top_level(definition)
+                && SPHINX_MARKERS.contains(&definition.name.as_str())
+        })
 }
 
 /// Check whether pytest collects the tests of a file.

@@ -64,6 +64,8 @@ pub(crate) struct Options {
     pub entry_points: Vec<String>,
     /// Whether the rules of each framework apply, over the defaults.
     pub frameworks: FxHashMap<Framework, bool>,
+    /// The configuration files of Sphinx, or None to find them by their contents.
+    pub sphinx_configuration: Option<Vec<PathBuf>>,
 }
 
 /// What the code of an owner uses.
@@ -197,7 +199,17 @@ pub(crate) fn find_unused(options: &Options) -> Vec<Finding> {
             )
         })
         .collect();
-    let rules = FrameworkRules::new(&enabled, &file_definitions, &module_names, &hierarchy);
+    let sphinx_configuration: Option<FxHashSet<PathBuf>> = options
+        .sphinx_configuration
+        .as_ref()
+        .map(|files| files.iter().map(|file| resolve(file)).collect());
+    let rules = FrameworkRules::new(
+        &enabled,
+        &file_definitions,
+        &module_names,
+        &hierarchy,
+        sphinx_configuration.as_ref(),
+    );
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
 
     let mut graph = Graph::new(&project, &uses, &fields, enums);
