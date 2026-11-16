@@ -1,13 +1,13 @@
 name: Setup Python
-description: Install Python, uv and dependencies, which builds unref.
+description: Install Python, uv and dependencies, which builds unref unless asked not to.
 
 inputs:
   python-version:
     description: Python version to install.
     default: "3.14"
-  resolution:
-    description: uv resolution strategy (e.g. lowest-direct). Empty installs the locked versions.
-    default: ""
+  install-project:
+    description: Whether to build and install unref. Jobs that only check the Python code do not need it.
+    default: "true"
 
 runs:
   using: "composite"
@@ -20,29 +20,22 @@ runs:
 
     # The Rust toolchain of the runner builds unref, whose build is cached.
     - name: Rust cache
+      if: inputs.install-project == 'true'
       uses: Swatinem/rust-cache@v2.9.3
 
     - name: Install Python dependencies
       shell: bash
       env:
-        RESOLUTION: ${{ inputs.resolution }}
+        INSTALL_PROJECT: ${{ inputs.install-project }}
       run: |
-          if [ -n "$RESOLUTION" ]; then
-            uv sync --resolution "$RESOLUTION"
-          else
+          if [ "$INSTALL_PROJECT" = "true" ]; then
             uv sync --frozen
+          else
+            uv sync --frozen --no-install-project
           fi
 
     # Put the project virtual environment on PATH for subsequent steps, so tools can be
-    # invoked directly (e.g. `pytest`). Uses $GITHUB_PATH, which is applied
-    # regardless of the step's shell and works on all runners.
+    # invoked directly (e.g. `pytest`).
     - name: Activate Python venv
       shell: bash
-      run: |
-        if [ -d .venv/Scripts ]; then
-          # Windows layout ('.venv/Scripts'); '$(pwd -W)' yields a Windows-style path.
-          echo "$(pwd -W)/.venv/Scripts" >> "$GITHUB_PATH"
-        else
-          # Unix layout ('.venv/bin').
-          echo "$(pwd)/.venv/bin" >> "$GITHUB_PATH"
-        fi
+      run: echo "$(pwd)/.venv/bin" >> "$GITHUB_PATH"

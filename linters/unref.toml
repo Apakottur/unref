@@ -3,7 +3,6 @@
 
 # The test cases are small projects that are unused on purpose.
 exclude = ["tests/cases"]
-used-decorators = ["app.command"]
 
 [[overrides]]
 paths = ["tests"]
