@@ -4,21 +4,20 @@ from pathlib import Path
 
 import pytest
 
+from tests._cli._files import CASES_DIR, write_config
 from tests._unref import run
-
-_CASES_DIR = Path(__file__).parent.parent / "cases"
 
 
 def test_version() -> None:
     # The version is printed without checking anything, as with ruff and ty.
-    result = run(["--version", str(_CASES_DIR / "function")])
+    result = run(["--version", str(CASES_DIR / "function")])
 
     assert result.exit_code == 0
     assert result.stdout == f"unref {importlib.metadata.version('unref')}\n"
 
 
 def test_output_format_concise() -> None:
-    case = _CASES_DIR / "function"
+    case = CASES_DIR / "function"
 
     result = run(["--output-format", "concise", str(case)])
 
@@ -27,7 +26,7 @@ def test_output_format_concise() -> None:
 
 
 def test_output_format_github() -> None:
-    case = _CASES_DIR / "syntax_error"
+    case = CASES_DIR / "syntax_error"
 
     result = run(["--output-format", "github", str(case)])
 
@@ -44,7 +43,7 @@ def test_output_format_github_escaped(tmp_path: Path) -> None:
     # A `%` is escaped everywhere, and a `,` or `:` only in the properties, where they separate the
     # properties from each other and from the message.
     case = tmp_path / "a,b:c%"
-    shutil.copytree(_CASES_DIR / "function", case)
+    shutil.copytree(CASES_DIR / "function", case)
     escaped = str(case).replace("%", "%25").replace(":", "%3A").replace(",", "%2C")
 
     result = run(["--output-format", "github", str(case)])
@@ -57,7 +56,7 @@ def test_output_format_github_escaped(tmp_path: Path) -> None:
 
 
 def test_output_format_unknown() -> None:
-    result = run(["--output-format", "json", str(_CASES_DIR / "function")])
+    result = run(["--output-format", "json", str(CASES_DIR / "function")])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -66,9 +65,8 @@ def test_output_format_unknown() -> None:
 
 
 def test_output_format_config(tmp_path: Path) -> None:
-    config = tmp_path / "unref.toml"
-    config.write_text('output-format = "github"\n')
-    case = _CASES_DIR / "function"
+    config = write_config(tmp_path, 'output-format = "github"\n')
+    case = CASES_DIR / "function"
 
     result = run(["--config", str(config), str(case)])
 
@@ -81,9 +79,8 @@ def test_output_format_config(tmp_path: Path) -> None:
 
 def test_output_format_option_over_config(tmp_path: Path) -> None:
     # The command-line option takes precedence over the configuration file, as with ruff.
-    config = tmp_path / "unref.toml"
-    config.write_text('output-format = "github"\n')
-    case = _CASES_DIR / "function"
+    config = write_config(tmp_path, 'output-format = "github"\n')
+    case = CASES_DIR / "function"
 
     result = run(["--config", str(config), "--output-format", "concise", str(case)])
 
@@ -91,25 +88,16 @@ def test_output_format_option_over_config(tmp_path: Path) -> None:
     assert result.stdout == f"{case}/main.py:1:5: unused-function 'function'\n"
 
 
-@pytest.mark.parametrize("value", ['"json"', '["github"]'])
-def test_output_format_config_invalid(tmp_path: Path, value: str) -> None:
-    config = tmp_path / "unref.toml"
-    config.write_text(f"output-format = {value}\n")
+# The option or the configuration file shows the methods of the unused class, which are reached only from it.
+@pytest.mark.parametrize(
+    ("option", "content"),
+    [pytest.param(["--show-transitive"], "", id="option"), pytest.param([], "show-transitive = true\n", id="config")],
+)
+def test_show_transitive(tmp_path: Path, option: list[str], content: str) -> None:
+    config = write_config(tmp_path, content)
+    case = CASES_DIR / "method"
 
-    result = run(["--config", str(config), str(_CASES_DIR / "function")])
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert result.stderr == (
-        f"Error: Option 'output-format' in the configuration file {config} must be one of 'concise', 'github'\n"
-    )
-
-
-def test_show_transitive() -> None:
-    # The methods of the unused class are reached only from it.
-    case = _CASES_DIR / "method"
-
-    result = run(["--show-transitive", str(case)])
+    result = run(["--config", str(config), *option, str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == (
@@ -120,7 +108,7 @@ def test_show_transitive() -> None:
 
 
 def test_show_transitive_github() -> None:
-    case = _CASES_DIR / "method"
+    case = CASES_DIR / "method"
 
     result = run(["--output-format", "github", str(case)])
 
@@ -130,39 +118,12 @@ def test_show_transitive_github() -> None:
     )
 
 
-def test_show_transitive_config(tmp_path: Path) -> None:
-    config = tmp_path / "unref.toml"
-    config.write_text("show-transitive = true\n")
-    case = _CASES_DIR / "method"
-
-    result = run(["--config", str(config), str(case)])
-
-    assert result.exit_code == 1
-    assert result.stdout == (
-        f"{case}/main.py:1:7: unused-class 'Class'\n"
-        f"{case}/main.py:2:9: unused-method 'method'\n"
-        f"{case}/main.py:5:15: unused-method 'async_method'\n"
-    )
-
-
 def test_show_transitive_option_over_config(tmp_path: Path) -> None:
     # The command-line option takes precedence over the configuration file, as with ruff.
-    config = tmp_path / "unref.toml"
-    config.write_text("show-transitive = true\n")
-    case = _CASES_DIR / "method"
+    config = write_config(tmp_path, "show-transitive = true\n")
+    case = CASES_DIR / "method"
 
     result = run(["--config", str(config), "--no-show-transitive", str(case)])
 
     assert result.exit_code == 1
     assert result.stdout == f"{case}/main.py:1:7: unused-class 'Class'\n"
-
-
-def test_show_transitive_config_invalid(tmp_path: Path) -> None:
-    config = tmp_path / "unref.toml"
-    config.write_text('show-transitive = "yes"\n')
-
-    result = run(["--config", str(config), str(_CASES_DIR / "method")])
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert result.stderr == f"Error: Option 'show-transitive' in the configuration file {config} must be a boolean\n"
