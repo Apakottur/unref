@@ -74,7 +74,7 @@ Unused code piles up in every codebase, faster than ever now that AI tools write
 [Ruff](https://docs.astral.sh/ruff/) does not find unused code yet, see
 [astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` fills that gap until it does:
 
-- **Just works**: built-in rules for pytest, unittest, Pydantic, SQLAlchemy and FastAPI, so most projects need
+- **Just works**: built-in rules for pytest, unittest, Pydantic, SQLAlchemy, FastAPI and Flask, so most projects need
   little or no configuration.
 - **Accurate**: names are matched by module, so a used `parse` in one module does not hide an unused `parse`
   in another.

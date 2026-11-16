@@ -2,6 +2,7 @@ addoption
 addopts
 anyio
 Apakottur
+appcontext
 asname
 asyncio
 capsys
@@ -23,6 +24,7 @@ dunders
 dynload
 elif
 elts
+errorhandler
 fastapi
 feff
 fnmatch
