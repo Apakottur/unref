@@ -11,7 +11,7 @@ use crate::definitions::{Definition, Kind};
 use crate::discover::{discover, is_under};
 use crate::external::{ExternalModules, environment_paths, standard_library};
 use crate::files::{FileFacts, analyze_files};
-use crate::frameworks::FrameworkRules;
+use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::ignores::{apply_ignore_comments, ignored_codes};
 use crate::models::{Finding, Framework, Override, fnmatch};
 use crate::modules::{ModuleName, import_root, module_name, resolve};
@@ -188,8 +188,14 @@ pub(crate) fn find_unused(options: &Options) -> Vec<Finding> {
     let uses = find_uses(&project, &classes);
 
     let module_names: Vec<String> = project.names.iter().map(|name| name.name.clone()).collect();
-    let file_definitions: Vec<(&Path, &[Definition])> = (0..project.files.len())
-        .map(|index| (&*project.files[index], project.file_definitions(index)))
+    let file_definitions: Vec<ProjectFile> = (0..project.files.len())
+        .map(|index| {
+            (
+                &*project.files[index],
+                project.file_definitions(index),
+                &project.facts[index].references.local_calls,
+            )
+        })
         .collect();
     let rules = FrameworkRules::new(&enabled, &file_definitions, &module_names, &hierarchy);
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);

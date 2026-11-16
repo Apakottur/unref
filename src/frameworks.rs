@@ -21,11 +21,12 @@
 //!   call of a construct such as `mapped_column`, `Column` or `relationship`. SQLAlchemy calls the
 //!   functions that `event.listens_for`, `validates`, `reconstructor` and `declared_attr` register.
 //! - FastAPI calls the functions that the decorators of an application or a router register, such as
-//!   `app.get` or `router.websocket`: of a variable at the top level of a module that is set to
-//!   `FastAPI()` or `APIRouter()`, or to an instance of a subclass of them.
+//!   `app.get` or `router.websocket`: of a variable that is set to `FastAPI()` or `APIRouter()`, or to
+//!   an instance of a subclass of them, at the top level of a module, or in the function that the
+//!   decorated function is defined in.
 //! - Flask calls the functions that the decorators of an application or a blueprint register, such as
-//!   `app.route` or `bp.errorhandler`, of a variable that is set the same way to `Flask()` or
-//!   `Blueprint()`. It calls the methods of a `MethodView` named after HTTP methods, and the
+//!   `app.route` or `bp.errorhandler`, of a variable at the top level of a module that is set to
+//!   `Flask()` or `Blueprint()`, or to an instance of a subclass of them. It calls the methods of a `MethodView` named after HTTP methods, and the
 //!   `dispatch_request` method of a `View`.
 //!
 //! pytest and unittest find the methods of a test class through its base classes as well, so a base
@@ -38,6 +39,7 @@ use rustc_hash::FxHashSet;
 use crate::classes::ClassHierarchy;
 use crate::definitions::{Definition, Kind};
 use crate::models::{Framework, fnmatch};
+use crate::references::LocalCalls;
 
 const PYTEST_FILES: [&str; 2] = ["test_*.py", "*_test.py"];
 const PYTEST_CONFTEST: &str = "conftest.py";
@@ -258,17 +260,31 @@ pub(crate) struct FrameworkRules<'a> {
     /// The declarative models of SQLAlchemy, and the classes that they inherit from, such as mixins,
     /// by their dotted names.
     mapped_classes: FxHashSet<String>,
-    /// The applications and routers of FastAPI, by their dotted names.
-    fastapi_routers: FxHashSet<String>,
-    /// The applications and blueprints of Flask, by their dotted names.
-    flask_apps: FxHashSet<String>,
+    /// The applications and routers of FastAPI.
+    fastapi_routers: Instances,
+    /// The applications and blueprints of Flask.
+    flask_apps: Instances,
 }
+
+/// The instances of some classes, such as the applications of a web framework.
+#[derive(Default)]
+struct Instances {
+    /// The variables at the top level of a module, by their dotted names.
+    variables: FxHashSet<String>,
+    /// The local variables of functions, each by its module, the line of the name of its function,
+    /// and its name.
+    locals: FxHashSet<(usize, u32, String)>,
+}
+
+/// A file of a project, with its definitions and the local variables that its functions assign the
+/// result of a call to.
+pub(crate) type ProjectFile<'a> = (&'a Path, &'a [Definition], &'a LocalCalls);
 
 impl<'a> FrameworkRules<'a> {
     /// Make the rules of the given frameworks, for the files of a project, each with its definitions.
     pub(crate) fn new(
         frameworks: &FxHashSet<Framework>,
-        files: &[(&Path, &[Definition])],
+        files: &[ProjectFile],
         module_names: &'a [String],
         hierarchy: &'a ClassHierarchy,
     ) -> Self {
@@ -284,15 +300,18 @@ impl<'a> FrameworkRules<'a> {
             pytest_bases: FxHashSet::default(),
             unittest_bases: FxHashSet::default(),
             mapped_classes: FxHashSet::default(),
-            fastapi_routers: FxHashSet::default(),
-            flask_apps: FxHashSet::default(),
+            fastapi_routers: Instances::default(),
+            flask_apps: Instances::default(),
         };
+        if rules.fastapi {
+            rules.fastapi_routers.locals = local_instances(files, hierarchy, &FASTAPI_ROUTERS);
+        }
 
         // The classes of the project, and the base classes that it makes with SQLAlchemy's function or
         // decorator, by their dotted names.
         let mut classes: Vec<(usize, String)> = Vec::new();
         let mut made: FxHashSet<String> = FxHashSet::default();
-        for (module, (path, definitions)) in files.iter().enumerate() {
+        for (module, (path, definitions, _)) in files.iter().enumerate() {
             for definition in *definitions {
                 let name = definition.qualified_name();
                 if definition.kind == Kind::Class {
@@ -324,11 +343,11 @@ impl<'a> FrameworkRules<'a> {
                     }
                     if rules.fastapi && has_any(&called, &FASTAPI_ROUTERS) {
                         let router = rules.dotted_name(module, &name);
-                        rules.fastapi_routers.insert(router);
+                        rules.fastapi_routers.variables.insert(router);
                     }
                     if rules.flask && has_any(&called, &FLASK_APPS) {
                         let app = rules.dotted_name(module, &name);
-                        rules.flask_apps.insert(app);
+                        rules.flask_apps.variables.insert(app);
                     }
                 }
             }
@@ -507,7 +526,7 @@ impl<'a> FrameworkRules<'a> {
         &self,
         definition: &Definition,
         module: usize,
-        instances: &FxHashSet<String>,
+        instances: &Instances,
         methods: &[&str],
     ) -> bool {
         if !definition.kind.is_function() {
@@ -517,11 +536,20 @@ impl<'a> FrameworkRules<'a> {
             for name in self.hierarchy.resolve(module, decorator).iter() {
                 let (instance, method) = name.rsplit_once('.').unwrap_or(("", name));
                 // An instance of the module itself is left as it is written, and is named by its
-                // module.
+                // module, or is a local variable of the function that the definition is in.
                 if methods.contains(&method)
-                    && (instances.contains(instance)
+                    && (instances.variables.contains(instance)
                         || (name == decorator
-                            && instances.contains(&self.dotted_name(module, instance))))
+                            && (instances
+                                .variables
+                                .contains(&self.dotted_name(module, instance))
+                                || definition.function.is_some_and(|function| {
+                                    instances.locals.contains(&(
+                                        module,
+                                        function,
+                                        instance.to_string(),
+                                    ))
+                                }))))
                 {
                     return true;
                 }
@@ -581,6 +609,27 @@ impl<'a> FrameworkRules<'a> {
     fn dotted_name(&self, module: usize, name: &str) -> String {
         format!("{}.{name}", self.module_names[module])
     }
+}
+
+/// Find the local variables of the functions of a project that are set to an instance of one of the
+/// given classes, or of a subclass of one of them, given by their dotted names.
+fn local_instances(
+    files: &[ProjectFile],
+    hierarchy: &ClassHierarchy,
+    classes: &[&str],
+) -> FxHashSet<(usize, u32, String)> {
+    let mut instances = FxHashSet::default();
+    for (module, (_, _, calls)) in files.iter().enumerate() {
+        for ((function, name), called) in *calls {
+            if called
+                .iter()
+                .any(|call| has_any(&hierarchy.resolve(module, call), classes))
+            {
+                instances.insert((module, *function, name.clone()));
+            }
+        }
+    }
+    instances
 }
 
 /// The name of a file, without its directory.
