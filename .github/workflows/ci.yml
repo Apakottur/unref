@@ -43,24 +43,20 @@ jobs:
         run: uv run --group docs zensical build --strict
 
   type-check:
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
-
-    name: Type Checks - Python ${{ matrix.python-version }}
+    name: Type Checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - uses: ./.github/workflows/util/setup_python
         with:
-          python-version: ${{ matrix.python-version }}
+          install-project: "false"
 
       - name: Run mypy
         run: mypy --config-file linters/mypy.toml .
 
       - name: Run ty
-        run: ty check --project . --config-file linters/ty.toml --python-version ${{ matrix.python-version }}
+        run: ty check --project . --config-file linters/ty.toml
 
   unit-tests:
     name: Unit Tests
