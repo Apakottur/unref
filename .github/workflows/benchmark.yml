@@ -20,13 +20,24 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      # A pull request is checked out as its merge into the current main, which is the merge's first parent. The
+      # base SHA of the event can be an older main, whose later commits would count as changes of the PR.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
 
       - name: Checkout the base
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.base.sha || 'main' }}
-          path: base
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            base=HEAD^1
+          else
+            git fetch --depth=1 origin main
+            base=FETCH_HEAD
+          fi
+          git worktree add --detach base "$base"
+          git -C base log -1 --format='Base: %h %s'
 
       - uses: ./.github/workflows/util/setup_python
         with:
