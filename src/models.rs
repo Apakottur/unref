@@ -45,18 +45,60 @@ impl Framework {
     }
 }
 
-/// The codes of the findings, which an ignore comment can name.
-pub(crate) const CODES: [&str; 9] = [
-    "unused-function",
-    "unused-class",
-    "unused-method",
-    "unused-variable",
-    "unused-attribute",
-    "unused-ignore-comment",
-    "invalid-ignore-comment",
-    "ignore-comment-unknown-rule",
-    "invalid-syntax",
-];
+/// The rule of a finding, by its code, which an ignore comment can name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Rule {
+    UnusedFunction,
+    UnusedClass,
+    UnusedMethod,
+    UnusedVariable,
+    UnusedAttribute,
+    UnusedIgnoreComment,
+    InvalidIgnoreComment,
+    UnknownCode,
+    InvalidSyntax,
+}
+
+impl Rule {
+    /// Every rule.
+    pub(crate) const ALL: [Rule; 9] = [
+        Rule::UnusedFunction,
+        Rule::UnusedClass,
+        Rule::UnusedMethod,
+        Rule::UnusedVariable,
+        Rule::UnusedAttribute,
+        Rule::UnusedIgnoreComment,
+        Rule::InvalidIgnoreComment,
+        Rule::UnknownCode,
+        Rule::InvalidSyntax,
+    ];
+
+    /// The code of the rule, such as `unused-function`.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Rule::UnusedFunction => "unused-function",
+            Rule::UnusedClass => "unused-class",
+            Rule::UnusedMethod => "unused-method",
+            Rule::UnusedVariable => "unused-variable",
+            Rule::UnusedAttribute => "unused-attribute",
+            Rule::UnusedIgnoreComment => "unused-ignore-comment",
+            Rule::InvalidIgnoreComment => "invalid-ignore-comment",
+            Rule::UnknownCode => "ignore-comment-unknown-rule",
+            Rule::InvalidSyntax => "invalid-syntax",
+        }
+    }
+
+    /// Whether a code that an ignore comment names is the code of a rule.
+    pub(crate) fn is_known(code: &str) -> bool {
+        Rule::ALL.into_iter().any(|rule| rule.name() == code)
+    }
+}
+
+impl fmt::Display for Rule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
 
 /// An unused definition, a problem with an ignore comment, or a file that does not parse.
 ///
@@ -69,8 +111,8 @@ pub(crate) struct Finding {
     pub line: u32,
     /// The column of the finding, starting at 1, as ruff and ty count it.
     pub column: u32,
-    /// The code of the rule, such as `unused-function`.
-    pub code: String,
+    /// The rule of the finding, shown by its code, such as `unused-function`.
+    pub code: Rule,
     /// The name of the unused definition, or what is wrong.
     pub name: String,
     /// Whether the unused definition is reached only from other unused definitions, which are

@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use ruff_python_ast::{Decorator, Expr};
 
+use crate::models::Rule;
+
 /// What is defined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Kind {
@@ -16,14 +18,14 @@ pub(crate) enum Kind {
 }
 
 impl Kind {
-    /// The code of the finding of a definition of this kind that is unused, such as `unused-function`.
-    pub(crate) fn code(self) -> &'static str {
+    /// The rule of the finding of a definition of this kind that is unused, such as `unused-function`.
+    pub(crate) fn code(self) -> Rule {
         match self {
-            Kind::Function => "unused-function",
-            Kind::Class => "unused-class",
-            Kind::Method => "unused-method",
-            Kind::Variable => "unused-variable",
-            Kind::Attribute => "unused-attribute",
+            Kind::Function => Rule::UnusedFunction,
+            Kind::Class => Rule::UnusedClass,
+            Kind::Method => Rule::UnusedMethod,
+            Kind::Variable => Rule::UnusedVariable,
+            Kind::Attribute => Rule::UnusedAttribute,
         }
     }
 

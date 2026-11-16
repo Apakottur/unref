@@ -8,7 +8,7 @@ use ruff_python_ast::token::{TokenKind, Tokens};
 use ruff_text_size::Ranged;
 use rustc_hash::FxHashSet;
 
-use crate::models::{CODES, Finding};
+use crate::models::{Finding, Rule};
 use crate::positions::{SourcePositions, to_u32};
 
 const MARKER: &str = "unref:";
@@ -17,9 +17,6 @@ const MARKER: &str = "unref:";
 static START: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"#\s*unref:\s*ignore").expect("valid pattern"));
 
-const UNUSED_IGNORE_COMMENT: &str = "unused-ignore-comment";
-const INVALID_IGNORE_COMMENT: &str = "invalid-ignore-comment";
-const UNKNOWN_CODE: &str = "ignore-comment-unknown-rule";
 const NO_CODES: &str = "expected the codes to ignore, in brackets";
 
 /// A code that an ignore comment names.
@@ -94,7 +91,7 @@ pub(crate) fn find_ignore_comments(
                     path: path.to_path_buf(),
                     line,
                     column: start + to_u32(error.offset) + 1,
-                    code: INVALID_IGNORE_COMMENT.to_string(),
+                    code: Rule::InvalidIgnoreComment,
                     name: error.message.to_string(),
                     transitive: false,
                 }),
@@ -109,12 +106,12 @@ pub(crate) fn find_ignore_comments(
                     findings.extend(
                         ignored
                             .iter()
-                            .filter(|code| !CODES.contains(&code.code.as_str()))
+                            .filter(|code| !Rule::is_known(&code.code))
                             .map(|code| Finding {
                                 path: path.to_path_buf(),
                                 line,
                                 column: code.column,
-                                code: UNKNOWN_CODE.to_string(),
+                                code: Rule::UnknownCode,
                                 name: code.code.clone(),
                                 transitive: false,
                             }),
@@ -269,7 +266,7 @@ pub(crate) fn apply_ignore_comments(
     }
     let mut left: Vec<Finding> = findings
         .iter()
-        .filter(|finding| !ignore(finding.line, &finding.code, &mut used))
+        .filter(|finding| !ignore(finding.line, finding.code.name(), &mut used))
         .cloned()
         .collect();
 
@@ -286,19 +283,25 @@ pub(crate) fn apply_ignore_comments(
     let candidates: Vec<(usize, usize)> = codes()
         .filter(|&(comment, index, code)| {
             !used.contains(&(comment, index))
-                && CODES.contains(&code)
-                && code != UNUSED_IGNORE_COMMENT
+                && Rule::is_known(code)
+                && code != Rule::UnusedIgnoreComment.name()
         })
         .map(|(comment, index, _)| (comment, index))
         .collect();
     let mut unused: Vec<(usize, usize)> = candidates
         .into_iter()
-        .filter(|&(comment, _)| !ignore(comments[comment].line, UNUSED_IGNORE_COMMENT, &mut used))
+        .filter(|&(comment, _)| {
+            !ignore(
+                comments[comment].line,
+                Rule::UnusedIgnoreComment.name(),
+                &mut used,
+            )
+        })
         .collect();
     unused.extend(
         codes()
             .filter(|&(comment, index, code)| {
-                !used.contains(&(comment, index)) && code == UNUSED_IGNORE_COMMENT
+                !used.contains(&(comment, index)) && code == Rule::UnusedIgnoreComment.name()
             })
             .map(|(comment, index, _)| (comment, index)),
     );
@@ -316,7 +319,7 @@ pub(crate) fn apply_ignore_comments(
                 path: path.to_path_buf(),
                 line: comment.line,
                 column: comment.column,
-                code: UNUSED_IGNORE_COMMENT.to_string(),
+                code: Rule::UnusedIgnoreComment,
                 name: comment.text.clone(),
                 transitive: false,
             });
@@ -325,7 +328,7 @@ pub(crate) fn apply_ignore_comments(
                 path: path.to_path_buf(),
                 line: comment.line,
                 column: comment.codes[index].column,
-                code: UNUSED_IGNORE_COMMENT.to_string(),
+                code: Rule::UnusedIgnoreComment,
                 name: comment.codes[index].code.clone(),
                 transitive: false,
             }));
