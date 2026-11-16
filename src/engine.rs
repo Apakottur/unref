@@ -73,6 +73,8 @@ struct Uses {
     objects: FxHashSet<(usize, Vec<String>)>,
     /// The modules that the code star imports.
     stars: FxHashSet<usize>,
+    /// The functions and classes that are local variables of a function, that the code reads.
+    definitions: FxHashSet<DefinitionId>,
 }
 
 /// The modules of the project, by the index of their file.
@@ -312,6 +314,12 @@ fn find_uses(project: &Project) -> FxHashMap<(usize, Owner), Uses> {
                 .or_default()
                 .keys
                 .insert(name.clone());
+        }
+        for (owner, index) in &references.local_reads {
+            uses.entry((file, *owner))
+                .or_default()
+                .definitions
+                .insert(project.first_definition[file] + index);
         }
     }
     uses
@@ -757,10 +765,14 @@ impl<'a> Graph<'a> {
             .zip(&project.definitions)
             .enumerate()
         {
-            by_name
-                .entry((*file, definition.name.clone()))
-                .or_default()
-                .push(id);
+            // A function or class that is a local variable of a function is read by its definition.
+            let local = &project.facts[*file].references.local_definitions;
+            if !local.contains(&(id - project.first_definition[*file])) {
+                by_name
+                    .entry((*file, definition.name.clone()))
+                    .or_default()
+                    .push(id);
+            }
             // A field of a TypedDict is read as a key, and only a method or another attribute is read
             // as an attribute of an object.
             if fields.contains(&id) {
@@ -849,6 +861,7 @@ impl<'a> Graph<'a> {
                     found.extend(self.public.get(star).into_iter().flatten());
                 }
             }
+            found.extend(&uses.definitions);
             self.add(found);
         }
         self.used.clone()
@@ -883,6 +896,7 @@ impl<'a> Graph<'a> {
         for star in &uses.stars {
             reached.extend(self.public.get(star).into_iter().flatten());
         }
+        reached.extend(&uses.definitions);
         reached
     }
 
