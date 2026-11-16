@@ -1,5 +1,5 @@
-# Attributes are matched by name only, so a read of one attribute keeps every method and attribute of
-# that name alive.
+# An attribute read from an object whose class is not known is matched by name only, so it keeps
+# every method and attribute of that name alive.
 class First:
     def method(self):
         return 1
@@ -10,5 +10,9 @@ class Second:
         return 2
 
 
-First().method()
+def call(value):
+    return value.method()
+
+
+call(First())
 Second()

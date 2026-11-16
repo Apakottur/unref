@@ -38,6 +38,8 @@ pub(crate) struct Read {
     pub attributes: Vec<String>,
     /// Whether it reads the object, which a type hint of a parameter does not.
     pub reads_object: bool,
+    /// The attribute read from the result of calling the chain, such as `name` in `Class().name`.
+    pub called: Option<String>,
 }
 
 /// A read of an imported name, or of a chain of attributes that starts with one.
@@ -47,6 +49,18 @@ pub(crate) struct ImportedRead {
     pub binding: Binding,
     pub attributes: Vec<String>,
     pub reads_object: bool,
+    pub called: Option<String>,
+}
+
+/// The object that a member is read from, when the class that it is in is plain.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Receiver {
+    /// The first parameter of a method of the class, as `self.name` or `cls.name`, by the name of the
+    /// class in the module.
+    Own(String),
+    /// `super()` in a method of the class, or `super(Class, self)`, by the name of the class in the
+    /// module.
+    Super(String),
 }
 
 /// A name that is imported from another module (`from module import name`).
@@ -79,6 +93,9 @@ pub(crate) struct References {
     /// The names that are read as an attribute of something other than a name, such as a call
     /// (`call().name`) or a local variable, and those that a class pattern matches by keyword.
     pub attributes: FxHashSet<(Owner, String)>,
+    /// The names that are read as a member of the class of a method, through its first parameter or
+    /// `super()`.
+    pub members: FxHashSet<(Owner, Receiver, String)>,
     /// The string keys that are read from a mapping: `value["name"]`, `value.get("name")`,
     /// `"name" in value`, or a mapping pattern (`case {"name": ...}`).
     pub keys: FxHashSet<(Owner, String)>,
@@ -295,7 +312,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
         match expr {
             Expr::Name(name) => {
                 if name.ctx == ExprContext::Load {
-                    self.add_read(name.id.as_str(), Vec::new());
+                    self.add_read(name.id.as_str(), Vec::new(), None);
                 } else {
                     self.bind(name.id.as_str());
                 }
@@ -305,15 +322,28 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                     self.visit_expr(&attribute.value);
                     return;
                 }
-                let (base, attributes) = attribute_chain(attribute);
-                if let Expr::Name(name) = base {
+                let (base, mut attributes) = attribute_chain(attribute);
+                match base {
                     // Whether the chain starts with an imported name is known when the scope ends.
-                    self.add_read(name.id.as_str(), attributes);
-                } else {
-                    for attribute in attributes {
-                        self.references.attributes.insert((self.owner, attribute));
+                    Expr::Name(name) => self.add_read(name.id.as_str(), attributes, None),
+                    Expr::Call(call) => {
+                        let first = attributes.remove(0);
+                        self.add_attributes(attributes);
+                        if let Some(class) = self.super_class(call) {
+                            self.references.members.insert((
+                                self.owner,
+                                Receiver::Super(class),
+                                first,
+                            ));
+                            walk_expr(self, base);
+                        } else {
+                            self.visit_call(call, Some(first));
+                        }
                     }
-                    self.visit_expr(base);
+                    _ => {
+                        self.add_attributes(attributes);
+                        self.visit_expr(base);
+                    }
                 }
             }
             Expr::Subscript(subscript) => {
@@ -323,16 +353,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 }
                 walk_expr(self, expr);
             }
-            Expr::Call(call) => {
-                // A read of a string key by a method of a mapping (`value.get("name")`).
-                if let Expr::Attribute(func) = &*call.func
-                    && KEY_METHODS.contains(&func.attr.as_str())
-                    && let Some(first) = call.arguments.args.first()
-                {
-                    self.add_key(first);
-                }
-                walk_expr(self, expr);
-            }
+            Expr::Call(call) => self.visit_call(call, None),
             Expr::Compare(compare) => {
                 // A read of a string key by a membership test (`"name" in value`).
                 let operands = compare.operands.iter();
@@ -406,11 +427,8 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             }
             Pattern::MatchClass(class) => {
                 // A read of each attribute that a class pattern matches by keyword (`Class(name=pattern)`).
-                for keyword in &class.arguments.keywords {
-                    self.references
-                        .attributes
-                        .insert((self.owner, keyword.attr.to_string()));
-                }
+                let names = class.arguments.keywords.iter();
+                self.add_attributes(names.map(|keyword| keyword.attr.to_string()));
             }
             _ => {}
         }
@@ -437,7 +455,9 @@ impl<'a> Walker<'_, '_> {
     /// reference to the attributes, methods and classes of that name in the class, and to nothing else.
     /// Python reads a name of a class body that is not bound yet from the code around the class, so
     /// that read is passed on.
-    fn add_read(&mut self, root: &str, attributes: Vec<String>) {
+    ///
+    /// `called` is the attribute read from the result of calling the chain, as in `Class().name`.
+    fn add_read(&mut self, root: &str, attributes: Vec<String>, called: Option<String>) {
         let scope = &self.scopes[self.scope];
         if scope.kind == ScopeKind::Class
             && scope.bound.contains(root)
@@ -449,9 +469,7 @@ impl<'a> Walker<'_, '_> {
                 .map(|&index| (self.owner, index))
                 .collect::<Vec<_>>();
             self.references.local_reads.extend(reads);
-            for attribute in attributes {
-                self.references.attributes.insert((self.owner, attribute));
-            }
+            self.add_attributes(attributes.into_iter().chain(called));
             return;
         }
         let read = Read {
@@ -459,9 +477,69 @@ impl<'a> Walker<'_, '_> {
             root: root.to_string(),
             attributes,
             reads_object: !self.in_signature,
+            called,
         };
         let scope = self.scope;
         self.scopes[scope].reads.insert(read);
+    }
+
+    /// Add the names that are read as attributes of an object whose class is not known.
+    fn add_attributes(&mut self, names: impl IntoIterator<Item = String>) {
+        let owner = self.owner;
+        self.references
+            .attributes
+            .extend(names.into_iter().map(|name| (owner, name)));
+    }
+
+    /// Add what a call refers to.
+    ///
+    /// `called` is the attribute read from its result, as in `Class().name`. It is read from the
+    /// class when what is called is a name, or a chain of attributes that starts with one.
+    fn visit_call(&mut self, call: &'a ast::ExprCall, called: Option<String>) {
+        // A read of a string key by a method of a mapping (`value.get("name")`).
+        if let Expr::Attribute(func) = &*call.func
+            && KEY_METHODS.contains(&func.attr.as_str())
+            && let Some(first) = call.arguments.args.first()
+        {
+            self.add_key(first);
+        }
+        let (base, attributes) = match &*call.func {
+            Expr::Attribute(func) => attribute_chain(func),
+            func => (func, Vec::new()),
+        };
+        if let Expr::Name(name) = base {
+            self.add_read(name.id.as_str(), attributes, called);
+        } else {
+            self.add_attributes(called);
+            self.visit_expr(&call.func);
+        }
+        self.visit_arguments(&call.arguments);
+    }
+
+    /// Get the class whose base classes a call of `super` reads from: `super()` in a method, or
+    /// `super(Class, self)` in a method of `Class`.
+    fn super_class(&self, call: &ast::ExprCall) -> Option<String> {
+        let Expr::Name(func) = &*call.func else {
+            return None;
+        };
+        let scope = &self.scopes[self.scope];
+        let class = scope.class_name.as_ref()?;
+        if func.id.as_str() != "super"
+            || scope.instance.is_none()
+            || scope.kind != ScopeKind::Function
+        {
+            return None;
+        }
+        let arguments = &call.arguments;
+        let plain = match (arguments.args.as_ref(), arguments.keywords.is_empty()) {
+            ([], true) => true,
+            ([Expr::Name(first), Expr::Name(second)], true) => {
+                class.rsplit('.').next() == Some(first.id.as_str())
+                    && scope.instance.as_deref() == Some(second.id.as_str())
+            }
+            _ => false,
+        };
+        plain.then(|| class.clone())
     }
 
     /// Add what a comprehension refers to.
@@ -614,17 +692,16 @@ impl<'a> Walker<'_, '_> {
         } else {
             None
         };
-        let bases = class
+        let written_bases = class
             .arguments
             .as_deref()
-            .map(|arguments| {
-                arguments
-                    .args
-                    .iter()
-                    .filter_map(|base| dotted_name(base, Unwrap::Subscript))
-                    .collect()
-            })
+            .map(|arguments| &*arguments.args)
             .unwrap_or_default();
+        let bases: Vec<String> = written_bases
+            .iter()
+            .filter_map(|base| dotted_name(base, Unwrap::Subscript))
+            .collect();
+        let other_bases = bases.len() < written_bases.len();
         let definition = Definition {
             path: self.path.clone(),
             line,
@@ -635,6 +712,7 @@ impl<'a> Walker<'_, '_> {
             owner,
             function: self.owner,
             bases,
+            other_bases,
             unpacked: false,
             annotation: None,
             call: None,
@@ -751,6 +829,7 @@ impl<'a> Walker<'_, '_> {
                     root: name,
                     attributes: Vec::new(),
                     reads_object: true,
+                    called: None,
                 });
             }
         }
@@ -778,11 +857,16 @@ impl<'a> Walker<'_, '_> {
         if enclosing.kind == ScopeKind::Class {
             kind = Kind::Method;
             let parameters = &function.parameters;
+            // The first parameter of a static method is not the instance or the class.
+            let is_static = function.decorator_list.iter().any(|decorator| {
+                matches!(&decorator.expression, Expr::Name(name) if name.id.as_str() == "staticmethod")
+            });
             scope.instance = parameters
                 .posonlyargs
                 .iter()
                 .chain(parameters.args.iter())
                 .next()
+                .filter(|_| !is_static)
                 .map(|parameter| parameter.parameter.name.to_string());
             scope.defined_in = enclosing.defined_in;
             scope.class_name.clone_from(&enclosing.class_name);
@@ -799,6 +883,7 @@ impl<'a> Walker<'_, '_> {
             owner,
             function: self.owner,
             bases: Vec::new(),
+            other_bases: false,
             unpacked: false,
             annotation: None,
             call: None,
@@ -879,6 +964,7 @@ impl<'a> Walker<'_, '_> {
             owner: class_name,
             function: self.owner,
             bases: Vec::new(),
+            other_bases: false,
             unpacked,
             annotation: annotation.cloned(),
             call: call.cloned(),
@@ -961,6 +1047,12 @@ impl<'a> Walker<'_, '_> {
         self.references
             .local_definitions
             .extend(defined.values().flatten().copied());
+        let scope = &self.scopes[inner];
+        let own_class = scope
+            .instance
+            .clone()
+            .filter(|instance| !scope.bound.contains(instance))
+            .zip(scope.class_name.clone());
         let mut passed = Vec::new();
         for read in reads {
             if let Some(binding) = self.scopes[inner].imports.get(&read.root) {
@@ -972,6 +1064,7 @@ impl<'a> Walker<'_, '_> {
                         root: read.root.clone(),
                         attributes: Vec::new(),
                         reads_object: false,
+                        called: None,
                     });
                 }
                 self.references.imported_reads.insert(ImportedRead {
@@ -979,14 +1072,30 @@ impl<'a> Walker<'_, '_> {
                     binding: binding.clone(),
                     attributes: read.attributes,
                     reads_object: read.reads_object,
+                    called: read.called,
                 });
             } else if local_names.contains(&read.root) {
                 for &index in defined.get(&read.root).into_iter().flatten() {
                     self.references.local_reads.insert((read.owner, index));
                 }
-                for attribute in read.attributes {
-                    self.references.attributes.insert((read.owner, attribute));
+                let mut attributes = read.attributes.into_iter();
+                // The first parameter of a method, unless it is assigned, is the instance or the
+                // class.
+                if let Some(class) = own_class
+                    .as_ref()
+                    .filter(|(instance, _)| *instance == read.root)
+                    .map(|(_, class)| class)
+                    && let Some(first) = attributes.next()
+                {
+                    let receiver = Receiver::Own(class.clone());
+                    self.references
+                        .members
+                        .insert((read.owner, receiver, first));
                 }
+                let names = attributes.chain(read.called);
+                self.references
+                    .attributes
+                    .extend(names.map(|name| (read.owner, name)));
             } else {
                 passed.push(read);
             }

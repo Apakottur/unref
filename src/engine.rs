@@ -6,7 +6,7 @@ use std::sync::{Arc, LazyLock};
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::classes::ClassHierarchy;
+use crate::classes::{ClassHierarchy, join};
 use crate::definitions::{Definition, Kind};
 use crate::discover::{discover, is_under};
 use crate::external::{ExternalModules, environment_paths, standard_library};
@@ -15,7 +15,7 @@ use crate::frameworks::FrameworkRules;
 use crate::ignores::{apply_ignore_comments, ignored_codes};
 use crate::models::{Finding, Framework, Override, fnmatch};
 use crate::modules::{ModuleName, import_root, module_name, resolve};
-use crate::references::{Binding, Owner};
+use crate::references::{Binding, Owner, Receiver};
 use crate::symbols::ModuleSymbols;
 use crate::transitive::transitive;
 
@@ -33,9 +33,14 @@ const ENUMS: [&str; 1] = ["enum.Enum"];
 /// `ast.NodeTransformer`, which inherits from it.
 const NODE_VISITORS: [&str; 2] = ["ast.NodeVisitor", "ast.NodeTransformer"];
 const NODE_VISITOR_PREFIX: &str = "visit_";
+/// `Protocol`, as `typing` and `typing_extensions` give it out, whose members a class has without
+/// inheriting from it.
+const PROTOCOLS: [&str; 2] = ["typing.Protocol", "typing_extensions.Protocol"];
 
 /// A definition of the project, by its index among the definitions of every file in order.
 type DefinitionId = usize;
+/// A class of the project, by its index among the classes.
+type ClassId = usize;
 
 /// The options of a check.
 pub(crate) struct Options {
@@ -161,7 +166,6 @@ pub(crate) fn find_unused(options: &Options) -> Vec<Finding> {
         first_definition,
     };
 
-    let uses = find_uses(&project);
     let modules: Vec<Arc<ModuleSymbols>> = (0..project.files.len())
         .map(|index| {
             let file_facts = &project.facts[index];
@@ -177,6 +181,9 @@ pub(crate) fn find_unused(options: &Options) -> Vec<Finding> {
     let hierarchy = make_hierarchy(&project, modules, options.python.as_deref());
     let typed_dicts = subclass_attributes(&project, &hierarchy, &TYPED_DICTS);
     let enums = subclass_attributes(&project, &hierarchy, &ENUMS);
+    let fields: FxHashSet<DefinitionId> = typed_dicts.values().flatten().copied().collect();
+    let classes = Classes::new(&project, &hierarchy, &fields);
+    let uses = find_uses(&project, &classes);
 
     let module_names: Vec<String> = project.names.iter().map(|name| name.name.clone()).collect();
     let file_definitions: Vec<(&Path, &[Definition])> = (0..project.files.len())
@@ -185,7 +192,6 @@ pub(crate) fn find_unused(options: &Options) -> Vec<Finding> {
     let rules = FrameworkRules::new(&enabled, &file_definitions, &module_names, &hierarchy);
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
 
-    let fields: FxHashSet<DefinitionId> = typed_dicts.values().flatten().copied().collect();
     let mut graph = Graph::new(&project, &uses, &fields, enums);
 
     // An ignore comment is needed for a definition that is unused without it. Such a definition is
@@ -228,18 +234,24 @@ impl Project {
 
 /// Find what the code of each owner uses.
 ///
-/// A plain name refers to the module that it is read in, an imported name to the module that it is
-/// imported from, and an attribute of an object is matched by name only.
-fn find_uses(project: &Project) -> FxHashMap<(usize, Owner), Uses> {
+/// A plain name refers to the module that it is read in, and an imported name to the module that it
+/// is imported from. A member of a class of the project that is plain, as in `self.name`,
+/// `super().name`, `Class.name` or `Class().name`, is matched in the classes that it can be in, and
+/// any other attribute of an object by name only.
+fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), Uses> {
     let mut uses: FxHashMap<(usize, Owner), Uses> = FxHashMap::default();
     for (file, file_facts) in project.facts.iter().enumerate() {
         let references = &file_facts.references;
+        let module = &project.names[file].name;
         for read in &references.reads {
             let owner_uses = uses.entry((file, read.owner)).or_default();
             owner_uses.names.insert((file, read.root.clone()));
-            owner_uses
-                .attributes
-                .extend(read.attributes.iter().cloned());
+            let mut parts = vec![read.root.clone()];
+            for attribute in read.attributes.iter().chain(&read.called) {
+                let written = join(module, &parts.join("."));
+                owner_uses.add_member(classes.read_from(&written, attribute), attribute);
+                parts.push(attribute.clone());
+            }
             if read.reads_object {
                 let mut parts = vec![read.root.clone()];
                 parts.extend(read.attributes.iter().cloned());
@@ -257,13 +269,17 @@ fn find_uses(project: &Project) -> FxHashMap<(usize, Owner), Uses> {
             ) else {
                 owner_uses
                     .attributes
-                    .extend(read.attributes.iter().cloned());
+                    .extend(read.attributes.iter().chain(&read.called).cloned());
                 continue;
             };
             if read.reads_object {
                 owner_uses
                     .objects
                     .extend(imported_objects(&resolved, project));
+            }
+            if let Some(called) = &read.called {
+                let written = resolved.0.join(".");
+                owner_uses.add_member(classes.read_from(&written, called), called);
             }
             if read.attributes.is_empty() {
                 continue;
@@ -285,9 +301,11 @@ fn find_uses(project: &Project) -> FxHashMap<(usize, Owner), Uses> {
                 .chain([parts.len() - read.attributes.len()])
                 .max()
                 .unwrap_or(0);
-            owner_uses
-                .attributes
-                .extend(parts[first_of_object..].iter().cloned());
+            for index in first_of_object..parts.len() {
+                let written = parts[..index].join(".");
+                let found = classes.read_from(&written, &parts[index]);
+                owner_uses.add_member(found, &parts[index]);
+            }
         }
 
         for import in &references.imports {
@@ -310,6 +328,15 @@ fn find_uses(project: &Project) -> FxHashMap<(usize, Owner), Uses> {
                 .attributes
                 .insert(name.clone());
         }
+        for (owner, receiver, name) in &references.members {
+            let found = match receiver {
+                Receiver::Own(class) => classes.read_from_own(file, class, name, false),
+                Receiver::Super(class) => classes.read_from_own(file, class, name, true),
+            };
+            uses.entry((file, *owner))
+                .or_default()
+                .add_member(found, name);
+        }
         for (owner, name) in &references.keys {
             uses.entry((file, *owner))
                 .or_default()
@@ -324,6 +351,264 @@ fn find_uses(project: &Project) -> FxHashMap<(usize, Owner), Uses> {
         }
     }
     uses
+}
+
+impl Uses {
+    /// Add a read of a member: the definitions that it can stand for, or its name if it is not known
+    /// what it is read from.
+    fn add_member(&mut self, found: Option<Vec<DefinitionId>>, name: &str) {
+        match found {
+            Some(found) => self.definitions.extend(found),
+            None => {
+                self.attributes.insert(name.to_string());
+            }
+        }
+    }
+}
+
+/// The classes of the project, with their members, so that a member read from an object whose class
+/// is plain is matched in the classes that the object can be an instance of.
+struct Classes<'a> {
+    hierarchy: &'a ClassHierarchy,
+    /// Each class by its file and its name in the module.
+    ids: FxHashMap<(usize, String), ClassId>,
+    /// The classes by their dotted names, such as `package.module.Class`.
+    by_dotted: FxHashMap<String, Vec<ClassId>>,
+    /// The names of the classes, without their modules, so that a name that cannot be a class is not
+    /// followed.
+    names: FxHashSet<String>,
+    /// The base classes of each class in the project, directly or not.
+    ancestors: Vec<Vec<ClassId>>,
+    /// The classes of the project that inherit from each class, directly or not.
+    descendants: Vec<Vec<ClassId>>,
+    /// Whether each class is a metaclass, whose instances are classes of their own.
+    metaclasses: Vec<bool>,
+    /// The members of each class by their name. A field of a `TypedDict` is read as a key instead.
+    by_member: FxHashMap<(ClassId, String), Vec<DefinitionId>>,
+    /// The members, by their name, of the classes that any member read can stand for: the
+    /// protocols, which a class matches without inheriting from them, and the classes that inherit
+    /// from a base class that is not known, such as a call or a variable, and the classes that
+    /// inherit from those.
+    loose: FxHashMap<String, Vec<DefinitionId>>,
+}
+
+impl<'a> Classes<'a> {
+    fn new(
+        project: &Project,
+        hierarchy: &'a ClassHierarchy,
+        fields: &FxHashSet<DefinitionId>,
+    ) -> Self {
+        let mut keys: Vec<(usize, String)> = Vec::new();
+        let mut ids = FxHashMap::default();
+        let mut by_dotted: FxHashMap<String, Vec<ClassId>> = FxHashMap::default();
+        let mut names = FxHashSet::default();
+        for (file, definition) in project.definition_files.iter().zip(&project.definitions) {
+            if definition.kind == Kind::Class {
+                let key = (*file, definition.qualified_name());
+                if ids.contains_key(&key) {
+                    continue;
+                }
+                let id = keys.len();
+                ids.insert(key.clone(), id);
+                let dotted = join(&project.names[*file].name, &key.1);
+                by_dotted.entry(dotted).or_default().push(id);
+                names.insert(definition.name.clone());
+                keys.push(key);
+            }
+        }
+        let mut ancestors = Vec::new();
+        let mut metaclasses = Vec::new();
+        let mut protocols = vec![false; keys.len()];
+        let mut unknown_bases = vec![false; keys.len()];
+        for (file, definition) in project.definition_files.iter().zip(&project.definitions) {
+            if definition.kind != Kind::Class {
+                continue;
+            }
+            let Some(&id) = ids.get(&(*file, definition.qualified_name())) else {
+                continue;
+            };
+            unknown_bases[id] = definition.other_bases;
+            for base in &definition.bases {
+                let names = hierarchy.resolve(*file, base);
+                protocols[id] |= PROTOCOLS.iter().any(|protocol| names.contains(*protocol));
+                unknown_bases[id] |= is_unknown_class(project, &by_dotted, *file, base, &names);
+            }
+        }
+        for (file, name) in &keys {
+            let dotted = hierarchy.ancestors(*file, name);
+            metaclasses.push(dotted.contains("type"));
+            let mut found: Vec<ClassId> = dotted
+                .iter()
+                .flat_map(|ancestor| by_dotted.get(ancestor).into_iter().flatten().copied())
+                .collect();
+            found.sort_unstable();
+            found.dedup();
+            ancestors.push(found);
+        }
+        let mut descendants = vec![Vec::new(); keys.len()];
+        for (id, found) in ancestors.iter().enumerate() {
+            for &ancestor in found {
+                if ancestor != id {
+                    descendants[ancestor].push(id);
+                }
+            }
+        }
+        // What a class inherits from is not known if what one of its base classes inherits from is not.
+        // A subclass of a protocol inherits from it as from any other class, so only the protocol
+        // itself is matched by name.
+        let is_loose: Vec<bool> = ancestors
+            .iter()
+            .enumerate()
+            .map(|(id, found)| {
+                protocols[id]
+                    || std::iter::once(&id)
+                        .chain(found)
+                        .any(|&class| unknown_bases[class])
+            })
+            .collect();
+        let mut by_member: FxHashMap<(ClassId, String), Vec<DefinitionId>> = FxHashMap::default();
+        let mut loose: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
+        for (id, (file, definition)) in project
+            .definition_files
+            .iter()
+            .zip(&project.definitions)
+            .enumerate()
+        {
+            if let Some(owner) = &definition.owner
+                && !fields.contains(&id)
+                && let Some(&class) = ids.get(&(*file, owner.clone()))
+            {
+                by_member
+                    .entry((class, definition.name.clone()))
+                    .or_default()
+                    .push(id);
+                if is_loose[class] {
+                    loose.entry(definition.name.clone()).or_default().push(id);
+                }
+            }
+        }
+        Self {
+            hierarchy,
+            ids,
+            by_dotted,
+            names,
+            ancestors,
+            descendants,
+            metaclasses,
+            by_member,
+            loose,
+        }
+    }
+
+    /// Find the members of a name in classes and their base classes.
+    ///
+    /// Returns None if none of them has a member of that name, since the member then comes from
+    /// somewhere unknown, such as a base class outside the project or a class decorator.
+    fn members(
+        &self,
+        classes: impl IntoIterator<Item = ClassId>,
+        name: &str,
+    ) -> Option<Vec<DefinitionId>> {
+        let mut found = Vec::new();
+        for class in classes {
+            if let Some(members) = self.by_member.get(&(class, name.to_string())) {
+                found.extend(members);
+            }
+        }
+        if found.is_empty() {
+            return None;
+        }
+        found.extend(self.loose.get(name).into_iter().flatten());
+        Some(found)
+    }
+
+    /// Find the members that a name read from a dotted name can stand for, as `name` in
+    /// `package.module.Class.name` or `Class().name`: those of the class and of its base classes.
+    ///
+    /// Returns None if the dotted name is not a class of the project, or if the class has no such
+    /// member.
+    fn read_from(&self, written: &str, name: &str) -> Option<Vec<DefinitionId>> {
+        let last = written.rsplit('.').next().unwrap_or(written);
+        if !self.names.contains(last) {
+            return None;
+        }
+        let classes: Vec<ClassId> = self
+            .hierarchy
+            .follow_name(written)
+            .iter()
+            .flat_map(|dotted| self.by_dotted.get(dotted).into_iter().flatten().copied())
+            .collect();
+        if classes.is_empty() {
+            return None;
+        }
+        self.members(classes, name)
+    }
+
+    /// Find the members that a name read from the first parameter of a method of a class can stand
+    /// for, or from `super()` in it.
+    ///
+    /// The object can be an instance of the class or of a class that inherits from it, so a member is
+    /// looked for in those classes and in their base classes, as a base class can call a method that
+    /// a subclass overrides, or one of another base class of a subclass. `super()` skips the class and
+    /// the classes that inherit from it.
+    ///
+    /// Returns None if the class is a metaclass, or if none of those classes has such a member.
+    fn read_from_own(
+        &self,
+        file: usize,
+        class: &str,
+        name: &str,
+        skip_own: bool,
+    ) -> Option<Vec<DefinitionId>> {
+        let &id = self.ids.get(&(file, class.to_string()))?;
+        if self.metaclasses[id] {
+            return None;
+        }
+        let mut lineage: FxHashSet<ClassId> = FxHashSet::default();
+        for &instance in std::iter::once(&id).chain(&self.descendants[id]) {
+            lineage.insert(instance);
+            lineage.extend(&self.ancestors[instance]);
+        }
+        if skip_own {
+            lineage.remove(&id);
+            for descendant in &self.descendants[id] {
+                lineage.remove(descendant);
+            }
+        }
+        self.members(lineage, name)
+    }
+}
+
+/// Check whether a base class of a class, as it is written in its module, is not known: it is
+/// none of the classes of the project, but a variable or another name of a module of the project.
+///
+/// `names` are the dotted names that the base class stands for.
+fn is_unknown_class(
+    project: &Project,
+    by_dotted: &FxHashMap<String, Vec<ClassId>>,
+    file: usize,
+    written: &str,
+    names: &FxHashSet<String>,
+) -> bool {
+    if names.iter().any(|name| by_dotted.contains_key(name)) {
+        return false;
+    }
+    names.iter().any(|name| {
+        if name == written && !written.contains('.') {
+            // A name that the module neither imports nor defines as a class or function, such as a
+            // builtin or a variable of the module.
+            return project
+                .file_definitions(file)
+                .iter()
+                .any(|definition| definition.owner.is_none() && definition.name == written);
+        }
+        let parts: Vec<&str> = name.split('.').collect();
+        (1..parts.len()).any(|index| {
+            project
+                .files_by_name
+                .contains_key(&parts[..index].join("."))
+        })
+    })
 }
 
 /// The dotted name that an imported name and the attributes read from it stand for, as its parts,
