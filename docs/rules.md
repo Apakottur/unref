@@ -21,7 +21,7 @@ A definition counts as used when something references it:
 | Definition                 | Used when                                                                                                           |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | Function, class, variable  | Read in its module, imported from it, read as `module.name`, or listed in its `__all__`.                            |
-| Method, attribute          | Read as `value.name` anywhere in the project, matched by name.                                                      |
+| Method, attribute          | Read as `value.name` anywhere in the project, matched by name, or read by its name in its class body.               |
 | `TypedDict` field          | Read as a key anywhere in the project, matched by name: `value["name"]`, `value.get("name")` or `"name" in value`.  |
 | Enum member                | Read as `Color.RED`, or the enum is read whole: `Color(value)`, `list(Color)`, or as the type of a class attribute. |
 | Member of an external base | Named like a member of a base class from outside the project, such as `emit` in a subclass of `logging.Handler`.    |

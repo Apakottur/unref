@@ -89,8 +89,9 @@ pub(crate) struct References {
     /// The functions and classes that are local variables of a function, by their index in the
     /// definitions of the module. A read of their name elsewhere is not a reference to them.
     pub local_definitions: FxHashSet<usize>,
-    /// The reads of the functions and classes that are local variables of a function, each with the
-    /// index of the definition in the definitions of the module.
+    /// The reads of the functions and classes that are local variables of a function, and of the
+    /// members of a class in its class body, each with the index of the definition in the definitions
+    /// of the module.
     pub local_reads: FxHashSet<(Owner, usize)>,
 }
 
@@ -169,6 +170,14 @@ struct Scope {
     instance: Option<String>,
     /// In a class or a method, the name of the class in the module.
     class_name: Option<String>,
+    /// In a class body, the attributes, methods and classes that it defines so far, by their name,
+    /// each with its index in the definitions of the module.
+    members: FxHashMap<String, Vec<usize>>,
+    /// In a class body, the nearest scope around it that is not a class body. The functions,
+    /// lambdas and comprehensions in a class body do not see its names, and neither does a class
+    /// body nested in it, so their reads go on to this scope, as do the reads of the class body that
+    /// are not of its own names.
+    outer: Option<usize>,
 }
 
 impl Scope {
@@ -186,6 +195,8 @@ impl Scope {
             defined: FxHashSet::default(),
             instance: None,
             class_name: None,
+            members: FxHashMap::default(),
+            outer: None,
         }
     }
 }
@@ -322,19 +333,23 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 None,
                 FunctionBody::Lambda(&lambda.body),
             ),
-            Expr::ListComp(_) | Expr::SetComp(_) | Expr::DictComp(_) | Expr::Generator(_) => {
-                // The variables of a comprehension are local to it.
-                let (scope, binder) = (self.scope, self.binder);
-                let mut inner = Scope::new(ScopeKind::Function);
-                inner.enclosing = Some(binder);
-                self.scope = self.push_scope(inner);
-                self.binder = self.scope;
-                walk_expr(self, expr);
-                let inner = self.scope;
-                self.scope = scope;
-                self.binder = binder;
-                let local_names = self.scopes[inner].bound.clone();
-                self.close(inner, &local_names, Target::Scope(scope));
+            Expr::ListComp(ast::ExprListComp {
+                elt, generators, ..
+            })
+            | Expr::SetComp(ast::ExprSetComp {
+                elt, generators, ..
+            })
+            | Expr::Generator(ast::ExprGenerator {
+                elt, generators, ..
+            }) => self.visit_comprehension(&[elt], generators),
+            Expr::DictComp(ast::ExprDictComp {
+                key,
+                value,
+                generators,
+                ..
+            }) => {
+                let elements: Vec<&Expr> = key.as_deref().into_iter().chain([&**value]).collect();
+                self.visit_comprehension(&elements, generators);
             }
             _ => walk_expr(self, expr),
         }
@@ -394,7 +409,29 @@ impl<'a> Walker<'_, '_> {
         self.scopes.len() - 1
     }
 
+    /// Add a read of a name, or of a chain of attributes that starts with one.
+    ///
+    /// In a class body, a name that the body has bound so far is read from the class: it is a
+    /// reference to the attributes, methods and classes of that name in the class, and to nothing else.
+    /// Python reads a name of a class body that is not bound yet from the code around the class, so
+    /// that read is passed on.
     fn add_read(&mut self, root: &str, attributes: Vec<String>) {
+        let scope = &self.scopes[self.scope];
+        if scope.kind == ScopeKind::Class
+            && scope.bound.contains(root)
+            && !scope.global_names.contains(root)
+            && !scope.imports.contains_key(root)
+        {
+            let members = scope.members.get(root).into_iter().flatten();
+            let reads = members
+                .map(|&index| (self.owner, index))
+                .collect::<Vec<_>>();
+            self.references.local_reads.extend(reads);
+            for attribute in attributes {
+                self.references.attributes.insert((self.owner, attribute));
+            }
+            return;
+        }
         let read = Read {
             owner: self.owner,
             root: root.to_string(),
@@ -405,9 +442,53 @@ impl<'a> Walker<'_, '_> {
         self.scopes[scope].reads.insert(read);
     }
 
+    /// Add what a comprehension refers to.
+    ///
+    /// The variables of a comprehension are local to it. Its first iterable is evaluated in the scope
+    /// that the comprehension is in, so it sees the names of a class body, and the rest does not.
+    fn visit_comprehension(&mut self, elements: &[&'a Expr], generators: &'a [ast::Comprehension]) {
+        let Some(first) = generators.first() else {
+            return;
+        };
+        self.visit_expr(&first.iter);
+        let (scope, binder) = (self.scope, self.binder);
+        let mut inner = Scope::new(ScopeKind::Function);
+        // A walrus binds its name in the function that the comprehension is in as well. It cannot be
+        // used in a comprehension in a class body.
+        if self.scopes[binder].kind != ScopeKind::Class {
+            inner.enclosing = Some(binder);
+        }
+        self.scope = self.push_scope(inner);
+        self.binder = self.scope;
+        for (index, generator) in generators.iter().enumerate() {
+            if index > 0 {
+                self.visit_expr(&generator.iter);
+            }
+            self.visit_expr(&generator.target);
+            for condition in &generator.ifs {
+                self.visit_expr(condition);
+            }
+        }
+        for element in elements {
+            self.visit_expr(element);
+        }
+        let inner = self.scope;
+        self.scope = scope;
+        self.binder = binder;
+        let local_names = self.scopes[inner].bound.clone();
+        let target = self.reads_target(scope);
+        self.close(inner, &local_names, Target::Scope(target));
+    }
+
+    /// Get the scope that the reads of a function, lambda or comprehension that is in a scope go to:
+    /// the scope itself, or for a class body, the nearest scope around it that is not a class body.
+    fn reads_target(&self, scope: usize) -> usize {
+        self.scopes[scope].outer.unwrap_or(scope)
+    }
+
     fn visit_function_def(&mut self, function: &'a ast::StmtFunctionDef) {
+        let index = self.definitions.len();
         let (body_scope, line) = self.define_function(function);
-        self.bind_definition(function.name.as_str());
         self.visit_function(
             Some(&function.parameters),
             &function.decorator_list,
@@ -415,6 +496,8 @@ impl<'a> Walker<'_, '_> {
             Some((body_scope, line)),
             FunctionBody::Statements(&function.body),
         );
+        // The name is bound once the function is defined, after its decorators are evaluated.
+        self.bind_definition(function.name.as_str(), index);
     }
 
     /// Add what a function or lambda refers to.
@@ -489,13 +572,14 @@ impl<'a> Walker<'_, '_> {
                 })
                 .cloned(),
         );
-        self.close(inner, &local_names, Target::Scope(scope));
+        let target = self.reads_target(scope);
+        self.close(inner, &local_names, Target::Scope(target));
     }
 
     /// Add a class, and what it defines and refers to.
     ///
-    /// The body of a class is not a scope whose reads are tracked: it sees the names of the code that
-    /// it is in, and what it binds is an attribute of the class.
+    /// The body of a class is a scope whose names are the attributes, methods and classes of the class.
+    /// The functions in it do not see them.
     fn visit_class(&mut self, class: &'a ast::StmtClassDef) {
         let (line, column) = self.positions.line_column(class.name.start());
         let binder = &self.scopes[self.binder];
@@ -531,10 +615,11 @@ impl<'a> Walker<'_, '_> {
         };
         let mut class_scope = Scope::new(ScopeKind::Class);
         class_scope.class_name = Some(definition.qualified_name());
+        class_scope.outer = Some(self.reads_target(self.scope));
+        let index = self.definitions.len();
         self.definitions.push(definition);
-        self.bind_definition(class.name.as_str());
 
-        let binder = self.binder;
+        let (scope, binder) = (self.scope, self.binder);
         self.binder = self.push_scope(class_scope);
         self.scopes[self.binder].defined_in = Some(self.binder);
         for decorator in &class.decorator_list {
@@ -546,8 +631,19 @@ impl<'a> Walker<'_, '_> {
         if let Some(arguments) = &class.arguments {
             self.visit_arguments(arguments);
         }
+        self.scope = self.binder;
         self.visit_body(&class.body);
+        let inner = self.scope;
+        self.scope = scope;
         self.binder = binder;
+
+        // The names that the class body imports are resolved in it, and its other reads are of names
+        // that it had not bound yet, so they go on.
+        let imported = self.scopes[inner].imports.keys().cloned().collect();
+        let target = self.reads_target(inner);
+        self.close(inner, &imported, Target::Scope(target));
+        // The name is bound once the class is defined.
+        self.bind_definition(class.name.as_str(), index);
     }
 
     /// Bind the names that an `import` statement imports.
@@ -632,14 +728,16 @@ impl<'a> Walker<'_, '_> {
                 });
             }
         }
-        for target in targets {
-            self.visit_expr(target);
+        // The value is evaluated before the targets are bound, so in a class body, `size = size + 1`
+        // reads the name around the class.
+        if let Some(value) = value {
+            self.visit_expr(value);
         }
         if let Some(annotation) = annotation {
             self.visit_expr(annotation);
         }
-        if let Some(value) = value {
-            self.visit_expr(value);
+        for target in targets {
+            self.visit_expr(target);
         }
     }
 
@@ -728,6 +826,7 @@ impl<'a> Walker<'_, '_> {
 
         // A variable or attribute is found once, where it is first assigned.
         let class_name = scope.class_name.clone();
+        let in_class_body = scope.kind == ScopeKind::Class;
         let Some(defined_in) = scope.defined_in else {
             return;
         };
@@ -735,6 +834,15 @@ impl<'a> Walker<'_, '_> {
             return;
         }
         let (line, column) = self.positions.line_column(position);
+        if in_class_body {
+            let index = self.definitions.len();
+            let binder = self.binder;
+            self.scopes[binder]
+                .members
+                .entry(name.to_string())
+                .or_default()
+                .push(index);
+        }
         self.definitions.push(Definition {
             path: self.path.clone(),
             line,
@@ -769,21 +877,19 @@ impl<'a> Walker<'_, '_> {
         }
     }
 
-    /// Bind the name of the function or class that was just added, if it is a local variable of a
-    /// function. The name of a function or class of a module or of a class body is not bound, since it
-    /// is a definition that is matched by its name.
-    fn bind_definition(&mut self, name: &str) {
+    /// Bind the name of a function or class, given with its index in the definitions of the module, if
+    /// it is a local variable of a function or a member of a class. The name of a function or class of
+    /// a module is not bound, since it is a definition that is matched by its name.
+    fn bind_definition(&mut self, name: &str, index: usize) {
         let binder = self.binder;
-        if self.scopes[binder].kind != ScopeKind::Function {
-            return;
-        }
+        let scope = &mut self.scopes[binder];
+        let definitions = match scope.kind {
+            ScopeKind::Module => return,
+            ScopeKind::Class => &mut scope.members,
+            ScopeKind::Function => &mut scope.functions_and_classes,
+        };
+        definitions.entry(name.to_string()).or_default().push(index);
         self.bind(name);
-        let index = self.definitions.len() - 1;
-        self.scopes[binder]
-            .functions_and_classes
-            .entry(name.to_string())
-            .or_default()
-            .push(index);
     }
 
     /// Bind the names that a statement imports.
