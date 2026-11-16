@@ -112,7 +112,14 @@ pub(crate) struct References {
     /// members of a class in its class body, each with the index of the definition in the definitions
     /// of the module.
     pub local_reads: FxHashSet<(Owner, usize)>,
+    /// The local variables of the functions that are assigned the result of a call.
+    pub local_calls: LocalCalls,
 }
+
+/// The local variables of each function of a module that are assigned the result of a call, by the
+/// line of the name of the function and the name of the variable, each with the dotted names of what
+/// they call as they are written, such as `FastAPI` for `app = FastAPI()`.
+pub(crate) type LocalCalls = FxHashMap<(u32, String), Vec<String>>;
 
 /// Find what a Python module defines and refers to.
 ///
@@ -192,6 +199,9 @@ struct Scope {
     /// In a class body, the attributes, methods and classes that it defines so far, by their name,
     /// each with its index in the definitions of the module.
     members: FxHashMap<String, Vec<usize>>,
+    /// In a function, the local variables that are assigned the result of a call, each with the
+    /// dotted names of what they call as they are written.
+    calls: FxHashMap<String, Vec<String>>,
     /// In a class body, the nearest scope around it that is not a class body. The functions,
     /// lambdas and comprehensions in a class body do not see its names, and neither does a class
     /// body nested in it, so their reads go on to this scope, as do the reads of the class body that
@@ -215,6 +225,7 @@ impl Scope {
             instance: None,
             class_name: None,
             members: FxHashMap::default(),
+            calls: FxHashMap::default(),
             outer: None,
         }
     }
@@ -663,6 +674,18 @@ impl<'a> Walker<'_, '_> {
         self.binder = binder;
         self.owner = owner;
 
+        let inner_scope = &mut self.scopes[inner];
+        // A variable declared `global` or `nonlocal` is not local to the function.
+        let calls = std::mem::take(&mut inner_scope.calls);
+        if line != 0 {
+            for (name, called) in calls {
+                if !inner_scope.global_names.contains(&name)
+                    && !inner_scope.nonlocal_names.contains(&name)
+                {
+                    self.references.local_calls.insert((line, name), called);
+                }
+            }
+        }
         let inner_scope = &self.scopes[inner];
         let mut local_names: FxHashSet<String> =
             names.iter().map(|name| (*name).to_string()).collect();
@@ -899,6 +922,16 @@ impl<'a> Walker<'_, '_> {
         annotation: Option<&String>,
         call: Option<&String>,
     ) {
+        if let (Expr::Name(name), Some(call)) = (target, call) {
+            let binder = self.binder;
+            if self.scopes[binder].kind == ScopeKind::Function {
+                self.scopes[binder]
+                    .calls
+                    .entry(name.id.to_string())
+                    .or_default()
+                    .push(call.clone());
+            }
+        }
         let scope = &self.scopes[self.binder];
         let (kind, name, position, unpacked) = match target {
             Expr::Name(name) if scope.kind != ScopeKind::Function => {

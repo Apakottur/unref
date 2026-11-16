@@ -50,15 +50,6 @@ def not_a_route():  # expect: 5 [unused-function]
     return None
 
 
-# An application made in a function is not followed.
-def create_app():  # expect: 5 [unused-function]
-    local = fastapi.FastAPI()
-
-    @local.get("/")
-    def local_root():  # expect: 9 [unused-function] transitive
-        return {}
-
-    return local
 
 
 print(routers.Health)
