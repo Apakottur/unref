@@ -155,6 +155,21 @@ Enabled by default: yes.
   `bp.errorhandler`, of a module-level `Flask()` or `Blueprint()`, or of an instance of a subclass.
 - HTTP method handlers of `MethodView` subclasses, and `dispatch_request` of `View` subclasses.
 
+#### `sphinx`
+
+Enabled by default: yes.
+
+- In Sphinx's configuration files: module-level variables not starting with `_`, and the `setup` and
+  `linkcode_resolve` functions.
+
+The configuration files are each `conf.py` that sets `project`, `extensions` or `html_theme`, or those that
+`configuration` names. A table turns the rules on:
+
+```toml
+[tool.unref.frameworks.sphinx]
+configuration = ["docs/conf.py"]
+```
+
 ### `output-format`
 
 How the findings are printed, as [Ruff's option](https://docs.astral.sh/ruff/settings/#output-format).

@@ -376,7 +376,7 @@ def test_config_frameworks_unknown(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert result.stderr == (
         f"Error: Option 'frameworks' in the configuration file {config} has an unknown framework 'nose', "
-        "expected one of 'pytest', 'unittest', 'pydantic', 'dataclasses', 'sqlalchemy', 'fastapi', 'flask'\n"
+        "expected one of 'pytest', 'unittest', 'pydantic', 'dataclasses', 'sqlalchemy', 'fastapi', 'flask', 'sphinx'\n"
     )
 
 
@@ -390,6 +390,34 @@ def test_config_frameworks_not_boolean(tmp_path: Path) -> None:
     assert result.stderr == (
         f"Error: Option 'frameworks.pytest' in the configuration file {config} must be a boolean\n"
     )
+
+
+@pytest.mark.parametrize(
+    ("content", "error"),
+    [
+        (
+            '[frameworks]\nsphinx = "docs/conf.py"\n',
+            "Option 'frameworks.sphinx' in the configuration file {config} must be a boolean or a table",
+        ),
+        (
+            '[frameworks.sphinx]\nconfiguration = "docs/conf.py"\n',
+            "Option 'configuration' in the 'frameworks.sphinx' table of the configuration file {config} must be a "
+            "list of strings",
+        ),
+        (
+            '[frameworks.sphinx]\nconf = ["docs/conf.py"]\n',
+            "Unknown option 'conf' in the 'frameworks.sphinx' table of the configuration file {config}",
+        ),
+    ],
+)
+def test_config_sphinx_invalid(tmp_path: Path, content: str, error: str) -> None:
+    config = tmp_path / "unref.toml"
+    config.write_text(content)
+
+    result = run(["--config", str(config)])
+
+    assert result.exit_code == 2
+    assert result.stderr == f"Error: {error.format(config=config)}\n"
 
 
 @pytest.mark.parametrize(("content", "table"), [('tool = "x"\n', "tool"), ('[tool]\nunref = "x"\n', "tool.unref")])

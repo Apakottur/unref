@@ -116,6 +116,7 @@ fn run(cli: Cli) -> ExitCode {
         dummy_variable_rgx: options.dummy_variable_rgx,
         entry_points: options.entry_points,
         frameworks: options.frameworks,
+        sphinx_configuration: options.sphinx_configuration,
     };
     let findings = pool.install(|| find_unused(&engine_options));
 

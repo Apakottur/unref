@@ -16,11 +16,12 @@ pub(crate) enum Framework {
     Sqlalchemy,
     Fastapi,
     Flask,
+    Sphinx,
 }
 
 impl Framework {
     /// Every framework, each enabled by default.
-    pub(crate) const ALL: [Framework; 7] = [
+    pub(crate) const ALL: [Framework; 8] = [
         Framework::Pytest,
         Framework::Unittest,
         Framework::Pydantic,
@@ -28,6 +29,7 @@ impl Framework {
         Framework::Sqlalchemy,
         Framework::Fastapi,
         Framework::Flask,
+        Framework::Sphinx,
     ];
 
     /// The name of the framework in the `frameworks` option.
@@ -40,6 +42,7 @@ impl Framework {
             Framework::Sqlalchemy => "sqlalchemy",
             Framework::Fastapi => "fastapi",
             Framework::Flask => "flask",
+            Framework::Sphinx => "sphinx",
         }
     }
 
