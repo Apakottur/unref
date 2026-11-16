@@ -18,7 +18,7 @@ An extremely fast Python dead code finder, written in Rust.
 
 - **Fast**: 20x faster than [vulture](https://github.com/jendrikseipp/vulture), it checks all of CPython in under a
   second.
-- **Just works**: built-in rules for pytest, unittest, Pydantic, SQLAlchemy and FastAPI, so most projects need
+- **Just works**: built-in rules for pytest, unittest, Pydantic, SQLAlchemy, FastAPI and Flask, so most projects need
   little or no configuration.
 - **Accurate**: names are matched by module, so a used `parse` in one module does not hide an unused `parse`
   in another.

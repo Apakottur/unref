@@ -11,6 +11,10 @@ Built in: the [`pydantic` framework](configuration.md#frameworks) needs no confi
 
 Built in: the [`fastapi` framework](configuration.md#frameworks) needs no configuration.
 
+## Flask
+
+Built in: the [`flask` framework](configuration.md#frameworks) needs no configuration.
+
 ## pytest
 
 The [`pytest` framework](configuration.md#frameworks) follows pytest's default naming. A project that sets
