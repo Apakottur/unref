@@ -49,8 +49,8 @@ def test_option(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, python: str) ->
 def test_option_windows_system_python(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # The interpreter of a system Python on Windows is directly in its `sys.prefix`, next to
     # `Lib/site-packages`.
-    prefix = tmp_path / "Python314"
-    shutil.copytree(_CASE / ".venv" / "lib" / "python3.14" / "site-packages", prefix / "Lib" / "site-packages")
+    prefix = tmp_path / "Python315"
+    shutil.copytree(_CASE / ".venv" / "lib" / "python3.15" / "site-packages", prefix / "Lib" / "site-packages")
     (prefix / "python.exe").touch()
     monkeypatch.chdir(tmp_path)
 

@@ -18,7 +18,7 @@ from pathlib import Path
 import httpx
 import shpyx
 
-_CPYTHON_TAG = "v3.14.0"
+_CPYTHON_TAG = "v3.15.0"
 _TOOLS = {
     "vulture": ("vulture==2.16", ["."]),
     "deadcode": ("deadcode==2.6.3", ["."]),
@@ -41,7 +41,7 @@ def _download_cpython(destination: Path) -> Path:
 
 def _install(name: str, requirement: str, environment: Path) -> Path:
     print(f"Installing {requirement}...")
-    shpyx.run(["uv", "venv", "--quiet", environment])
+    shpyx.run(["uv", "venv", "--quiet", "--python", sys.executable, environment])
     shpyx.run(["uv", "pip", "install", "--quiet", "--python", environment, requirement])
     return environment / "bin" / name
 
