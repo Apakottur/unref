@@ -87,14 +87,13 @@ pub(crate) fn find_ignore_comments(
                 character_offset(found.end()),
             );
             match parse_codes(&characters, match_start, match_end) {
-                Err(error) => findings.push(Finding {
-                    path: path.to_path_buf(),
+                Err(error) => findings.push(Finding::new(
+                    path.to_path_buf(),
                     line,
-                    column: start + to_u32(error.offset) + 1,
-                    code: Rule::InvalidIgnoreComment,
-                    name: error.message.to_string(),
-                    transitive: false,
-                }),
+                    start + to_u32(error.offset) + 1,
+                    Rule::InvalidIgnoreComment,
+                    error.message.to_string(),
+                )),
                 Ok((codes, end)) => {
                     let ignored: Vec<IgnoredCode> = codes
                         .into_iter()
@@ -107,13 +106,14 @@ pub(crate) fn find_ignore_comments(
                         ignored
                             .iter()
                             .filter(|code| !Rule::is_known(&code.code))
-                            .map(|code| Finding {
-                                path: path.to_path_buf(),
-                                line,
-                                column: code.column,
-                                code: Rule::UnknownCode,
-                                name: code.code.clone(),
-                                transitive: false,
+                            .map(|code| {
+                                Finding::new(
+                                    path.to_path_buf(),
+                                    line,
+                                    code.column,
+                                    Rule::UnknownCode,
+                                    code.code.clone(),
+                                )
                             }),
                     );
                     let text: String = characters[match_start + 1..end].iter().collect();
@@ -315,22 +315,22 @@ pub(crate) fn apply_ignore_comments(
             .collect();
         indexes.sort_unstable();
         if !indexes.is_empty() && indexes.len() == comment.codes.len() {
-            left.push(Finding {
-                path: path.to_path_buf(),
-                line: comment.line,
-                column: comment.column,
-                code: Rule::UnusedIgnoreComment,
-                name: comment.text.clone(),
-                transitive: false,
-            });
+            left.push(Finding::new(
+                path.to_path_buf(),
+                comment.line,
+                comment.column,
+                Rule::UnusedIgnoreComment,
+                comment.text.clone(),
+            ));
         } else {
-            left.extend(indexes.into_iter().map(|index| Finding {
-                path: path.to_path_buf(),
-                line: comment.line,
-                column: comment.codes[index].column,
-                code: Rule::UnusedIgnoreComment,
-                name: comment.codes[index].code.clone(),
-                transitive: false,
+            left.extend(indexes.into_iter().map(|index| {
+                Finding::new(
+                    path.to_path_buf(),
+                    comment.line,
+                    comment.codes[index].column,
+                    Rule::UnusedIgnoreComment,
+                    comment.codes[index].code.clone(),
+                )
             }));
         }
     }

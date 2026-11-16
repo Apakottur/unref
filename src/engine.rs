@@ -7,6 +7,7 @@ use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::{ClassHierarchy, join};
+use crate::config::Config;
 use crate::definitions::{Definition, Kind};
 use crate::discover::{discover, is_under};
 use crate::external::{ExternalModules, environment_paths, standard_library};
@@ -41,32 +42,6 @@ const PROTOCOLS: [&str; 2] = ["typing.Protocol", "typing_extensions.Protocol"];
 type DefinitionId = usize;
 /// A class of the project, by its index among the classes.
 type ClassId = usize;
-
-/// The options of a check.
-pub(crate) struct Options {
-    /// The files and directories that make up the project.
-    pub paths: Vec<PathBuf>,
-    /// The names, as patterns, of the definitions that count as used.
-    pub used_names: Vec<String>,
-    /// The decorators that make the definitions they decorate count as used.
-    pub used_decorators: Vec<String>,
-    /// The patterns of the files and directories that are not part of the project.
-    pub exclude: Vec<String>,
-    /// The directory that the `exclude` patterns are anchored at.
-    pub root: PathBuf,
-    /// The options that apply only to some of the files of the project.
-    pub overrides: Vec<Override>,
-    /// The Python environment or interpreter of the project, if there is one.
-    pub python: Option<PathBuf>,
-    /// The pattern of the names of the variables that are not used on purpose.
-    pub dummy_variable_rgx: String,
-    /// The object references of the entry points of the project.
-    pub entry_points: Vec<String>,
-    /// Whether the rules of each framework apply, over the defaults.
-    pub frameworks: FxHashMap<Framework, bool>,
-    /// The configuration files of Sphinx, or None to find them by their contents.
-    pub sphinx_configuration: Option<Vec<PathBuf>>,
-}
 
 /// What the code of an owner uses.
 #[derive(Default)]
@@ -105,17 +80,18 @@ struct Project {
     first_definition: Vec<DefinitionId>,
 }
 
-/// Find the unused definitions of a Python project, which are those that nothing references.
+/// Find the unused definitions of a Python project, made up of the given files and directories, which
+/// are those that nothing references.
 ///
 /// Returns a finding for each unused definition, for each problem with an ignore comment, and for each
 /// file that does not parse, sorted by file, line and column.
-pub(crate) fn find_unused(options: &Options) -> Vec<Finding> {
+pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     let enabled: FxHashSet<Framework> = Framework::ALL
         .into_iter()
         .filter(|framework| options.frameworks.get(framework).copied().unwrap_or(true))
         .collect();
 
-    let discovered: Vec<Arc<Path>> = discover(&options.paths, &options.exclude, &options.root)
+    let discovered: Vec<Arc<Path>> = discover(paths, &options.exclude, &options.root)
         .into_iter()
         .map(Arc::from)
         .collect();
@@ -136,8 +112,7 @@ pub(crate) fn find_unused(options: &Options) -> Vec<Finding> {
 
     // Only a directory can have a namespace package under it. A hook of prek or pre-commit gives every
     // file of the project, and checking each directory against each of them takes quadratic time.
-    let roots: Vec<PathBuf> = options
-        .paths
+    let roots: Vec<PathBuf> = paths
         .iter()
         .map(|path| resolve(path))
         .filter(|root| root.is_dir())
@@ -786,7 +761,7 @@ fn subclass_attributes(
 fn find_roots(
     project: &Project,
     hierarchy: &ClassHierarchy,
-    options: &Options,
+    options: &Config,
     rules: &FrameworkRules,
 ) -> (Vec<DefinitionId>, Vec<DefinitionId>) {
     let dummy_variable = fancy_regex::Regex::new(&options.dummy_variable_rgx).ok();

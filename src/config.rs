@@ -33,7 +33,7 @@ pub(crate) struct Config {
     pub exclude: Vec<String>,
     /// The options that apply only to some of the files of the project.
     pub overrides: Vec<Override>,
-    /// The Python environment or interpreter of the project, or None if it is not set.
+    /// The Python environment or interpreter of the project, or None if there is none.
     pub python: Option<PathBuf>,
     /// The pattern of the names of the variables that are not used on purpose.
     pub dummy_variable_rgx: String,
@@ -264,49 +264,30 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
         &place,
     )?;
 
+    let invalid_overrides = || format!("Option 'overrides' in {place} must be a list of tables");
     let overrides = match options.get("overrides") {
         None => Vec::new(),
         Some(Value::Array(items)) => items
             .iter()
-            .map(|item| match item {
-                Value::Table(table) => Ok(table),
-                _ => Err(format!(
-                    "Option 'overrides' in {place} must be a list of tables"
-                )),
-            })
+            .map(|item| item.as_table().ok_or_else(invalid_overrides))
             .collect::<Result<Vec<_>, _>>()?,
-        Some(_) => {
-            return Err(format!(
-                "Option 'overrides' in {place} must be a list of tables"
-            ));
-        }
+        Some(_) => return Err(invalid_overrides()),
     };
 
-    let python = match options.get("python") {
-        None => None,
-        Some(Value::String(python)) => Some(PathBuf::from(python)),
-        Some(_) => return Err(format!("Option 'python' in {place} must be a string")),
-    };
+    let python = string_option(options, "python", &place)?.map(PathBuf::from);
 
-    let dummy_variable_rgx = match options.get("dummy-variable-rgx") {
-        None => DEFAULT_DUMMY_VARIABLE_RGX.to_string(),
-        Some(Value::String(pattern)) => pattern.clone(),
-        Some(_) => {
-            return Err(format!(
-                "Option 'dummy-variable-rgx' in {place} must be a string"
-            ));
-        }
-    };
+    let dummy_variable_rgx = string_option(options, "dummy-variable-rgx", &place)?
+        .unwrap_or(DEFAULT_DUMMY_VARIABLE_RGX)
+        .to_string();
     if let Err(error) = fancy_regex::Regex::new(&dummy_variable_rgx) {
         return Err(format!(
             "Option 'dummy-variable-rgx' in {place} is not a valid regular expression: {error}"
         ));
     }
 
-    let output_format = match options.get("output-format") {
-        None => OutputFormat::Concise,
-        Some(Value::String(format)) if format == "concise" => OutputFormat::Concise,
-        Some(Value::String(format)) if format == "github" => OutputFormat::Github,
+    let output_format = match options.get("output-format").map(Value::as_str) {
+        None | Some(Some("concise")) => OutputFormat::Concise,
+        Some(Some("github")) => OutputFormat::Github,
         Some(_) => {
             return Err(format!(
                 "Option 'output-format' in {place} must be one of 'concise', 'github'"
@@ -314,15 +295,7 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
         }
     };
 
-    let show_transitive = match options.get("show-transitive") {
-        None => false,
-        Some(Value::Boolean(value)) => *value,
-        Some(_) => {
-            return Err(format!(
-                "Option 'show-transitive' in {place} must be a boolean"
-            ));
-        }
-    };
+    let show_transitive = bool_option(options, "show-transitive", &place)?.unwrap_or(false);
 
     let (frameworks, sphinx_configuration) = parse_frameworks(options, &place)?;
 
@@ -336,12 +309,11 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
             .collect::<Result<_, _>>()?,
         python,
         dummy_variable_rgx,
-        entry_points: Vec::new(),
         frameworks,
         sphinx_configuration,
         output_format,
         show_transitive,
-        root: PathBuf::from("."),
+        ..Config::default()
     })
 }
 
@@ -470,6 +442,28 @@ fn decorators(options: &Table, name: &str, place: &str) -> Result<Vec<String>, S
         ));
     }
     Ok(decorators)
+}
+
+/// Get an option that is a string, or None if it is not set.
+fn string_option<'a>(
+    options: &'a Table,
+    name: &str,
+    place: &str,
+) -> Result<Option<&'a str>, String> {
+    match options.get(name) {
+        None => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value)),
+        Some(_) => Err(format!("Option '{name}' in {place} must be a string")),
+    }
+}
+
+/// Get an option that is a boolean, or None if it is not set.
+fn bool_option(options: &Table, name: &str, place: &str) -> Result<Option<bool>, String> {
+    match options.get(name) {
+        None => Ok(None),
+        Some(Value::Boolean(value)) => Ok(Some(*value)),
+        Some(_) => Err(format!("Option '{name}' in {place} must be a boolean")),
+    }
 }
 
 /// Get an option that is a list of strings, empty if the option is not set.
