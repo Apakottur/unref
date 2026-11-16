@@ -3,7 +3,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt};
+use ruff_python_ast::visitor::{
+    Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt, walk_with_item,
+};
 use ruff_python_ast::{
     self as ast, CmpOp, ExceptHandler, Expr, ExprContext, Parameters, Pattern, Stmt,
 };
@@ -270,8 +272,23 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 None,
                 false,
             ),
+            Stmt::TypeAlias(alias) => {
+                // Its value is evaluated when it is used, but what it reads is still read.
+                self.define_target(&alias.name, false, None, None);
+                walk_stmt(self, stmt);
+            }
             _ => walk_stmt(self, stmt),
         }
+    }
+
+    fn visit_with_item(&mut self, item: &'a ast::WithItem) {
+        // The target of `with ... as target` is assigned, as by an assignment. The target of a `for`
+        // loop is not collected: like Ruff, which leaves it to a rule of its own, unref does not count
+        // an unused loop variable as an unused variable.
+        if let Some(target) = &item.optional_vars {
+            self.define_target(target, false, None, None);
+        }
+        walk_with_item(self, item);
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
@@ -350,6 +367,11 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             }) => {
                 let elements: Vec<&Expr> = key.as_deref().into_iter().chain([&**value]).collect();
                 self.visit_comprehension(&elements, generators);
+            }
+            Expr::Named(named) => {
+                // The target of a walrus is assigned, as by an assignment.
+                self.define_target(&named.target, false, None, None);
+                walk_expr(self, expr);
             }
             _ => walk_expr(self, expr),
         }
@@ -489,6 +511,10 @@ impl<'a> Walker<'_, '_> {
     fn visit_function_def(&mut self, function: &'a ast::StmtFunctionDef) {
         let index = self.definitions.len();
         let (body_scope, line) = self.define_function(function);
+        // The bounds and defaults of the type parameters are read where the function is defined.
+        if let Some(type_params) = &function.type_params {
+            self.visit_type_params(type_params);
+        }
         self.visit_function(
             Some(&function.parameters),
             &function.decorator_list,
