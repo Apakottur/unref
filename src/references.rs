@@ -4,10 +4,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use ruff_python_ast::visitor::{
-    Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt, walk_with_item,
+    Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt, walk_type_param,
+    walk_with_item,
 };
 use ruff_python_ast::{
-    self as ast, CmpOp, ExceptHandler, Expr, ExprContext, Parameters, Pattern, Stmt,
+    self as ast, CmpOp, ExceptHandler, Expr, ExprContext, Operator, Parameters, Pattern, Stmt,
+    TypeParam,
 };
 use ruff_text_size::Ranged;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -293,6 +295,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 // Its value is evaluated when it is used, but what it reads is still read.
                 self.define_target(&alias.name, false, None, None);
                 walk_stmt(self, stmt);
+                self.visit_type_strings(&alias.value);
             }
             _ => walk_stmt(self, stmt),
         }
@@ -395,6 +398,21 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 walk_expr(self, expr);
             }
             _ => walk_expr(self, expr),
+        }
+    }
+
+    fn visit_type_param(&mut self, type_param: &'a TypeParam) {
+        walk_type_param(self, type_param);
+        // The bound and the default of a type parameter are types.
+        let (bound, default) = match type_param {
+            TypeParam::TypeVar(type_var) => {
+                (type_var.bound.as_deref(), type_var.default.as_deref())
+            }
+            TypeParam::ParamSpec(spec) => (None, spec.default.as_deref()),
+            TypeParam::TypeVarTuple(tuple) => (None, tuple.default.as_deref()),
+        };
+        for expr in bound.into_iter().chain(default) {
+            self.visit_type_strings(expr);
         }
     }
 
@@ -514,6 +532,32 @@ impl<'a> Walker<'_, '_> {
             self.visit_expr(&call.func);
         }
         self.visit_arguments(&call.arguments);
+        for argument in type_arguments(call) {
+            self.visit_type_strings(argument);
+        }
+    }
+
+    /// Add the reads of the names in the strings of a type expression that are types themselves, as
+    /// Python reads them when it evaluates the type: a quoted annotation (`"Item"`), and a string in
+    /// a subscript or a union of a type (`list["Item"]`, `int | "Item"`). The names are read in the
+    /// scope of the type, as when they are not quoted. A string that is not a valid expression reads
+    /// nothing.
+    fn visit_type_strings(&mut self, expr: &Expr) {
+        let mut strings = Vec::new();
+        type_strings(expr, &mut strings);
+        for string in strings {
+            let Ok(parsed) = ruff_python_parser::parse_expression(string.value.to_str().trim())
+            else {
+                continue;
+            };
+            let mut names = TypeNames::default();
+            names.visit_expr(parsed.expr());
+            for (root, attributes) in names.reads {
+                self.add_read(&root, attributes, None);
+            }
+            self.add_attributes(names.attributes);
+            self.visit_type_strings(parsed.expr());
+        }
     }
 
     /// Get the class whose base classes a call of `super` reads from: `super()` in a method, or
@@ -642,6 +686,7 @@ impl<'a> Walker<'_, '_> {
         self.in_signature = true;
         for annotation in annotations.into_iter().chain(returns) {
             self.visit_expr(annotation);
+            self.visit_type_strings(annotation);
         }
         self.in_signature = false;
 
@@ -840,6 +885,14 @@ impl<'a> Walker<'_, '_> {
         }
         if let Some(annotation) = annotation {
             self.visit_expr(annotation);
+            self.visit_type_strings(annotation);
+            // The value of `Alias: TypeAlias = ...` is a type.
+            let name = dotted_name(annotation, Unwrap::Subscript);
+            if let Some(value) = value
+                && name.is_some_and(|name| typing_name(&name) == Some("TypeAlias"))
+            {
+                self.visit_type_strings(value);
+            }
         }
         for target in targets {
             self.visit_expr(target);
@@ -1118,6 +1171,104 @@ fn attribute_chain(attribute: &ast::ExprAttribute) -> (&Expr, Vec<String>) {
     }
     attributes.reverse();
     (node, attributes)
+}
+
+/// The names that a type expression parsed from a string reads.
+#[derive(Default)]
+struct TypeNames {
+    /// The names, or the chains of attributes that start with one, each with its attributes in order.
+    reads: Vec<(String, Vec<String>)>,
+    /// The names that are read as attributes of something other than a name.
+    attributes: Vec<String>,
+}
+
+impl<'b> Visitor<'b> for TypeNames {
+    fn visit_expr(&mut self, expr: &'b Expr) {
+        match expr {
+            Expr::Name(name) => self.reads.push((name.id.to_string(), Vec::new())),
+            Expr::Attribute(attribute) => {
+                let (base, attributes) = attribute_chain(attribute);
+                if let Expr::Name(name) = base {
+                    self.reads.push((name.id.to_string(), attributes));
+                } else {
+                    self.attributes.extend(attributes);
+                    self.visit_expr(base);
+                }
+            }
+            _ => walk_expr(self, expr),
+        }
+    }
+}
+
+/// Get the strings of a type expression that are types themselves: the expression itself when it is
+/// a string, and the strings in its subscripts, unions, tuples and lists, such as `"Item"` in
+/// `list["Item"]`, `int | "Item"` or `Callable[["Item"], None]`. The values of `Literal` are not
+/// types, and of `Annotated[T, ...]`, only `T` is.
+fn type_strings<'e>(expr: &'e Expr, strings: &mut Vec<&'e ast::ExprStringLiteral>) {
+    match expr {
+        Expr::StringLiteral(string) => strings.push(string),
+        Expr::Subscript(subscript) => {
+            let name = dotted_name(&subscript.value, Unwrap::Subscript);
+            match name.as_deref().and_then(typing_name) {
+                Some("Literal") => {}
+                Some("Annotated") => match &*subscript.slice {
+                    Expr::Tuple(tuple) => {
+                        if let Some(first) = tuple.elts.first() {
+                            type_strings(first, strings);
+                        }
+                    }
+                    slice => type_strings(slice, strings),
+                },
+                _ => type_strings(&subscript.slice, strings),
+            }
+        }
+        Expr::BinOp(binary) if binary.op == Operator::BitOr => {
+            type_strings(&binary.left, strings);
+            type_strings(&binary.right, strings);
+        }
+        Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
+            for element in elts {
+                type_strings(element, strings);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Get the arguments of a call that are types: the first argument of `typing.cast`, the constraints,
+/// the bound and the default of `typing.TypeVar`, and the second argument of `typing.NewType`.
+fn type_arguments(call: &ast::ExprCall) -> Vec<&Expr> {
+    let Some(name) = dotted_name(&call.func, Unwrap::Subscript) else {
+        return Vec::new();
+    };
+    let arguments = &call.arguments;
+    let (positional, keywords): (_, &[&str]) = match typing_name(&name) {
+        Some("cast") => (arguments.args.get(..1), &["typ"]),
+        Some("TypeVar") => (arguments.args.get(1..), &["bound", "default"]),
+        Some("NewType") => (arguments.args.get(1..2), &["tp"]),
+        _ => return Vec::new(),
+    };
+    let keyword = arguments.keywords.iter().filter(|keyword| {
+        keyword
+            .arg
+            .as_ref()
+            .is_some_and(|arg| keywords.contains(&arg.as_str()))
+    });
+    positional
+        .unwrap_or_default()
+        .iter()
+        .chain(keyword.map(|keyword| &keyword.value))
+        .collect()
+}
+
+/// Get the name of a member of `typing` or `typing_extensions` from the dotted name that it is read
+/// by, such as `cast` for `typing.cast` or `cast`. Returns None for a member of another module.
+fn typing_name(name: &str) -> Option<&str> {
+    match name.rsplit_once('.') {
+        None => Some(name),
+        Some(("typing" | "typing_extensions", member)) => Some(member),
+        Some(_) => None,
+    }
 }
 
 /// Check whether an assignment target is the `__all__` variable.
