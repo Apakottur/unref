@@ -1,6 +1,6 @@
 # Configuration
 
-`unref` reads the `[tool.unref]` table of the `pyproject.toml` in the current directory:
+`unref` reads the `[tool.unref]` table of the closest `pyproject.toml`, from the current directory up:
 
 ```toml
 [tool.unref]
@@ -8,8 +8,12 @@ used-decorators = ["app.command", "app.route"]
 exclude = ["generated"]
 ```
 
+As with ty, the project root is the directory of the closest `pyproject.toml` with a `[tool.unref]`
+table, or else of the closest `pyproject.toml`. Its paths are relative to the project root, which is
+checked by default.
+
 Another file can be given with `--config`. In a file not named `pyproject.toml`, the options are at the
-top level. Paths are relative to the current directory, as in Ruff.
+top level. Its paths are relative to the current directory, as in Ruff.
 
 ## Options
 
@@ -48,7 +52,7 @@ used-decorators = ["app.command"]
 ### `exclude`
 
 Files and directories that are not checked, and whose references do not count. Patterns in the syntax of
-`.gitignore`, anchored at the current directory, as [ty's `exclude`](https://docs.astral.sh/ty/exclusions/):
+`.gitignore`, anchored at the project root, as [ty's `exclude`](https://docs.astral.sh/ty/exclusions/):
 
 ```toml
 [tool.unref]
@@ -71,8 +75,8 @@ Nothing is imported or run.
 python = ".venv"
 ```
 
-Defaults to the active virtual environment, or else `./.venv`. An environment that runs `unref` itself,
-such as that of a pre-commit or prek hook, is skipped.
+Defaults to the active virtual environment, or else the `.venv` of the project root. An environment that
+runs `unref` itself, such as that of a pre-commit or prek hook, is skipped.
 
 ### `dummy-variable-rgx`
 
@@ -136,11 +140,11 @@ show-transitive = true
 
 ## Command line
 
-`unref [paths]` checks the given files and directories, or the current directory.
+`unref [paths]` checks the given files and directories, or the project root.
 
 | Option            | Description                                                          |
 | ----------------- | -------------------------------------------------------------------- |
-| `--config`        | Configuration file. Defaults to `./pyproject.toml`.                  |
+| `--config`        | Configuration file. Defaults to the closest `pyproject.toml`.        |
 | `--python`        | The [`python`](#python) option. Overrides the configuration.         |
 | `--output-format` | The [`output-format`](#output-format) option. Overrides the configuration. |
 | `--show-transitive`, `--no-show-transitive` | The [`show-transitive`](#show-transitive) option. Overrides the configuration. |

@@ -45,6 +45,9 @@ pub(crate) struct Config {
     pub output_format: OutputFormat,
     /// Whether the unused definitions that only other unused definitions reach are printed too.
     pub show_transitive: bool,
+    /// The directory that the paths of the configuration are relative to, and that is checked when no
+    /// paths are given: the directory of a `pyproject.toml` that is found, or else the current one.
+    pub root: PathBuf,
 }
 
 impl Default for Config {
@@ -60,6 +63,7 @@ impl Default for Config {
             frameworks: FxHashMap::default(),
             output_format: OutputFormat::Concise,
             show_transitive: false,
+            root: PathBuf::from("."),
         }
     }
 }
@@ -67,23 +71,82 @@ impl Default for Config {
 /// Load the configuration from a TOML file.
 ///
 /// A file named `pyproject.toml` holds the options in its `[tool.unref]` table, and the entry points
-/// of the project in its `[project]` table. Any other file holds the options at the top level. Without
-/// a file, the `pyproject.toml` of the current directory is read, if there is one.
+/// of the project in its `[project]` table. Any other file holds the options at the top level. The
+/// paths of a given file are relative to the current directory, as with ruff.
+///
+/// Without a file, the closest `pyproject.toml` with a `[tool.unref]` table is read, from the current
+/// directory up, or else the closest `pyproject.toml`, as ty finds its project. Its directory is the
+/// root of the project, and its paths are relative to it.
 ///
 /// Returns an error message if the file cannot be read or is not valid.
 pub(crate) fn load_config(path: Option<&Path>) -> Result<Config, String> {
-    let path = if let Some(path) = path {
-        path.to_path_buf()
+    let (path, root) = if let Some(path) = path {
+        (path.to_path_buf(), None)
     } else {
-        let path = PathBuf::from(PYPROJECT);
-        if !path.is_file() {
-            return Ok(Config::default());
+        match find_pyproject() {
+            Some((path, root)) => (path, Some(root)),
+            None => return Ok(Config::default()),
         }
-        path
     };
+    let mut config = read_config(&path)?;
+    if let Some(root) = root {
+        for item in &mut config.overrides {
+            item.paths = item.paths.iter().map(|path| root.join(path)).collect();
+        }
+        config.python = config.python.map(|python| root.join(python));
+        config.root = root;
+    }
+    Ok(config)
+}
+
+/// Find the `pyproject.toml` of the project, from the current directory up: the closest one with a
+/// `[tool.unref]` table, or else the closest one. A file that cannot be read or parsed is taken, so
+/// that its error is reported.
+///
+/// Returns the file and its directory, relative to the current directory, or None if there is none.
+fn find_pyproject() -> Option<(PathBuf, PathBuf)> {
+    let current = std::env::current_dir().ok()?;
+    let mut closest = None;
+    for (depth, directory) in current.ancestors().enumerate() {
+        let candidate = directory.join(PYPROJECT);
+        if !candidate.is_file() {
+            continue;
+        }
+        let root: PathBuf = if depth == 0 {
+            PathBuf::from(".")
+        } else {
+            std::iter::repeat_n("..", depth).collect()
+        };
+        let found = (
+            if depth == 0 {
+                PathBuf::from(PYPROJECT)
+            } else {
+                root.join(PYPROJECT)
+            },
+            root,
+        );
+        let has_table = std::fs::read_to_string(&candidate)
+            .ok()
+            .and_then(|text| text.parse::<Table>().ok())
+            .is_none_or(|options| {
+                options
+                    .get("tool")
+                    .and_then(|tool| tool.get("unref"))
+                    .is_some()
+            });
+        if has_table {
+            return Some(found);
+        }
+        closest.get_or_insert(found);
+    }
+    closest
+}
+
+/// Read the configuration from a TOML file, with its paths as they are written.
+fn read_config(path: &Path) -> Result<Config, String> {
     let shown = path.display();
 
-    let text = std::fs::read(&path).map_err(|error| {
+    let text = std::fs::read(path).map_err(|error| {
         format!(
             "Cannot read the configuration file {shown}: {}",
             strerror(&error)
@@ -103,7 +166,7 @@ pub(crate) fn load_config(path: Option<&Path>) -> Result<Config, String> {
         let project = options
             .remove("project")
             .unwrap_or_else(|| Value::Table(Table::new()));
-        entry_points = parse_entry_points(&project, &path)?;
+        entry_points = parse_entry_points(&project, path)?;
         let place = format!("the configuration file {shown}");
         options = match options.remove("tool") {
             None => Table::new(),
@@ -116,7 +179,7 @@ pub(crate) fn load_config(path: Option<&Path>) -> Result<Config, String> {
         };
     }
 
-    let mut config = parse(&options, &path)?;
+    let mut config = parse(&options, path)?;
     config.entry_points = entry_points;
     Ok(config)
 }
@@ -258,7 +321,6 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
     Ok(Config {
         used_names: string_list(options, "used-names", &place)?,
         used_decorators: decorators(options, "used-decorators", &place)?,
-        // As with ruff, the paths are relative to the current directory, not to the configuration file.
         exclude: string_list(options, "exclude", &place)?,
         overrides: overrides
             .into_iter()
@@ -270,6 +332,7 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
         frameworks: parse_frameworks(options, &place)?,
         output_format,
         show_transitive,
+        root: PathBuf::from("."),
     })
 }
 
@@ -304,7 +367,6 @@ fn parse_override(options: &Table, path: &Path) -> Result<Override, String> {
     }
 
     Ok(Override {
-        // As with ruff, the paths are relative to the current directory, not to the configuration file.
         paths: string_list(options, "paths", &place)?
             .into_iter()
             .map(PathBuf::from)

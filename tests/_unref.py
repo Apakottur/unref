@@ -38,13 +38,14 @@ class Result:
         return self.stdout + self.stderr
 
 
-def run(args: Sequence[str], *, env: Mapping[str, str | None] | None = None) -> Result:
+def run(args: Sequence[str], *, env: Mapping[str, str | None] | None = None, cwd: Path | None = None) -> Result:
     """
-    Run the command in the current directory.
+    Run the command.
 
     Args:
         args: The arguments of the command.
         env: Environment variables to set for the run, or to remove with None.
+        cwd: The directory to run it in, or None for the current directory.
 
     Returns:
         What the run gives.
@@ -56,6 +57,6 @@ def run(args: Sequence[str], *, env: Mapping[str, str | None] | None = None) -> 
         else:
             environment[name] = value
     completed = subprocess.run(  # noqa: S603
-        [UNREF, *args], capture_output=True, text=True, env=environment, check=False
+        [UNREF, *args], capture_output=True, text=True, env=environment, cwd=cwd, check=False
     )
     return Result(exit_code=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)

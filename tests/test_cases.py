@@ -27,7 +27,8 @@ twice: by default, which prints only the findings that are not transitive, and w
 which prints them all.
 
 A case is run through the command, from its directory, so it is configured with a `pyproject.toml` in
-its directory, as a project is, which also gives its entry points.
+its directory, as a project is, which also gives its entry points. A case without one is run with an
+empty configuration, so that the `pyproject.toml` of this repository, above it, is not found.
 """
 
 import re
@@ -71,7 +72,9 @@ def _expected_findings(case: Path, *, show_transitive: bool) -> list[_Finding]:
     return sorted(findings)
 
 
-def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch, *, show_transitive: bool) -> list[_Finding]:
+def _actual_findings(
+    case: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, show_transitive: bool
+) -> list[_Finding]:
     """
     Run the command on a case from its directory, as a user runs it on their project, and collect the
     findings it prints. The paths of the configuration and of the findings are relative to the current
@@ -81,8 +84,14 @@ def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch, *, show_transi
     # An environment that is active in the shell that runs the tests is not the one of the case.
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
+    args = ["--jobs", "1", "--show-transitive" if show_transitive else "--no-show-transitive"]
+    if not (case / "pyproject.toml").is_file():
+        config = tmp_path / "unref.toml"
+        config.write_text("")
+        args += ["--config", str(config)]
+
     # A single process keeps the check in the process of the tests, which is faster for small cases.
-    result = run(["--jobs", "1", "--show-transitive" if show_transitive else "--no-show-transitive"])
+    result = run(args)
 
     findings: list[_Finding] = []
     for line in result.stdout.splitlines():
@@ -101,6 +110,6 @@ def _actual_findings(case: Path, monkeypatch: pytest.MonkeyPatch, *, show_transi
     ids=lambda case: case.name,
 )
 @pytest.mark.parametrize("show_transitive", [False, True], ids=["default", "show-transitive"])
-def test_case(case: Path, show_transitive: bool, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: FBT001
+def test_case(case: Path, show_transitive: bool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:  # noqa: FBT001
     expected = _expected_findings(case, show_transitive=show_transitive)
-    assert _actual_findings(case, monkeypatch, show_transitive=show_transitive) == expected
+    assert _actual_findings(case, monkeypatch, tmp_path, show_transitive=show_transitive) == expected

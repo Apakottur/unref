@@ -38,11 +38,11 @@ type IgnoreFile = (PathBuf, Gitignore);
 ///
 /// A file in `paths` is taken as is, a directory is searched for Python files. The `exclude` patterns
 /// are those of the files and directories that are not part of the project, on top of the default
-/// ones, in the syntax of `.gitignore`. They are anchored at the current directory.
+/// ones, in the syntax of `.gitignore`. They are anchored at `root`, the root of the project.
 ///
 /// Returns the Python files, sorted.
-pub(crate) fn discover(paths: &[PathBuf], exclude: &[String]) -> Vec<PathBuf> {
-    let excluded = Exclude::new(exclude);
+pub(crate) fn discover(paths: &[PathBuf], exclude: &[String], root: &Path) -> Vec<PathBuf> {
+    let excluded = Exclude::new(exclude, root);
     let mut files = Vec::new();
     for path in paths {
         let path = clean(path);
@@ -71,14 +71,14 @@ pub(crate) fn clean(path: &Path) -> PathBuf {
     }
 }
 
-/// The `exclude` patterns, with the default ones before them, anchored at the current directory.
+/// The `exclude` patterns, with the default ones before them, anchored at the root of the project.
 struct Exclude {
     patterns: Gitignore,
     root: PathBuf,
 }
 
 impl Exclude {
-    fn new(patterns: &[String]) -> Self {
+    fn new(patterns: &[String], root: &Path) -> Self {
         let mut builder = GitignoreBuilder::new(".");
         for pattern in DEFAULT_EXCLUDE
             .iter()
@@ -92,14 +92,14 @@ impl Exclude {
         }
         Self {
             patterns: builder.build().unwrap_or_else(|_| Gitignore::empty()),
-            root: resolve(Path::new(".")),
+            root: resolve(root),
         }
     }
 
     /// Check whether a file or directory under a given directory, which is resolved, is excluded.
     /// The last pattern that matches it decides.
     fn excludes(&self, path: &Path, is_directory: bool, given: &Path) -> bool {
-        // A path outside of the current directory can still match the patterns that start with `**/`.
+        // A path outside of the root can still match the patterns that start with `**/`.
         let relative_to_base = |path: &Path| {
             path.strip_prefix(&self.root)
                 .map_or_else(|_| without_root(path), Path::to_path_buf)
@@ -113,7 +113,7 @@ impl Exclude {
     }
 }
 
-/// Anchor a pattern at the current directory, as ty anchors them at the project root: `src` matches
+/// Anchor a pattern at the root of the project, as ty does: `src` matches
 /// only the `src` there, `**/src` matches one at any depth.
 fn anchor(pattern: &str) -> String {
     let (negation, body) = match pattern.strip_prefix('!') {

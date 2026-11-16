@@ -401,3 +401,86 @@ def test_config_tool_not_table(tmp_path: Path, content: str, table: str) -> None
 
     assert result.exit_code == 2
     assert result.stderr == f"Error: Table '{table}' in the configuration file {config} must be a table\n"
+
+
+def test_config_found_from_subdirectory() -> None:
+    # Without `--config`, the closest `pyproject.toml` with a `[tool.unref]` table is read from the
+    # current directory up, as ty finds its project. Its `exclude` and override paths are relative to
+    # its directory, it gives the entry points, and its directory is checked.
+    case = _CASES_DIR / "config_in_parent"
+
+    result = run([], cwd=case / "src")
+
+    assert result.exit_code == 1
+    assert result.stdout == "../scripts/tool.py:5:5: unused-function 'unused_tool'\n"
+
+
+def test_config_found_from_subdirectory_with_path() -> None:
+    # The paths that are given are relative to the current directory, the patterns to the project root.
+    case = _CASES_DIR / "config_in_parent"
+
+    result = run(["."], cwd=case / "src")
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
+
+
+def test_config_found_skips_pyproject_without_table(tmp_path: Path) -> None:
+    # A closer `pyproject.toml` without a `[tool.unref]` table is not the one of the project.
+    project = tmp_path / "project"
+    shutil.copytree(_CASES_DIR / "config_in_parent", project)
+    (project / "src" / "pyproject.toml").write_text('[project]\nname = "inner"\n')
+
+    result = run([], cwd=project / "src" / "app")
+
+    assert result.exit_code == 1
+    assert result.stdout == "../../scripts/tool.py:5:5: unused-function 'unused_tool'\n"
+
+
+def test_config_found_without_table(tmp_path: Path) -> None:
+    # Without a `[tool.unref]` table anywhere, the closest `pyproject.toml` is read, for its entry points.
+    project = tmp_path / "project"
+    shutil.copytree(_CASES_DIR / "config_in_parent", project)
+    (project / "pyproject.toml").write_text('[project.scripts]\napp = "app.cli:main"\n')
+
+    result = run([], cwd=project / "src")
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        "../scripts/tool.py:1:5: unused-function 'keep_this'\n"
+        "../scripts/tool.py:5:5: unused-function 'unused_tool'\n"
+        "../src/app/skip.py:1:5: unused-function 'skipped'\n"
+    )
+
+
+def test_config_found_python_relative_to_root(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    (project / "pyproject.toml").write_text('[tool.unref]\npython = "missing"\n')
+
+    result = run([], cwd=project / "src", env={"VIRTUAL_ENV": None})
+
+    assert result.exit_code == 2
+    assert result.stderr == "Error: The Python environment ../missing does not exist\n"
+
+
+def test_config_given_from_subdirectory() -> None:
+    # With `--config`, the paths are relative to the current directory, as with ruff, which is checked.
+    case = _CASES_DIR / "config_in_parent"
+
+    result = run(["--config", "../pyproject.toml"], cwd=case / "src")
+
+    assert result.exit_code == 1
+    assert result.stdout == "app/skip.py:1:5: unused-function 'skipped'\n"
+
+
+def test_config_not_found(tmp_path: Path) -> None:
+    # Without a `pyproject.toml` anywhere above, nothing is configured and the current directory is checked.
+    project = tmp_path / "project"
+    shutil.copytree(_CASES_DIR / "config_in_parent", project)
+    (project / "pyproject.toml").unlink()
+
+    result = run([], cwd=project / "src")
+
+    assert result.exit_code == 1
+    assert result.stdout == "app/cli.py:1:5: unused-function 'main'\napp/skip.py:1:5: unused-function 'skipped'\n"

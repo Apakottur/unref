@@ -1,0 +1,9 @@
+[project.scripts]
+app = "app.cli:main"
+
+[tool.unref]
+exclude = ["src/app/skip.py"]
+
+[[tool.unref.overrides]]
+paths = ["scripts"]
+used-names = ["keep_*"]

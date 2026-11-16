@@ -36,11 +36,12 @@ def test_file_path() -> None:
     assert result.stdout == f"{case}/module.py:1:5: unused-function 'function'\n"
 
 
-def test_default_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Without arguments, the current directory is checked.
-    monkeypatch.chdir(_CASES_DIR / "package")
+def test_default_path(tmp_path: Path) -> None:
+    # Without arguments and without a `pyproject.toml`, the current directory is checked.
+    project = tmp_path / "project"
+    shutil.copytree(_CASES_DIR / "package", project)
 
-    result = run([])
+    result = run([], cwd=project)
 
     assert result.exit_code == 1
     assert (

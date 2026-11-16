@@ -38,10 +38,10 @@ const STACK_SIZE: usize = 64 * 1024 * 1024;
 #[derive(Parser)]
 #[command(name = "unref", version, about)]
 struct Cli {
-    /// Files and directories to check. Defaults to the current directory.
+    /// Files and directories to check. Defaults to the root of the project.
     paths: Vec<PathBuf>,
 
-    /// Configuration file. Defaults to ./pyproject.toml.
+    /// Configuration file. Defaults to the closest pyproject.toml, from the current directory up.
     #[arg(long)]
     config: Option<PathBuf>,
 
@@ -49,7 +49,7 @@ struct Cli {
     #[arg(long, short, value_parser = parse_jobs)]
     jobs: Option<NonZeroUsize>,
 
-    /// Python environment or interpreter of the project. Defaults to the active one, or else ./.venv.
+    /// Python environment or interpreter of the project. Defaults to the active one, or else the .venv of the project root.
     #[arg(long)]
     python: Option<PathBuf>,
 
@@ -82,7 +82,7 @@ fn run(cli: Cli) -> ExitCode {
     };
 
     let environment = match cli.python.or_else(|| options.python.clone()) {
-        None => find_environment(),
+        None => find_environment(&options.root),
         Some(environment) if !environment.exists() => {
             return fail(&format!(
                 "The Python environment {} does not exist",
@@ -103,13 +103,14 @@ fn run(cli: Cli) -> ExitCode {
 
     let engine_options = Options {
         paths: if cli.paths.is_empty() {
-            vec![PathBuf::from(".")]
+            vec![options.root.clone()]
         } else {
             cli.paths
         },
         used_names: options.used_names,
         used_decorators: options.used_decorators,
         exclude: options.exclude,
+        root: options.root,
         overrides: options.overrides,
         python: environment,
         dummy_variable_rgx: options.dummy_variable_rgx,
@@ -164,11 +165,11 @@ fn fail(message: &str) -> ExitCode {
 }
 
 /// Find the virtual environment that the project runs in: the active one, or else the `.venv` of the
-/// current directory, or else the environment that the command is installed in, if it is one.
+/// root of the project, or else the environment that the command is installed in, if it is one.
 ///
 /// A hook of prek or pre-commit runs in an environment of its own, which it activates, so an active
 /// environment that holds the command itself is not taken first.
-fn find_environment() -> Option<PathBuf> {
+fn find_environment(root: &Path) -> Option<PathBuf> {
     let own = own_environment();
     if let Some(active) = std::env::var_os("VIRTUAL_ENV").filter(|active| !active.is_empty()) {
         let active = PathBuf::from(active);
@@ -176,9 +177,13 @@ fn find_environment() -> Option<PathBuf> {
             return Some(active);
         }
     }
-    let venv = Path::new(".venv");
+    let venv = if root == Path::new(".") {
+        PathBuf::from(".venv")
+    } else {
+        root.join(".venv")
+    };
     if venv.is_dir() {
-        return Some(venv.to_path_buf());
+        return Some(venv);
     }
     own.filter(|environment| environment.join("pyvenv.cfg").is_file())
 }
