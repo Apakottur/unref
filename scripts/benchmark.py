@@ -31,7 +31,7 @@ _TOOLS = {
 _RUNS = 5
 _COMPARE_RUNS = 15
 _TIME_LIMIT = 30.0
-# A slowdown above this fraction on one thread is flagged. Many threads are too noisy on CI runners to flag.
+# A slowdown above this fraction on a single core is flagged. Multi core times are too noisy on CI runners to flag.
 _SLOWDOWN_WARNING = 0.10
 _CHART = Path(__file__).parent.parent / "assets" / "benchmark.svg"
 
@@ -148,14 +148,14 @@ def compare(base: Path, head: Path, report: Path) -> None:
         "",
         f"Time to check CPython {_CPYTHON_TAG}: the median of {_COMPARE_RUNS} runs of each binary, run in turns.",
         "",
-        "| Threads | Base | Head | Change |",
+        "| Cores | Base | Head | Change |",
         "| --- | --- | --- | --- |",
     ]
     warning = None
     with tempfile.TemporaryDirectory() as directory:
         cpython = _download_cpython(Path(directory) / "source")
-        for name, options in {"One": ["--jobs", "1"], "All": []}.items():
-            print(f"Timing with {name.lower()} threads...")
+        for name, options in {"Single core": ["--jobs", "1"], "Multi core": []}.items():
+            print(f"Timing {name.lower()}...")
             commands = [[str(base.resolve()), *options], [str(head.resolve()), *options]]
             times: list[list[float]] = [[], []]
             # One run of each to warm up the file system cache. The binaries then run in turns, so that a slow
@@ -170,7 +170,7 @@ def compare(base: Path, head: Path, report: Path) -> None:
             change = head_median / base_median - 1
             lines.append(f"| {name} | {_label(base_median)} | {_label(head_median)} | {change:+.1%} |")
             if options and change > _SLOWDOWN_WARNING:
-                warning = f"unref is {change:.1%} slower on one thread."
+                warning = f"unref is {change:.1%} slower on a single core."
 
     if warning is not None:
         lines += ["", "> [!WARNING]", f"> {warning}"]
