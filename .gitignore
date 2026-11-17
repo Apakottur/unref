@@ -24,3 +24,6 @@ site
 
 # Rust
 target
+# Coverage data of an instrumented build, such as by cargo-llvm-cov.
+*.profraw
+*.profdata
