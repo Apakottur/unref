@@ -109,7 +109,14 @@ Enabled by default: yes.
   setup and teardown functions.
 - Anywhere: `pytest_*` hooks and fixtures.
 
-A project with custom pytest naming can add what these miss with an [override](#overrides).
+A project that sets `python_files`, `python_classes` or `python_functions` adds its own names with an
+[override](#overrides):
+
+```toml
+[[tool.unref.overrides]]
+paths = ["tests"]
+used-names = ["check_*", "Describe*"]
+```
 
 #### `unittest`
 
@@ -232,7 +239,7 @@ Options that apply only to some definitions. An override selects them with at le
 | ------------------ | -------------------------------------------------------------------------------------- |
 | `paths`            | Definitions in these files and directories.                                            |
 | `base-classes`     | Definitions in subclasses of these classes, such as `ast.NodeVisitor`.                 |
-| `class-decorators` | Definitions in classes with these decorators, such as `dataclasses.dataclass`.         |
+| `class-decorators` | Definitions in classes with these decorators, such as `plugins.register`.              |
 
 With several selectors, an override applies to what matches all of them. It then takes these options,
 which add to those of the project:
@@ -252,7 +259,7 @@ base-classes = ["ast.NodeVisitor"]
 used-names = ["visit_*"]
 
 [[tool.unref.overrides]]
-class-decorators = ["dataclasses.dataclass"]
+class-decorators = ["plugins.register"]
 used-names = ["*"]
 ```
 

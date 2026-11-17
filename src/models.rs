@@ -170,7 +170,7 @@ pub(crate) struct Override {
     pub paths: Vec<PathBuf>,
     /// Selects the definitions in subclasses of these classes, such as `ast.NodeVisitor`.
     pub base_classes: Vec<String>,
-    /// Selects the definitions in classes with these decorators, such as `dataclasses.dataclass`.
+    /// Selects the definitions in classes with these decorators, such as `plugins.register`.
     pub class_decorators: Vec<String>,
     /// Names, as patterns, of the selected definitions that count as used.
     pub used_names: Vec<String>,

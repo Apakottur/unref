@@ -90,7 +90,6 @@ def _actual_findings(
         config.write_text("")
         args += ["--config", str(config)]
 
-    # A single process keeps the check in the process of the tests, which is faster for small cases.
     result = run(args)
 
     findings: list[_Finding] = []

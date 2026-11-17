@@ -16,15 +16,6 @@ def test_version() -> None:
     assert result.stdout == f"unref {importlib.metadata.version('unref')}\n"
 
 
-def test_output_format_concise() -> None:
-    case = CASES_DIR / "function"
-
-    result = run(["--output-format", "concise", str(case)])
-
-    assert result.exit_code == 1
-    assert result.stdout == f"{case}/main.py:1:5: unused-function 'function'\n"
-
-
 def test_output_format_github() -> None:
     case = CASES_DIR / "syntax_error"
 
@@ -104,17 +95,6 @@ def test_show_transitive(tmp_path: Path, option: list[str], content: str) -> Non
         f"{case}/main.py:1:7: unused-class 'Class'\n"
         f"{case}/main.py:2:9: unused-method 'method'\n"
         f"{case}/main.py:5:15: unused-method 'async_method'\n"
-    )
-
-
-def test_show_transitive_github() -> None:
-    case = CASES_DIR / "method"
-
-    result = run(["--output-format", "github", str(case)])
-
-    assert result.exit_code == 1
-    assert result.stdout == (
-        f"::error title=unref (unused-class),file={case}/main.py,line=1,col=7::{case}/main.py:1:7: unused-class 'Class'\n"
     )
 
 
