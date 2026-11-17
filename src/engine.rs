@@ -418,9 +418,8 @@ impl<'a> Classes<'a> {
             if definition.kind != Kind::Class {
                 continue;
             }
-            let Some(&id) = ids.get(&(*file, definition.qualified_name())) else {
-                continue;
-            };
+            // The loop above gave an id to every class.
+            let id = ids[&(*file, definition.qualified_name())];
             unknown_bases[id] = definition.other_bases;
             for base in &definition.bases {
                 let names = hierarchy.resolve(*file, base);
@@ -962,9 +961,8 @@ fn findings(
             all.push(finding.clone());
             continue;
         }
-        let Some(&file) = file_of.get(path) else {
-            continue;
-        };
+        // A file that is read and parsed is in the project.
+        let file = file_of[path];
         let mut file_findings: Vec<Finding> = project
             .ids_of_file(file)
             .filter(|id| !used[*id])
@@ -1017,10 +1015,11 @@ struct Graph<'a> {
     by_attribute: FxHashMap<String, Vec<DefinitionId>>,
     by_key: FxHashMap<String, Vec<DefinitionId>>,
     public: FxHashMap<usize, Vec<DefinitionId>>,
-    /// What is used so far, and what is left to follow.
+    /// What is used so far, and what is left to follow. An owner is left to follow once: a module at
+    /// the start, and a function when it is first used, as no two functions of a file have their name
+    /// on the same line.
     used: Vec<bool>,
     pending: Vec<(usize, Owner)>,
-    seen_owners: FxHashSet<(usize, Owner)>,
     seen: Seen,
 }
 
@@ -1108,7 +1107,6 @@ impl<'a> Graph<'a> {
             used: vec![false; project.definitions.len()],
             // The code of every module runs.
             pending: (0..project.files.len()).map(|file| (file, None)).collect(),
-            seen_owners: FxHashSet::default(),
             seen: Seen::default(),
         }
     }
@@ -1125,9 +1123,6 @@ impl<'a> Graph<'a> {
             let Some(uses) = self.uses.get(&owner) else {
                 continue;
             };
-            if !self.seen_owners.insert(owner) {
-                continue;
-            }
             let mut seen = std::mem::take(&mut self.seen);
             let mut found: Vec<DefinitionId> = Vec::new();
             self.look_up(uses, Some(&mut seen), &mut found);

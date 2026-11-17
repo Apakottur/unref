@@ -38,7 +38,13 @@ class Result:
         return self.stdout + self.stderr
 
 
-def run(args: Sequence[str], *, env: Mapping[str, str | None] | None = None, cwd: Path | None = None) -> Result:
+def run(
+    args: Sequence[str],
+    *,
+    env: Mapping[str, str | None] | None = None,
+    cwd: Path | None = None,
+    binary: Path = UNREF,
+) -> Result:
     """
     Run the command.
 
@@ -46,6 +52,7 @@ def run(args: Sequence[str], *, env: Mapping[str, str | None] | None = None, cwd
         args: The arguments of the command.
         env: Environment variables to set for the run, or to remove with None.
         cwd: The directory to run it in, or None for the current directory.
+        binary: The executable of the command, which is the one that the tests run by default.
 
     Returns:
         What the run gives.
@@ -57,6 +64,6 @@ def run(args: Sequence[str], *, env: Mapping[str, str | None] | None = None, cwd
         else:
             environment[name] = value
     completed = subprocess.run(  # noqa: S603
-        [UNREF, *args], capture_output=True, text=True, env=environment, cwd=cwd, check=False
+        [binary, *args], capture_output=True, text=True, env=environment, cwd=cwd, check=False
     )
     return Result(exit_code=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)

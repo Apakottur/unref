@@ -1,0 +1,2 @@
+# coding: euc-jp
+"ÆüËÜ¸ì"; japanese = 1  # expect: 8 [unused-variable]

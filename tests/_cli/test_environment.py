@@ -1,11 +1,11 @@
+import os
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
 
 from tests._cli._files import CASES_DIR, write_config
-from tests._unref import run
+from tests._unref import UNREF, run
 
 _CASE = CASES_DIR / "external_environment"
 
@@ -88,8 +88,15 @@ def test_active_environment(tmp_path: Path) -> None:
 
 def test_venv_of_current_directory(tmp_path: Path) -> None:
     # A prek or pre-commit hook activates the environment that runs the check, which is not the one of
-    # the project.
-    result = run(["--config", str(write_config(tmp_path)), str(_CASE)], env={"VIRTUAL_ENV": sys.prefix}, cwd=_CASE)
+    # the project. The command is installed in an environment of its own, wherever the one that the
+    # tests run is.
+    hook = tmp_path / "hook"
+    (hook / "bin").mkdir(parents=True)
+    binary = Path(shutil.copy2(UNREF, hook / "bin" / UNREF.name))
+
+    result = run(
+        ["--config", str(write_config(tmp_path)), str(_CASE)], env={"VIRTUAL_ENV": str(hook)}, cwd=_CASE, binary=binary
+    )
 
     assert result.stdout == _WITH_ENVIRONMENT
 
@@ -98,3 +105,46 @@ def test_no_environment(tmp_path: Path) -> None:
     result = run(["--config", str(write_config(tmp_path)), str(_CASE)], env=_NO_ACTIVE_ENVIRONMENT, cwd=tmp_path)
 
     assert result.stdout == _WITHOUT_ENVIRONMENT
+
+
+def test_python_path(tmp_path: Path) -> None:
+    # The directories of `PYTHONPATH` that exist are where modules are imported from.
+    python_path = os.pathsep.join([str(tmp_path / "missing"), str(_CASE / ".venv" / "src")])
+
+    result = run(
+        ["--config", str(write_config(tmp_path)), str(_CASE)],
+        env={**_NO_ACTIVE_ENVIRONMENT, "PYTHONPATH": python_path},
+        cwd=tmp_path,
+    )
+
+    assert result.stdout == _WITHOUT_ENVIRONMENT.replace(f"{_CASE}/main.py:21:9: unused-method 'hook'\n", "")
+
+
+def test_python_path_before_environment(tmp_path: Path) -> None:
+    # As in Python, a package on `PYTHONPATH` comes before the one of the same name that is installed:
+    # the `TypeDecorator` there has no base class with members.
+    result = run(
+        ["--config", str(write_config(tmp_path)), "--python", str(_CASE / ".venv"), str(_CASE)],
+        env={**_NO_ACTIVE_ENVIRONMENT, "PYTHONPATH": str(_CASE / ".venv" / "pythonpath")},
+        cwd=tmp_path,
+    )
+
+    assert result.stdout == _WITHOUT_ENVIRONMENT.replace(f"{_CASE}/main.py:21:9: unused-method 'hook'\n", "")
+
+
+@pytest.mark.parametrize("key", ["version", "version_info"])
+def test_standard_library_version(tmp_path: Path, key: str) -> None:
+    # The standard library is the one of the version that the `pyvenv.cfg` of the environment names,
+    # under the Python that it is made from, and not the newest one there.
+    case = CASES_DIR / "standard_library"
+    environment = tmp_path / "venv"
+    environment.mkdir()
+    (environment / "pyvenv.cfg").write_text(f"home = {case / '.venv' / 'bin'}\n{key} = 3.13.1\n")
+
+    result = run(
+        ["--config", str(write_config(tmp_path)), "--python", str(environment), str(case)],
+        env=_NO_ACTIVE_ENVIRONMENT,
+        cwd=tmp_path,
+    )
+
+    assert result.stdout == f"{case}/main.py:7:9: unused-method 'newest'\n"
