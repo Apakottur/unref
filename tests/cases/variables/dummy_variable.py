@@ -1,5 +1,5 @@
 # A variable whose name matches `dummy-variable-rgx` is not reported where Python forces a binding: as a
-# target of an unpacking, a for loop or a comprehension. The default pattern is the one of Ruff.
+# target of an unpacking. The default pattern is the one of Ruff.
 
 
 def pair():

@@ -75,15 +75,6 @@ pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
     })
 }
 
-/// What a module defines and refers to, and the names that it gives out from its `__getattr__`.
-pub(crate) type Module = (Vec<Definition>, References, FxHashMap<String, Vec<Binding>>);
-
-/// Read a module and parse it, as for a module outside the project, which has no findings.
-pub(crate) fn read_module(path: &Arc<Path>) -> Option<Module> {
-    let facts = analyze_file(path).ok()?;
-    Some((facts.definitions, facts.references, facts.lazy))
-}
-
 /// Why the source of a module cannot be decoded, with the line and the column where it fails.
 #[derive(Debug)]
 pub(crate) struct DecodeError {
