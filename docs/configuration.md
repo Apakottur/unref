@@ -80,8 +80,7 @@ runs `unref` itself, such as that of a pre-commit or prek hook, is skipped.
 
 ### `dummy-variable-rgx`
 
-Names of variables that are unused on purpose, where Python needs a name to bind: an unpacking or a `for`
-loop target, such as `key, _rest = pair()`. Same option and default as
+Names of variables that are unused on purpose, where Python needs a name to bind, such as an unpacking: `key, _rest = pair()`. Same option and default as
 [Ruff's](https://docs.astral.sh/ruff/settings/#lint_dummy-variable-rgx), which matches `_`, `__` and
 `_rest`.
 

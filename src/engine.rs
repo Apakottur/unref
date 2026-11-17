@@ -57,8 +57,9 @@ struct Uses {
     objects: FxHashSet<(usize, Vec<String>)>,
     /// The modules that the code star imports.
     stars: FxHashSet<usize>,
-    /// The functions and classes that are local variables of a function, and the members of a class
-    /// read in its class body, that the code reads.
+    /// The functions and classes that are local variables of a function, the members of a class read
+    /// in its class body, and the members that a read through a class or its first parameter can
+    /// stand for, that the code reads.
     definitions: FxHashSet<DefinitionId>,
 }
 
@@ -906,7 +907,7 @@ fn transitive_definitions(
         .collect();
 
     let mut classes: FxHashMap<(usize, String), usize> = FxHashMap::default();
-    // By the owner of their code, which is None for no function.
+    // By the line of their name, which is the owner of the code in them.
     let mut functions: FxHashMap<(usize, u32), usize> = FxHashMap::default();
     for (index, &id) in unused.iter().enumerate() {
         let (file, definition) = (&project.definition_files[id], &project.definitions[id]);
@@ -1152,8 +1153,8 @@ impl<'a> Graph<'a> {
 
     /// Find the definitions that the uses of an owner can stand for: the names by their module, the
     /// attributes and keys by their name, the members of the enums that are read as a whole, and the
-    /// public names of the modules that are star imported, and the functions and classes defined in
-    /// a function that the code reads.
+    /// public names of the modules that are star imported, and the definitions that the code reads
+    /// exactly: functions and classes defined in a function, and members found through a class.
     ///
     /// With `seen`, a use that is in it already is skipped, and the others are added to it.
     fn look_up(

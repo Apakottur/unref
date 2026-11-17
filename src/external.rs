@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
-use crate::files::read_module;
+use crate::files::analyze_file;
 use crate::modules::{ModuleName, resolve};
 use crate::symbols::ModuleSymbols;
 
@@ -91,16 +91,16 @@ impl ExternalModules {
             return None;
         }
         let file: Arc<Path> = Arc::from(file);
-        let (definitions, references, lazy) = read_module(&file)?;
+        let facts = analyze_file(&file).ok()?;
         Some(ModuleSymbols::of(
             file,
             ModuleName {
                 name: name.to_string(),
                 is_package,
             },
-            &definitions,
-            &references,
-            lazy,
+            &facts.definitions,
+            &facts.references,
+            facts.lazy,
         ))
     }
 

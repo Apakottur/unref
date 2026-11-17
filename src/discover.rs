@@ -277,10 +277,7 @@ fn matched(patterns: &Gitignore, path: &Path, is_directory: bool, given: &Path) 
     }
     let placeholder: PathBuf = given
         .iter()
-        .map(Into::into)
-        .chain(rest.iter().map(|_| PLACEHOLDER.into()))
-        .collect::<Vec<std::ffi::OsString>>()
-        .iter()
+        .chain(rest.iter().map(|_| std::ffi::OsStr::new(PLACEHOLDER)))
         .collect();
     if patterns.matched(&placeholder, is_directory).is_none() {
         found

@@ -831,14 +831,14 @@ impl<'a> Walker<'_, '_> {
                 },
             ),
         });
-        let bindings: Vec<_> = bindings.collect();
+        let bindings = bindings.collect();
         self.bind_imports(bindings);
     }
 
     /// Add the names that a `from` import imports, and bind them.
     fn visit_import_from(&mut self, import: &ast::StmtImportFrom) {
         let module = import.module.as_ref().map(ToString::to_string);
-        let mut bindings = Vec::new();
+        let mut bindings = FxHashMap::default();
         for alias in &import.names {
             self.references.imports.insert(Import {
                 owner: self.owner,
@@ -847,14 +847,14 @@ impl<'a> Walker<'_, '_> {
                 name: alias.name.to_string(),
             });
             let bound = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
-            bindings.push((
+            bindings.insert(
                 bound,
                 Binding {
                     module: module.clone(),
                     level: import.level,
                     name: Some(alias.name.to_string()),
                 },
-            ));
+            );
         }
         self.bind_imports(bindings);
     }
@@ -1086,11 +1086,7 @@ impl<'a> Walker<'_, '_> {
     ///
     /// When a name is imported more than once, as by an `import` in a `try` and a fallback in its
     /// `except`, the first import is the one that counts. Within one statement, the last one does.
-    fn bind_imports(&mut self, bindings: Vec<(String, Binding)>) {
-        let mut statement: FxHashMap<String, Binding> = FxHashMap::default();
-        for (name, binding) in bindings {
-            statement.insert(name, binding);
-        }
+    fn bind_imports(&mut self, statement: FxHashMap<String, Binding>) {
         for (name, binding) in statement {
             self.bind(&name);
             let binder = self.binder;
