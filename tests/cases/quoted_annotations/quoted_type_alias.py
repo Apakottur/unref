@@ -23,9 +23,26 @@ class SpecDefault:
     pass
 
 
-# The default of a `ParamSpec` is a type as well (PEP 696).
+class TupleDefault:
+    pass
+
+
+class Unpacked:
+    pass
+
+
+# The defaults of a `ParamSpec` and of a `TypeVarTuple` are types as well (PEP 696), and so is an
+# unpacked annotation of `*args`.
 def call[**P = ["SpecDefault"]](function: Callable[P, None]) -> None:
     print(function)
 
 
-print(JSONValue, Old, first, call)
+class Row[*Ts = *tuple["TupleDefault"]]:
+    pass
+
+
+def take(*args: *tuple["Unpacked"]) -> None:
+    print(args)
+
+
+print(JSONValue, Old, first, call, Row, take)

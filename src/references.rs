@@ -1226,9 +1226,9 @@ impl<'b> Visitor<'b> for TypeNames {
 }
 
 /// Get the strings of a type expression that are types themselves: the expression itself when it is
-/// a string, and the strings in its subscripts, unions, tuples and lists, such as `"Item"` in
-/// `list["Item"]`, `int | "Item"` or `Callable[["Item"], None]`. The values of `Literal` are not
-/// types, and of `Annotated[T, ...]`, only `T` is.
+/// a string, and the strings in its subscripts, unions, tuples, lists and unpacked types, such as
+/// `"Item"` in `list["Item"]`, `int | "Item"`, `Callable[["Item"], None]` or `*tuple["Item"]`. The
+/// values of `Literal` are not types, and of `Annotated[T, ...]`, only `T` is.
 fn type_strings<'e>(expr: &'e Expr, strings: &mut Vec<&'e ast::ExprStringLiteral>) {
     match expr {
         Expr::StringLiteral(string) => strings.push(string),
@@ -1251,6 +1251,7 @@ fn type_strings<'e>(expr: &'e Expr, strings: &mut Vec<&'e ast::ExprStringLiteral
             type_strings(&binary.left, strings);
             type_strings(&binary.right, strings);
         }
+        Expr::Starred(starred) => type_strings(&starred.value, strings),
         Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
             for element in elts {
                 type_strings(element, strings);
