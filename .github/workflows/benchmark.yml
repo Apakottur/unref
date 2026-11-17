@@ -22,7 +22,7 @@ jobs:
     steps:
       # A pull request is checked out as its merge into the current main, which is the merge's first parent. The
       # base SHA of the event can be an older main, whose later commits would count as changes of the PR.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
 
@@ -44,7 +44,7 @@ jobs:
           install-project: "false"
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2.9.3
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             . -> target
@@ -64,7 +64,7 @@ jobs:
       # A pull request from a fork has a read-only token, so it gets the job summary only.
       - name: Comment on the pull request
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.5
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: benchmark
           path: benchmark.md
