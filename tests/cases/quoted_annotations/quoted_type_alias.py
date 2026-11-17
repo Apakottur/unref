@@ -1,5 +1,5 @@
 # The value of a type alias is a type, so the names in a quoted part of it are read.
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TypeAlias
 
 type JSONArray = Sequence["JSONValue"]
@@ -19,4 +19,13 @@ def first[T: "Bound"](values: list[T]) -> T:
     return values[0]
 
 
-print(JSONValue, Old, first)
+class SpecDefault:
+    pass
+
+
+# The default of a `ParamSpec` is a type as well (PEP 696).
+def call[**P = ["SpecDefault"]](function: Callable[P, None]) -> None:
+    print(function)
+
+
+print(JSONValue, Old, first, call)

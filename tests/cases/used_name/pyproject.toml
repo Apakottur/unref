@@ -1,2 +1,9 @@
 [tool.unref]
-used-names = ["model_config", "visit_*", "*_handler", "Test*", "item_?"]
+used-names = [
+  "model_config",
+  "visit_*",
+  "*_handler",
+  "Test*",
+  "item_?",
+  "level_[abc]",
+]

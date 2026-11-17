@@ -44,6 +44,19 @@ def test_config_file_missing(tmp_path: Path) -> None:
     assert result.stderr == f"Error: Cannot read the configuration file {config}: No such file or directory\n"
 
 
+def test_config_file_not_utf8(tmp_path: Path) -> None:
+    # A TOML file is UTF-8.
+    config = tmp_path / "unref.toml"
+    config.write_bytes(b"# \xe9\n")
+
+    result = run(["--config", str(config)])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    # The end of the message comes from a library.
+    assert result.stderr.startswith(f"Error: Invalid TOML in the configuration file {config}: ")
+
+
 def _invalid(test_id: str, content: str, error: str, *, name: str = "unref.toml", partial: bool = False) -> object:
     """
     A configuration file that is not valid, and the error it gives, where `{config}` stands for its path.

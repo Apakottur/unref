@@ -1,4 +1,7 @@
 from pkg import Base, Compiled
+from pkg.dotted import Base as DottedBase
+from pkg.stable import Base as StableBase
+from pkg.tagged import Base as TaggedBase
 
 
 # A base class is found through the star imports of a package, past a star import of a compiled module
@@ -17,4 +20,22 @@ class FromCompiled(Compiled):
         return record
 
 
-print(Handler, FromCompiled)
+# A compiled module is found before a source of the same name, also with a platform tag in its name,
+# such as `tagged.cpython-315-x86_64-linux-gnu.so` or `stable.abi3.so`.
+class FromTagged(TaggedBase):
+    def emit(self, record):  # expect: 9 [unused-method]
+        return record
+
+
+class FromStable(StableBase):
+    def emit(self, record):  # expect: 9 [unused-method]
+        return record
+
+
+# A tag has no dot, so `dotted.x.y.so` is not the compiled module `dotted`, and its source is followed.
+class FromDotted(DottedBase):
+    def emit(self, record):
+        return record
+
+
+print(Handler, FromCompiled, FromTagged, FromStable, FromDotted)

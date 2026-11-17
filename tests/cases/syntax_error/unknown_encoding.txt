@@ -1,0 +1,2 @@
+# coding: unknown-codec
+# The encoding that the first line declares does not exist.

@@ -33,6 +33,11 @@ item_1 = 7
 item_10 = 8  # expect: 1 [unused-variable]
 
 
+# A pattern, where `[abc]` stands for one of its characters.
+level_b = 11
+level_d = 12  # expect: 1 [unused-variable]
+
+
 # A name is matched with its case.
 class TestCase:
     def __init__(self):

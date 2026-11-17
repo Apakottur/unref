@@ -1,0 +1,3 @@
+[tool.unref]
+# A `sys.prefix` of its own, without a `pyvenv.cfg`, with the standard libraries of two versions.
+python = ".venv"

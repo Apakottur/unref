@@ -85,10 +85,31 @@ def test_syntax_error() -> None:
     )
 
 
-@pytest.mark.parametrize("name", ["missing.py", "missing"])
+@pytest.mark.parametrize(
+    ("name", "error"),
+    [
+        ("undecodable.txt", "(unicode error) 'euc-jp' codec can't decode the source"),
+        ("unknown_encoding.txt", "unknown encoding: unknown-codec"),
+    ],
+)
+def test_undecodable(name: str, error: str) -> None:
+    # A file that does not decode with the encoding it declares, or that declares an encoding that does
+    # not exist, is a syntax error, as in Python. The files are not named `.py`, so that the cases, which
+    # read every `.py` file, do not read them, and a file that is given directly is checked whatever its
+    # name.
+    path = CASES_DIR / "syntax_error" / name
+
+    result = run([str(path)])
+
+    assert result.exit_code == 1
+    assert result.stdout == f"{path}:1:1: invalid-syntax '{error}'\n"
+
+
+@pytest.mark.parametrize("name", ["missing.py", "missing", "missing/module.py", "missing/../main.py"])
 def test_missing_path(name: str) -> None:
     # A given path that does not exist, whether a file or a directory, is reported as a file that
-    # cannot be read, as with ruff, and the rest of the project is still checked.
+    # cannot be read, as with ruff, and the rest of the project is still checked. A path through a
+    # directory that does not exist does not exist either, even when a `..` leads back out of it.
     case = CASES_DIR / "method"
     missing = case / name
 

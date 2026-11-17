@@ -1,0 +1,3 @@
+# coding: euc-jp
+# The bytes on the next line are not valid EUC-JP.
+"ÿþ"
