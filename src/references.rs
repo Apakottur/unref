@@ -11,7 +11,7 @@ use ruff_python_ast::{
     self as ast, CmpOp, ExceptHandler, Expr, ExprContext, Operator, Parameters, Pattern, Stmt,
     TypeParam,
 };
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::definitions::{Definition, Kind, Unwrap, annotation_name, decorator_names, dotted_name};
@@ -27,8 +27,8 @@ pub(crate) struct Binding {
     pub name: Option<String>,
 }
 
-/// The code that a reference is made from: the line of the name of the function that the reference
-/// is in, or None for code that runs when the module is imported.
+/// The code that a reference or a definition is in: the line of the name of the function that it is
+/// in, or None for code that runs when the module is imported.
 pub(crate) type Owner = Option<u32>;
 
 /// A read of a name, or of a chain of attributes that starts with one (`package.module.name`).
@@ -154,8 +154,8 @@ pub(crate) fn walk_module(
     };
     walker.visit_body(&module.body);
     // What reaches the module is read from the module itself, or from what it imports.
-    walker.references.bindings = walker.scopes[0].imports.clone();
     walker.close(0, &FxHashSet::default(), Target::Module);
+    walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
     (walker.definitions, walker.references)
 }
 
@@ -256,9 +256,11 @@ struct Walker<'p, 'a> {
     scopes: Vec<Scope>,
     /// The scope that the node being walked is in.
     scope: usize,
-    /// The scope that the names bound at the node belong to, which holds its definitions. In a class
-    /// body, and in what a function evaluates where it is defined, it is a scope of its own that is
-    /// then dropped, since the names that they bind are not tracked.
+    /// The scope that the names bound at the node belong to, which holds its definitions. It is the
+    /// scope of the node, except in what a class or function evaluates where it is defined. The
+    /// decorators, type parameters and base classes of a class bind in the class body. The decorators,
+    /// default values and annotations of a function bind in a scope of their own that is then dropped,
+    /// since the names that they bind are not tracked.
     binder: usize,
     /// The function that the node is in, or None for code that runs when the module is imported.
     owner: Owner,
@@ -493,11 +495,11 @@ impl<'a> Walker<'_, '_> {
             && !scope.global_names.contains(root)
             && !scope.imports.contains_key(root)
         {
+            let owner = self.owner;
             let members = scope.members.get(root).into_iter().flatten();
-            let reads = members
-                .map(|&index| (self.owner, index))
-                .collect::<Vec<_>>();
-            self.references.local_reads.extend(reads);
+            self.references
+                .local_reads
+                .extend(members.map(|&index| (owner, index)));
             self.add_attributes(attributes.into_iter().chain(called));
             return;
         }
@@ -579,10 +581,8 @@ impl<'a> Walker<'_, '_> {
         };
         let scope = &self.scopes[self.scope];
         let class = scope.class_name.as_ref()?;
-        if func.id.as_str() != "super"
-            || scope.instance.is_none()
-            || scope.kind != ScopeKind::Function
-        {
+        // Only the body of a method has an instance.
+        if func.id.as_str() != "super" || scope.instance.is_none() {
             return None;
         }
         let arguments = &call.arguments;
@@ -721,29 +721,27 @@ impl<'a> Walker<'_, '_> {
 
         let inner_scope = &mut self.scopes[inner];
         // A variable declared `global` or `nonlocal` is not local to the function.
+        let mut local_names: FxHashSet<String> = inner_scope
+            .bound
+            .iter()
+            .filter(|name| {
+                !inner_scope.global_names.contains(*name)
+                    && !inner_scope.nonlocal_names.contains(*name)
+            })
+            .cloned()
+            .collect();
+        // A variable that is assigned the result of a call is bound, so it is local unless declared
+        // `global` or `nonlocal`.
         let calls = std::mem::take(&mut inner_scope.calls);
         if line != 0 {
-            for (name, called) in calls {
-                if !inner_scope.global_names.contains(&name)
-                    && !inner_scope.nonlocal_names.contains(&name)
-                {
-                    self.references.local_calls.insert((line, name), called);
-                }
-            }
+            let calls = calls
+                .into_iter()
+                .filter(|(name, _)| local_names.contains(name));
+            self.references
+                .local_calls
+                .extend(calls.map(|(name, called)| ((line, name), called)));
         }
-        let inner_scope = &self.scopes[inner];
-        let mut local_names: FxHashSet<String> =
-            names.iter().map(|name| (*name).to_string()).collect();
-        local_names.extend(
-            inner_scope
-                .bound
-                .iter()
-                .filter(|name| {
-                    !inner_scope.global_names.contains(*name)
-                        && !inner_scope.nonlocal_names.contains(*name)
-                })
-                .cloned(),
-        );
+        local_names.extend(names.iter().map(|name| (*name).to_string()));
         let target = self.reads_target(scope);
         self.close(inner, &local_names, Target::Scope(target));
     }
@@ -753,9 +751,8 @@ impl<'a> Walker<'_, '_> {
     /// The body of a class is a scope whose names are the attributes, methods and classes of the class.
     /// The functions in it do not see them.
     fn visit_class(&mut self, class: &'a ast::StmtClassDef) {
-        let (line, column) = self.positions.line_column(class.name.start());
         let binder = &self.scopes[self.binder];
-        let owner = if binder.kind == ScopeKind::Class {
+        let enclosing_class = if binder.kind == ScopeKind::Class {
             binder.class_name.clone()
         } else {
             None
@@ -771,19 +768,11 @@ impl<'a> Walker<'_, '_> {
             .collect();
         let other_bases = bases.len() < written_bases.len();
         let definition = Definition {
-            path: self.path.clone(),
-            line,
-            column,
-            kind: Kind::Class,
-            name: class.name.to_string(),
             decorators: decorator_names(&class.decorator_list),
-            owner,
-            function: self.owner,
+            class: enclosing_class,
             bases,
             other_bases,
-            unpacked: false,
-            annotation: None,
-            call: None,
+            ..self.definition(Kind::Class, &class.name, class.name.start())
         };
         let mut class_scope = Scope::new(ScopeKind::Class);
         class_scope.class_name = Some(definition.qualified_name());
@@ -929,7 +918,7 @@ impl<'a> Walker<'_, '_> {
         let enclosing = &self.scopes[self.binder];
         let mut kind = Kind::Function;
         let mut scope = Scope::new(ScopeKind::Function);
-        let mut owner = None;
+        let mut class = None;
         if enclosing.kind == ScopeKind::Class {
             kind = Kind::Method;
             let parameters = &function.parameters;
@@ -946,24 +935,15 @@ impl<'a> Walker<'_, '_> {
                 .map(|parameter| parameter.parameter.name.to_string());
             scope.defined_in = enclosing.defined_in;
             scope.class_name.clone_from(&enclosing.class_name);
-            owner.clone_from(&enclosing.class_name);
+            class.clone_from(&enclosing.class_name);
         }
-        let (line, column) = self.positions.line_column(function.name.start());
-        self.definitions.push(Definition {
-            path: self.path.clone(),
-            line,
-            column,
-            kind,
-            name: function.name.to_string(),
+        let definition = Definition {
             decorators: decorator_names(&function.decorator_list),
-            owner,
-            function: self.owner,
-            bases: Vec::new(),
-            other_bases: false,
-            unpacked: false,
-            annotation: None,
-            call: None,
-        });
+            class,
+            ..self.definition(kind, &function.name, function.name.start())
+        };
+        let line = definition.line;
+        self.definitions.push(definition);
         (scope, line)
     }
 
@@ -1030,7 +1010,6 @@ impl<'a> Walker<'_, '_> {
         if !self.scopes[defined_in].defined.insert(name.to_string()) {
             return;
         }
-        let (line, column) = self.positions.line_column(position);
         if in_class_body {
             let index = self.definitions.len();
             let binder = self.binder;
@@ -1041,20 +1020,33 @@ impl<'a> Walker<'_, '_> {
                 .push(index);
         }
         self.definitions.push(Definition {
+            class: class_name,
+            unpacked,
+            annotation: annotation.cloned(),
+            call: call.cloned(),
+            ..self.definition(kind, name, position)
+        });
+    }
+
+    /// Start a definition of a name at a position, in the function that the node is in, with no
+    /// decorators, class, base classes, annotation or call, and not unpacked.
+    fn definition(&self, kind: Kind, name: &str, position: TextSize) -> Definition {
+        let (line, column) = self.positions.line_column(position);
+        Definition {
             path: self.path.clone(),
             line,
             column,
             kind,
             name: name.to_string(),
             decorators: Vec::new(),
-            owner: class_name,
-            function: self.owner,
+            class: None,
+            owner: self.owner,
             bases: Vec::new(),
             other_bases: false,
-            unpacked,
-            annotation: annotation.cloned(),
-            call: call.cloned(),
-        });
+            unpacked: false,
+            annotation: None,
+            call: None,
+        }
     }
 
     /// Add a read of a key, if it is a string literal.

@@ -242,14 +242,14 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
             let owner_uses = uses.entry((file, read.owner)).or_default();
             owner_uses.names.insert((file, read.root.clone()));
             let mut parts = vec![read.root.clone()];
-            for attribute in read.attributes.iter().chain(&read.called) {
-                let written = join(module, &parts.join("."));
+            parts.extend(read.attributes.iter().cloned());
+            // Each attribute, and the one read from the result of the call, is read from the chain
+            // before it.
+            for (index, attribute) in read.attributes.iter().chain(&read.called).enumerate() {
+                let written = join(module, &parts[..=index].join("."));
                 owner_uses.add_member(classes.read_from(&written, attribute), attribute);
-                parts.push(attribute.clone());
             }
             if read.reads_object {
-                let mut parts = vec![read.root.clone()];
-                parts.extend(read.attributes.iter().cloned());
                 owner_uses.objects.insert((file, parts));
             }
         }
@@ -324,10 +324,9 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
                 .insert(name.clone());
         }
         for (owner, receiver, name) in &references.members {
-            let found = match receiver {
-                Receiver::Own(class) => classes.read_from_own(file, class, name, false),
-                Receiver::Super(class) => classes.read_from_own(file, class, name, true),
-            };
+            let (Receiver::Own(class) | Receiver::Super(class)) = receiver;
+            let is_super = matches!(receiver, Receiver::Super(_));
+            let found = classes.read_from_own(file, class, name, is_super);
             uses.entry((file, *owner))
                 .or_default()
                 .add_member(found, name);
@@ -469,9 +468,9 @@ impl<'a> Classes<'a> {
             .zip(&project.definitions)
             .enumerate()
         {
-            if let Some(owner) = &definition.owner
+            if let Some(class_name) = &definition.class
                 && !fields.contains(&id)
-                && let Some(&class) = ids.get(&(*file, owner.clone()))
+                && let Some(&class) = ids.get(&(*file, class_name.clone()))
             {
                 by_member
                     .entry((class, definition.name.clone()))
@@ -595,7 +594,7 @@ fn is_unknown_class(
             return project
                 .file_definitions(file)
                 .iter()
-                .any(|definition| definition.owner.is_none() && definition.name == written);
+                .any(|definition| definition.class.is_none() && definition.name == written);
         }
         let parts: Vec<&str> = name.split('.').collect();
         (1..parts.len()).any(|index| {
@@ -739,16 +738,16 @@ fn subclass_attributes(
         .enumerate()
     {
         if definition.kind == Kind::Attribute
-            && let Some(owner) = &definition.owner
+            && let Some(class) = &definition.class
         {
             attributes
-                .entry((*file, owner.clone()))
+                .entry((*file, class.clone()))
                 .or_default()
                 .push(id);
         }
     }
-    attributes.retain(|(file, owner), _| {
-        let ancestors = hierarchy.ancestors(*file, owner);
+    attributes.retain(|(file, class), _| {
+        let ancestors = hierarchy.ancestors(*file, class);
         bases.iter().any(|base| ancestors.contains(*base))
     });
     attributes
@@ -802,14 +801,14 @@ fn find_roots(
                         .is_some_and(|pattern| pattern.is_match(name).unwrap_or(false)))
                 // A member that a base class outside the project defines is used by its code.
                 || definition
-                    .owner
+                    .class
                     .as_ref()
-                    .is_some_and(|owner| hierarchy.external_members(file, owner).contains(name))
+                    .is_some_and(|class| hierarchy.external_members(file, class).contains(name))
                 // A method of a node visitor of `ast`, which its `visit` calls by the name of the node.
                 || (definition.kind == Kind::Method
                     && name.starts_with(NODE_VISITOR_PREFIX)
-                    && definition.owner.as_ref().is_some_and(|owner| {
-                        let ancestors = hierarchy.ancestors(file, owner);
+                    && definition.class.as_ref().is_some_and(|class| {
+                        let ancestors = hierarchy.ancestors(file, class);
                         NODE_VISITORS.iter().any(|visitor| ancestors.contains(*visitor))
                     }))
                 // The objects that the entry points name.
@@ -845,8 +844,8 @@ fn covers(
     // An override with base classes applies to what is defined in a class that inherits from one of
     // them.
     if !item.base_classes.is_empty() {
-        let inherits = definition.owner.as_ref().is_some_and(|owner| {
-            let ancestors = hierarchy.ancestors(file, owner);
+        let inherits = definition.class.as_ref().is_some_and(|class| {
+            let ancestors = hierarchy.ancestors(file, class);
             item.base_classes
                 .iter()
                 .any(|base| ancestors.contains(base))
@@ -857,8 +856,8 @@ fn covers(
     }
     // An override with class decorators applies to what is defined in a class that has one of them.
     item.class_decorators.is_empty()
-        || definition.owner.as_ref().is_some_and(|owner| {
-            let decorators = hierarchy.decorators(file, owner);
+        || definition.class.as_ref().is_some_and(|class| {
+            let decorators = hierarchy.decorators(file, class);
             item.class_decorators
                 .iter()
                 .any(|decorator| decorators.contains(decorator))
@@ -921,8 +920,8 @@ fn transitive_definitions(
     for (index, &id) in unused.iter().enumerate() {
         let (file, definition) = (&project.definition_files[id], &project.definitions[id]);
         // A definition in a class is in the class first, even if the class is in a function.
-        let container = match (&definition.owner, definition.function) {
-            (Some(owner), _) => classes.get(&(*file, owner.clone())),
+        let container = match (&definition.class, definition.owner) {
+            (Some(class), _) => classes.get(&(*file, class.clone())),
             (None, Some(function)) => functions.get(&(*file, function)),
             (None, None) => None,
         };
@@ -1059,7 +1058,7 @@ impl<'a> Graph<'a> {
                 .references
                 .local_definitions
                 .contains(&(id - project.first_definition[*file]));
-            if !is_local && definition.owner.is_none() {
+            if !is_local && definition.class.is_none() {
                 by_name
                     .entry((*file, definition.name.clone()))
                     .or_default()
@@ -1069,7 +1068,7 @@ impl<'a> Graph<'a> {
             // as an attribute of an object.
             if fields.contains(&id) {
                 by_key.entry(definition.name.clone()).or_default().push(id);
-            } else if definition.owner.is_some() {
+            } else if definition.class.is_some() {
                 by_attribute
                     .entry(definition.name.clone())
                     .or_default()
@@ -1081,7 +1080,7 @@ impl<'a> Graph<'a> {
             // of the module.
             if !project.facts[*file].references.has_all
                 && !definition.name.starts_with('_')
-                && definition.owner.is_none()
+                && definition.class.is_none()
                 && !is_local
             {
                 public.entry(*file).or_default().push(id);
