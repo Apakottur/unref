@@ -31,8 +31,9 @@ _TOOLS = {
 _RUNS = 5
 _COMPARE_RUNS = 15
 _TIME_LIMIT = 30.0
-# A slowdown above this fraction on a single core is flagged. Multi core times are too noisy on CI runners to flag.
-_SLOWDOWN_WARNING = 0.10
+# A slowdown above this fraction on a single core fails the comparison. Multi core times are too noisy on CI
+# runners to judge, so they are only shown.
+_SLOWDOWN_LIMIT = 0.10
 _CHART = Path(__file__).parent.parent / "assets" / "benchmark.svg"
 
 app = typer.Typer(add_completion=False)
@@ -142,7 +143,7 @@ def tools() -> None:
 
 @app.command()
 def compare(base: Path, head: Path, report: Path) -> None:
-    """Time two unref binaries in turns, and write the change from BASE to HEAD to REPORT."""
+    """Time two unref binaries in turns, write the change from BASE to HEAD to REPORT, and fail if HEAD is too slow."""
     lines = [
         "## Performance",
         "",
@@ -151,7 +152,7 @@ def compare(base: Path, head: Path, report: Path) -> None:
         "| Cores | Base | Head | Change |",
         "| --- | --- | --- | --- |",
     ]
-    warning = None
+    slowdown = None
     with tempfile.TemporaryDirectory() as directory:
         cpython = _download_cpython(Path(directory) / "source")
         for name, options in {"Single core": ["--jobs", "1"], "Multi core": []}.items():
@@ -168,14 +169,27 @@ def compare(base: Path, head: Path, report: Path) -> None:
                     times[index].append(_run(commands[index], cpython))
             base_median, head_median = (statistics.median(binary_times) for binary_times in times)
             change = head_median / base_median - 1
-            lines.append(f"| {name} | {_label(base_median)} | {_label(head_median)} | {change:+.1%} |")
-            if options and change > _SLOWDOWN_WARNING:
-                warning = f"unref is {change:.1%} slower on a single core."
+            cell = f"{change:+.1%}"
+            if options:
+                # GitHub colors text in Markdown only through its math, in which `%` starts a comment. The Markdown
+                # turns `\\%` into the `\%` that the math needs.
+                color = "red" if change > _SLOWDOWN_LIMIT else "green"
+                escaped = cell.replace("%", r"\\%")
+                cell = rf"$\color{{{color}}}{{{escaped}}}$"
+                if change > _SLOWDOWN_LIMIT:
+                    slowdown = change
+            lines.append(f"| {name} | {_label(base_median)} | {_label(head_median)} | {cell} |")
 
-    if warning is not None:
-        lines += ["", "> [!WARNING]", f"> {warning}"]
+    if slowdown is not None:
+        lines += [
+            "",
+            "> [!CAUTION]",
+            f"> unref is {slowdown:.1%} slower on a single core, over the limit of {_SLOWDOWN_LIMIT:.0%}.",
+        ]
     report.write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
+    if slowdown is not None:
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

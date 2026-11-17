@@ -55,15 +55,19 @@ jobs:
           cargo build --release --locked
           cargo build --release --locked --manifest-path base/Cargo.toml
 
+      # Fails when the head is too slow, after it writes the report, which the next steps then still post.
       - name: Compare the head with the base
         run: python scripts/benchmark.py compare base/target/release/unref target/release/unref benchmark.md
 
       - name: Write the job summary
+        if: ${{ !cancelled() && hashFiles('benchmark.md') != '' }}
         run: cat benchmark.md >> "$GITHUB_STEP_SUMMARY"
 
       # A pull request from a fork has a read-only token, so it gets the job summary only.
       - name: Comment on the pull request
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: >-
+          ${{ !cancelled() && hashFiles('benchmark.md') != '' && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository }}
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: benchmark
