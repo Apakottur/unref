@@ -55,6 +55,8 @@ peekable
 platlib
 posonlyargs
 prek
+profdata
+profraw
 purelib
 pycache
 Pydantic
