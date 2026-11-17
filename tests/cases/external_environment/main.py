@@ -1,4 +1,4 @@
-import typer
+import flask
 import editable_module
 from project_only.types import Text, TypeDecorator
 
@@ -22,9 +22,9 @@ class FromEditable(editable_module.Base):
         return self
 
 
-# Installed packages are read from the environment of the project only: `typer` is not installed in
+# Installed packages are read from the environment of the project only: `flask` is not installed in
 # it.
-class App(typer.Typer):
+class App(flask.Flask):
     def command(self):  # expect: 9 [unused-method]
         return self
 

@@ -1,22 +1,28 @@
 #!/usr/bin/env python
 """
-Time unref and other dead code finders on the CPython codebase.
+Time unref on the CPython codebase.
 
-Run with `uv run scripts/benchmark.py`. It downloads the source of CPython, installs each other tool into its own
-temporary environment, runs each tool on the whole codebase a few times, prints the mean time of each and draws
-them as a bar chart in `assets/benchmark.svg`. A tool that takes longer than the time limit is shown as over it.
+Run with `uv run scripts/benchmark.py COMMAND`. Each command downloads the source of CPython and times on it:
+
+- `tools`: unref and other dead code finders, drawn as a bar chart in `assets/benchmark.svg`.
+- `compare BASE HEAD REPORT`: two unref binaries, written as a Markdown report that the CI posts on each PR.
 """
 
+import contextlib
 import io
+import math
+import statistics
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
+from collections.abc import Generator
 from pathlib import Path
 
 import httpx
 import shpyx
+import typer
 
 _CPYTHON_TAG = "v3.15.0"
 _TOOLS = {
@@ -25,18 +31,27 @@ _TOOLS = {
     "skylos": ("skylos==5.6.0", [".", "--no-upload", "--no-cache"]),
 }
 _RUNS = 5
+_COMPARE_RUNS = 15
 _TIME_LIMIT = 30.0
+# A change above this fraction on a single core is shown in red, as a big speedup can mean that unref stopped
+# doing some of its work, and a slowdown above it fails the comparison. Multi core times are too noisy on CI
+# runners to judge, so they are only shown.
+_CHANGE_LIMIT = 0.10
 _CHART = Path(__file__).parent.parent / "assets" / "benchmark.svg"
 
+app = typer.Typer(add_completion=False)
 
-def _download_cpython(destination: Path) -> Path:
+
+@contextlib.contextmanager
+def _cpython() -> Generator[Path]:
+    """Download the source of CPython into a temporary directory."""
     url = f"https://codeload.github.com/python/cpython/tar.gz/refs/tags/{_CPYTHON_TAG}"
     print(f"Downloading CPython {_CPYTHON_TAG}...")
     response = httpx.get(url, follow_redirects=True, timeout=120)
     response.raise_for_status()
-    with tarfile.open(fileobj=io.BytesIO(response.content)) as archive:
-        archive.extractall(destination, filter="data")
-    return next(destination.iterdir())
+    with tempfile.TemporaryDirectory() as directory, tarfile.open(fileobj=io.BytesIO(response.content)) as archive:
+        archive.extractall(directory, filter="data")
+        yield next(Path(directory).iterdir())
 
 
 def _install(name: str, requirement: str, environment: Path) -> Path:
@@ -46,49 +61,55 @@ def _install(name: str, requirement: str, environment: Path) -> Path:
     return environment / "bin" / name
 
 
-def _run(command: list[str], cwd: Path) -> float | None:
-    """Run a command once and return how long it took, or `None` if it went over the time limit."""
+def _run(command: list[str], cwd: Path) -> float:
+    """Run a command once and return how long it took, or infinity if it went over the time limit."""
     start = time.perf_counter()
     try:
         subprocess.run(  # noqa: S603
             command, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=_TIME_LIMIT, check=False
         )
     except subprocess.TimeoutExpired:
-        return None
+        return math.inf
     return time.perf_counter() - start
 
 
-def _time(command: list[str], cwd: Path) -> float | None:
-    # One run to warm up the file system cache, then the mean of the others.
-    if _run(command, cwd) is None:
-        return None
-    times = []
-    for _ in range(_RUNS):
-        seconds = _run(command, cwd)
-        if seconds is None:
-            return None
-        times.append(seconds)
-    return sum(times) / len(times)
+def _time(commands: list[list[str]], cwd: Path, runs: int) -> list[float]:
+    """
+    Run the commands in turns and return the median time of each, or infinity for each if a run goes over the
+    time limit.
+
+    The first turn only warms up the file system cache. Running in turns makes a slow period of the machine slow
+    every command, and the order swaps each turn, as a later run of a turn is otherwise a few percent slower.
+    """
+    times: list[list[float]] = [[] for _ in commands]
+    indices = list(range(len(commands)))
+    for turn in range(runs + 1):
+        for index in indices if turn % 2 == 0 else indices[::-1]:
+            seconds = _run(commands[index], cwd)
+            if math.isinf(seconds):
+                return [math.inf] * len(commands)
+            times[index].append(seconds)
+    return [statistics.median(command_times[1:]) for command_times in times]
 
 
-def _label(seconds: float | None) -> str:
-    return f">{_TIME_LIMIT:.0f}s" if seconds is None else f"{seconds:.2f}s"
+def _label(seconds: float) -> str:
+    return f">{_TIME_LIMIT:.0f}s" if math.isinf(seconds) else f"{seconds:.2f}s"
 
 
-def _chart(results: dict[str, float | None]) -> str:
+def _chart(results: dict[str, float]) -> str:
     """Draw the results as horizontal bars, scaled to the time limit, in colors that follow the page theme."""
     width, row, name_width, bar_width = 640, 36, 90, 460
     height = row * len(results) + 40
     rows = []
     for index, (name, seconds) in enumerate(results.items()):
         y = 10 + index * row
-        length = bar_width * min(seconds if seconds is not None else _TIME_LIMIT, _TIME_LIMIT) / _TIME_LIMIT
+        length = max(bar_width * min(seconds, _TIME_LIMIT) / _TIME_LIMIT, 2)
         bar_class = "bar main" if name == "unref" else "bar"
         weight = ' font-weight="bold"' if name == "unref" else ""
         rows.append(
             f'<text x="{name_width - 10}" y="{y + 17}" text-anchor="end"{weight}>{name}</text>'
-            f'<rect class="{bar_class}" x="{name_width}" y="{y + 2}" width="{max(length, 2):.1f}" height="22" rx="3"/>'
-            f'<text x="{name_width + max(length, 2) + 8:.1f}" y="{y + 17}"{weight}>{_label(seconds)}</text>'
+            f'<rect class="{bar_class}" x="{name_width}" y="{y + 2}" width="{length:.1f}" height="22" rx="3"/>'
+            f'<text x="{name_width + length + 8:.1f}" y="{y + 17}"{weight}>{_label(seconds)}</text>'
         )
     axis_y = height - 22
     ticks = "".join(
@@ -110,18 +131,18 @@ def _chart(results: dict[str, float | None]) -> str:
     )
 
 
-def main() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        cpython = _download_cpython(Path(directory) / "source")
+@app.command()
+def tools() -> None:
+    """Time unref and other dead code finders, and draw the chart."""
+    with _cpython() as cpython, tempfile.TemporaryDirectory() as environments:
         commands = {"unref": [str(Path(sys.executable).parent / "unref")]}
         for name, (requirement, arguments) in _TOOLS.items():
-            executable = _install(name, requirement, Path(directory) / name)
-            commands[name] = [str(executable), *arguments]
+            commands[name] = [str(_install(name, requirement, Path(environments) / name)), *arguments]
 
         results = {}
         for name, command in commands.items():
             print(f"Timing {name}...")
-            results[name] = _time(command, cpython)
+            [results[name]] = _time([command], cpython, _RUNS)
 
     print(f"\n| Tool | Time to check CPython {_CPYTHON_TAG} |")
     print("| --- | --- |")
@@ -133,5 +154,45 @@ def main() -> None:
     print(f"\nWrote {_CHART}")
 
 
+@app.command()
+def compare(base: Path, head: Path, report: Path) -> None:
+    """Time two unref binaries in turns, write the change from BASE to HEAD to REPORT, and fail if HEAD is too slow."""
+    lines = [
+        "## Performance",
+        "",
+        f"Time to check CPython {_CPYTHON_TAG}: the median of {_COMPARE_RUNS} runs of each binary, run in turns.",
+        "",
+        "| Cores | Base | Head | Change |",
+        "| --- | --- | --- | --- |",
+    ]
+    slowdown = None
+    with _cpython() as cpython:
+        for name, options in {"Single core": ["--jobs", "1"], "Multi core": []}.items():
+            print(f"Timing {name.lower()}...")
+            commands = [[str(base.resolve()), *options], [str(head.resolve()), *options]]
+            base_median, head_median = _time(commands, cpython, _COMPARE_RUNS)
+            change = head_median / base_median - 1
+            cell = f"{change:+.1%}"
+            if options and abs(change) > _CHANGE_LIMIT:
+                # GitHub colors text in Markdown only through its math, in which `%` starts a comment. The Markdown
+                # turns `\\%` into the `\%` that the math needs.
+                escaped = cell.replace("%", r"\\%")
+                cell = rf"$\color{{red}}{{{escaped}}}$"
+                if change > 0:
+                    slowdown = change
+            lines.append(f"| {name} | {_label(base_median)} | {_label(head_median)} | {cell} |")
+
+    if slowdown is not None:
+        lines += [
+            "",
+            "> [!CAUTION]",
+            f"> unref is {slowdown:.1%} slower on a single core, over the limit of {_CHANGE_LIMIT:.0%}.",
+        ]
+    report.write_text("\n".join(lines) + "\n")
+    print("\n".join(lines))
+    if slowdown is not None:
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
-    main()
+    app()
