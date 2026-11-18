@@ -58,6 +58,12 @@
 //!   application that `get_wsgi_application()` or `get_asgi_application()` makes, by a dotted path.
 //!   Django makes the subclasses of `AppConfig` of the installed applications, reads their attributes
 //!   such as `name`, and calls their `ready` method.
+//! - Celery's workers run the tasks that `shared_task` registers, and those that the `task` decorator of
+//!   an application registers: of a variable that is set to `Celery()`, or to an instance of a subclass
+//!   of it, at the top level of a module, or in the function that the decorated function is defined in,
+//!   of a parameter of that function that is annotated as one, and of `current_app`. A task runs by its
+//!   name, such as from the schedule of Celery beat, so it needs no reference. Celery calls the `run`
+//!   method and the handlers, such as `on_failure`, of the subclasses of `Task`.
 //!
 //! pytest and unittest find the methods of a test class through its base classes as well, so a base
 //! class of a test class, wherever it is, holds tests.
@@ -351,6 +357,35 @@ const DJANGO_APP_CONFIG_ATTRIBUTES: [&str; 6] = [
 ];
 const DJANGO_APP_CONFIG_METHODS: [&str; 1] = ["ready"];
 
+/// The class of Celery's applications, as `celery` gives it out, and where it is defined.
+const CELERY_APPS: [&str; 3] = [
+    "celery.Celery",
+    "celery.app.Celery",
+    "celery.app.base.Celery",
+];
+/// `current_app`, which stands for the application, as `celery` gives it out, and where it is defined.
+const CELERY_CURRENT_APP: [&str; 3] = [
+    "celery.current_app",
+    "celery.app.current_app",
+    "celery._state.current_app",
+];
+/// The decorator of an application that registers a task.
+const CELERY_TASK_DECORATORS: [&str; 1] = ["task"];
+/// The decorator that registers a task with every application, as `celery` gives it out, and where it
+/// is defined.
+const CELERY_SHARED_TASKS: [&str; 2] = ["celery.shared_task", "celery.app.shared_task"];
+/// The class of Celery's tasks, as `celery` gives it out, and where it is defined.
+const CELERY_TASKS: [&str; 3] = ["celery.Task", "celery.app.Task", "celery.app.task.Task"];
+/// The methods of a task that Celery calls.
+const CELERY_TASK_METHODS: [&str; 6] = [
+    "run",
+    "before_start",
+    "on_success",
+    "on_failure",
+    "on_retry",
+    "after_return",
+];
+
 /// Check whether a set of dotted names has one of the given names.
 fn has_any(names: &FxHashSet<String>, wanted: &[&str]) -> bool {
     wanted.iter().any(|name| names.contains(*name))
@@ -381,6 +416,8 @@ pub(crate) struct FrameworkRules<'a> {
     sphinx_configs: FxHashSet<usize>,
     /// The modules that Django reads by their names.
     django: DjangoModules,
+    /// The applications of Celery.
+    celery_apps: Instances,
 }
 
 /// The modules that Django reads by their names, by their indices.
@@ -433,6 +470,7 @@ impl<'a> FrameworkRules<'a> {
             flask_factories: FxHashSet::default(),
             sphinx_configs: FxHashSet::default(),
             django: DjangoModules::default(),
+            celery_apps: Instances::default(),
         };
         if rules.enabled(Framework::Fastapi) {
             rules.fastapi_routers.locals = local_instances(files, hierarchy, &FASTAPI_ROUTERS);
@@ -452,6 +490,17 @@ impl<'a> FrameworkRules<'a> {
                 .extend(FLASK_CURRENT_APP.map(String::from));
             rules.flask_factories = rules.flask_factories(files);
             rules.flask_groups.locals = local_instances(files, hierarchy, &FLASK_GROUPS);
+        }
+        if rules.enabled(Framework::Celery) {
+            rules.celery_apps.locals = local_instances(files, hierarchy, &CELERY_APPS);
+            rules
+                .celery_apps
+                .locals
+                .extend(annotated_parameters(files, hierarchy, &CELERY_APPS));
+            rules
+                .celery_apps
+                .variables
+                .extend(CELERY_CURRENT_APP.map(String::from));
         }
 
         // The classes of the project, and the base classes that it makes with SQLAlchemy's function or
@@ -507,6 +556,10 @@ impl<'a> FrameworkRules<'a> {
                             rules.flask_groups.variables.insert(dotted);
                         }
                     }
+                    if rules.enabled(Framework::Celery) && has_any(&called, &CELERY_APPS) {
+                        let app = rules.dotted_name(module, &name);
+                        rules.celery_apps.variables.insert(app);
+                    }
                 }
             }
         }
@@ -537,6 +590,26 @@ impl<'a> FrameworkRules<'a> {
             || (self.enabled(Framework::Flask) && self.flask_uses(definition, module))
             || (self.enabled(Framework::Sphinx) && self.sphinx_uses(definition, module))
             || (self.enabled(Framework::Django) && self.django_uses(definition, module))
+            || (self.enabled(Framework::Celery) && self.celery_uses(definition, module))
+    }
+
+    /// Check whether Celery runs or calls a definition by itself.
+    fn celery_uses(&self, definition: &Definition, module: usize) -> bool {
+        if definition.kind == Kind::Method
+            && let Some(class) = &definition.class
+            && CELERY_TASK_METHODS.contains(&definition.name.as_str())
+            && self.inherits(module, class, &CELERY_TASKS)
+        {
+            return true;
+        }
+        (definition.kind.is_function()
+            && self.is_decorated(definition, module, &CELERY_SHARED_TASKS))
+            || self.registers(
+                definition,
+                module,
+                &self.celery_apps,
+                &[&CELERY_TASK_DECORATORS],
+            )
     }
 
     /// Check whether Django or a server reads or calls a definition by itself.

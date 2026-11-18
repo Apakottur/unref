@@ -201,6 +201,14 @@ that `settings` names, and the modules they star import. A table turns the rules
 settings = ["config/settings/production.py"]
 ```
 
+#### `celery`
+
+Enabled by default: yes.
+
+- Tasks of `shared_task`, and of the `task` decorator of `Celery()`, or an instance of a subclass, set
+  at module level or in the same function, of a parameter annotated as one, or of `current_app`.
+- In subclasses of `Task`: `run` and handlers such as `on_failure`.
+
 ### `output-format`
 
 How the findings are printed, as [Ruff's option](https://docs.astral.sh/ruff/settings/#output-format).
