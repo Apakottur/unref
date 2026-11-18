@@ -57,7 +57,8 @@
 //!   and `app_name` from each module that `include` names by a string. The server loads the
 //!   application that `get_wsgi_application()` or `get_asgi_application()` makes, by a dotted path.
 //!   Django makes the subclasses of `AppConfig` of the installed applications, reads their attributes
-//!   such as `name`, and calls their `ready` method.
+//!   such as `name`, and calls their `ready` method. Its migration commands load the subclasses of
+//!   `Migration` and read their attributes, such as `operations`.
 //!
 //! pytest and unittest find the methods of a test class through its base classes as well, so a base
 //! class of a test class, wherever it is, holds tests.
@@ -350,6 +351,20 @@ const DJANGO_APP_CONFIG_ATTRIBUTES: [&str; 6] = [
     "default_auto_field",
 ];
 const DJANGO_APP_CONFIG_METHODS: [&str; 1] = ["ready"];
+/// `Migration`, as `django.db.migrations` gives it out, and where it is defined, with the attributes
+/// of its subclasses that Django reads.
+const DJANGO_MIGRATIONS: [&str; 2] = [
+    "django.db.migrations.Migration",
+    "django.db.migrations.migration.Migration",
+];
+const DJANGO_MIGRATION_ATTRIBUTES: [&str; 6] = [
+    "operations",
+    "dependencies",
+    "run_before",
+    "replaces",
+    "initial",
+    "atomic",
+];
 
 /// Check whether a set of dotted names has one of the given names.
 fn has_any(names: &FxHashSet<String>, wanted: &[&str]) -> bool {
@@ -546,13 +561,20 @@ impl<'a> FrameworkRules<'a> {
             if definition.kind == Kind::Class {
                 return false;
             }
-            return ((definition.kind == Kind::Attribute
-                && DJANGO_APP_CONFIG_ATTRIBUTES.contains(&name))
-                || (definition.kind == Kind::Method && DJANGO_APP_CONFIG_METHODS.contains(&name)))
-                && self.inherits(module, class, &DJANGO_APP_CONFIGS);
+            let app_config_member = match definition.kind {
+                Kind::Attribute => DJANGO_APP_CONFIG_ATTRIBUTES.contains(&name),
+                Kind::Method => DJANGO_APP_CONFIG_METHODS.contains(&name),
+                _ => false,
+            };
+            let migration_member =
+                definition.kind == Kind::Attribute && DJANGO_MIGRATION_ATTRIBUTES.contains(&name);
+            return (app_config_member && self.inherits(module, class, &DJANGO_APP_CONFIGS))
+                || (migration_member && self.inherits(module, class, &DJANGO_MIGRATIONS));
         }
         if definition.kind == Kind::Class {
-            return definition.owner.is_none() && self.inherits(module, name, &DJANGO_APP_CONFIGS);
+            return definition.owner.is_none()
+                && (self.inherits(module, name, &DJANGO_APP_CONFIGS)
+                    || self.inherits(module, name, &DJANGO_MIGRATIONS));
         }
         if definition.kind != Kind::Variable || definition.owner.is_some() {
             return false;

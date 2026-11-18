@@ -192,6 +192,7 @@ Enabled by default: yes.
 - In modules that `include("...")` names: `urlpatterns` and `app_name`.
 - Module-level variables set to `get_wsgi_application()` or `get_asgi_application()`.
 - Subclasses of `AppConfig`, with their `ready` method and attributes such as `name`.
+- Subclasses of `Migration`, with their attributes such as `operations` and `dependencies`.
 
 The settings modules are those that `os.environ.setdefault("DJANGO_SETTINGS_MODULE", ...)` names, those
 that `settings` names, and the modules they star import. A table turns the rules on:
