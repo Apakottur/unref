@@ -18,11 +18,12 @@ pub(crate) enum Framework {
     Flask,
     Sphinx,
     Django,
+    Celery,
 }
 
 impl Framework {
     /// Every framework, each enabled by default.
-    pub(crate) const ALL: [Framework; 9] = [
+    pub(crate) const ALL: [Framework; 10] = [
         Framework::Pytest,
         Framework::Unittest,
         Framework::Pydantic,
@@ -32,6 +33,7 @@ impl Framework {
         Framework::Flask,
         Framework::Sphinx,
         Framework::Django,
+        Framework::Celery,
     ];
 
     /// The name of the framework in the `frameworks` option.
@@ -46,6 +48,7 @@ impl Framework {
             Framework::Flask => "flask",
             Framework::Sphinx => "sphinx",
             Framework::Django => "django",
+            Framework::Celery => "celery",
         }
     }
 
