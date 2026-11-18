@@ -129,7 +129,8 @@ _OVERRIDE_WRONG_TYPE = "Option '{option}' in an override in the configuration fi
             "frameworks-unknown",
             "[frameworks]\nnose = true",
             "Option 'frameworks' in the configuration file {config} has an unknown framework 'nose', "
-            "expected one of 'pytest', 'unittest', 'pydantic', 'dataclasses', 'sqlalchemy', 'fastapi', 'flask', 'sphinx'",
+            "expected one of 'pytest', 'unittest', 'pydantic', 'dataclasses', 'sqlalchemy', 'fastapi', 'flask', 'sphinx', "
+            "'django'",
         ),
         _invalid(
             "frameworks-not-boolean",
@@ -151,6 +152,22 @@ _OVERRIDE_WRONG_TYPE = "Option '{option}' in an override in the configuration fi
             "frameworks-sphinx-unknown-option",
             '[frameworks.sphinx]\nconf = ["docs/conf.py"]',
             "Unknown option 'conf' in the 'frameworks.sphinx' table of the configuration file {config}",
+        ),
+        _invalid(
+            "frameworks-django-string",
+            '[frameworks]\ndjango = "mysite/settings.py"',
+            "Option 'frameworks.django' in the configuration file {config} must be a boolean or a table",
+        ),
+        _invalid(
+            "frameworks-django-settings-string",
+            '[frameworks.django]\nsettings = "mysite/settings.py"',
+            "Option 'settings' in the 'frameworks.django' table of the configuration file {config} must be a "
+            "list of strings",
+        ),
+        _invalid(
+            "frameworks-django-unknown-option",
+            '[frameworks.django]\nsettings-module = "mysite.settings"',
+            "Unknown option 'settings-module' in the 'frameworks.django' table of the configuration file {config}",
         ),
         _invalid(
             "overrides-string",

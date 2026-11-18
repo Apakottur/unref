@@ -176,6 +176,25 @@ The configuration files are each `conf.py` that sets `project`, `extensions` or 
 configuration = ["docs/conf.py"]
 ```
 
+#### `django`
+
+Enabled by default: yes.
+
+- In settings modules: module-level uppercase names, such as `DEBUG`.
+- In the module that `ROOT_URLCONF` names: `urlpatterns` and `handler400`, `handler403`, `handler404`,
+  `handler500`.
+- In modules that `include("...")` names: `urlpatterns` and `app_name`.
+- Module-level variables set to `get_wsgi_application()` or `get_asgi_application()`.
+- Subclasses of `AppConfig`, with their `ready` method and attributes such as `name`.
+
+The settings modules are those that `os.environ.setdefault("DJANGO_SETTINGS_MODULE", ...)` names, those
+that `settings` names, and the modules they star import. A table turns the rules on:
+
+```toml
+[tool.unref.frameworks.django]
+settings = ["config/settings/production.py"]
+```
+
 ### `output-format`
 
 How the findings are printed, as [Ruff's option](https://docs.astral.sh/ruff/settings/#output-format).
