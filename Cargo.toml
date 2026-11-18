@@ -31,6 +31,11 @@ ruff_text_size = { git = "https://github.com/astral-sh/ruff", tag = "0.17.5" }
 lto = "fat"
 codegen-units = 16
 
+# For the builds of uv, which skip LTO to rebuild in seconds. The binary runs about 10 to 15% slower.
+[profile.local]
+inherits = "release"
+lto = "off"
+
 [lints.rust]
 unsafe_code = "forbid"
 unreachable_pub = "warn"

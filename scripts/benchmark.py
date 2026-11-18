@@ -4,7 +4,8 @@ Time unref on the CPython codebase.
 
 Run with `uv run scripts/benchmark.py COMMAND`. Each command downloads the source of CPython and times on it:
 
-- `tools`: unref and other dead code finders, drawn as a bar chart in `assets/benchmark.svg`.
+- `tools`: unref and other dead code finders, drawn as a bar chart in `assets/benchmark.svg`. uv builds unref without
+  LTO, so first rebuild it with `CARGO_PROFILE_LOCAL_LTO=fat uv sync --reinstall-package unref`.
 - `compare BASE HEAD REPORT`: two unref binaries, written as a Markdown report that the CI posts on each PR.
 """
 

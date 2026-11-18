@@ -53,6 +53,8 @@ strip = true
 
 [tool.uv]
 package = true
+# Build with the local profile of Cargo.toml.
+config-settings = { build-args = "--profile=local" }
 # Rebuild the binary when its source changes.
 cache-keys = [
   { file = "pyproject.toml" },
