@@ -34,9 +34,9 @@ _TOOLS = {
 _RUNS = 5
 _COMPARE_RUNS = 15
 _TIME_LIMIT = 30.0
-# A change above this fraction on a single core is shown in red, as a big speedup can mean that unref stopped
-# doing some of its work, and a slowdown above it fails the comparison. Multi core times are too noisy on CI
-# runners to judge, so they are only shown.
+# A change above this fraction is shown in red under a warning, as a big speedup can mean that unref stopped doing
+# some of its work. A slowdown above it on a single core fails the comparison, as multi core times are too noisy
+# on CI runners to judge.
 _CHANGE_LIMIT = 0.10
 _CHART = Path(__file__).parent.parent / "assets" / "benchmark.svg"
 
@@ -158,14 +158,8 @@ def tools() -> None:
 @app.command()
 def compare(base: Path, head: Path, report: Path) -> None:
     """Time two unref binaries in turns, write the change from BASE to HEAD to REPORT, and fail if HEAD is too slow."""
-    lines = [
-        "## Performance",
-        "",
-        f"Time to check CPython {_CPYTHON_TAG}: the median of {_COMPARE_RUNS} runs of each binary, run in turns.",
-        "",
-        "| Cores | Base | Head | Change |",
-        "| --- | --- | --- | --- |",
-    ]
+    rows = []
+    changed = False
     slowdown = None
     with _cpython() as cpython:
         for name, options in {"Single core": ["--jobs", "1"], "Multi core": []}.items():
@@ -174,15 +168,26 @@ def compare(base: Path, head: Path, report: Path) -> None:
             base_median, head_median = _time(commands, cpython, _COMPARE_RUNS)
             change = head_median / base_median - 1
             cell = f"{change:+.1%}"
-            if options and abs(change) > _CHANGE_LIMIT:
+            if abs(change) > _CHANGE_LIMIT:
+                changed = True
                 # GitHub colors text in Markdown only through its math, in which `%` starts a comment. The Markdown
                 # turns `\\%` into the `\%` that the math needs.
                 escaped = cell.replace("%", r"\\%")
                 cell = rf"$\color{{red}}{{{escaped}}}$"
-                if change > 0:
+                if options and change > 0:
                     slowdown = change
-            lines.append(f"| {name} | {_label(base_median)} | {_label(head_median)} | {cell} |")
+            rows.append(f"| {name} | {_label(base_median)} | {_label(head_median)} | {cell} |")
 
+    lines = ["## Performance", ""]
+    if changed:
+        lines += [f"⚠️ **Performance changed significantly**, by more than {_CHANGE_LIMIT:.0%}.", ""]
+    lines += [
+        f"Time to check CPython {_CPYTHON_TAG}: the median of {_COMPARE_RUNS} runs of each binary, run in turns.",
+        "",
+        "| Cores | Base | Head | Change |",
+        "| --- | --- | --- | --- |",
+        *rows,
+    ]
     if slowdown is not None:
         lines += [
             "",
