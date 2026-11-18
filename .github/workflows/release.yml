@@ -18,10 +18,7 @@ jobs:
           # jemalloc on aarch64 Linux takes pages of up to 64 KiB, which some kernels use, as ruff's.
           - {runner: ubuntu-latest, target: aarch64, manylinux: auto, docker-options: -e JEMALLOC_SYS_WITH_LG_PAGE=16}
           - {runner: ubuntu-latest, target: x86_64-unknown-linux-musl, manylinux: musllinux_1_2}
-          - runner: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            manylinux: musllinux_1_2
-            docker-options: -e JEMALLOC_SYS_WITH_LG_PAGE=16
+          - {runner: ubuntu-latest, target: aarch64-unknown-linux-musl, manylinux: musllinux_1_2}
           - {runner: macos-latest, target: x86_64, manylinux: ""}
           - {runner: macos-latest, target: aarch64, manylinux: ""}
           - {runner: windows-latest, target: x64, manylinux: ""}

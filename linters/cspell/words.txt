@@ -78,7 +78,6 @@ pytype
 pyvenv
 reconstructor
 rfind
-riscv
 Rozantsev
 rsplit
 rustc

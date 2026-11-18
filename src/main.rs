@@ -30,22 +30,11 @@ use crate::models::Finding;
 use crate::modules::resolve;
 
 // The check makes many small allocations, which these serve faster than the allocator of the system.
-#[cfg(target_os = "windows")]
+#[cfg(not(all(target_os = "linux", target_arch = "aarch64", target_env = "gnu")))]
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-#[cfg(all(
-    not(target_os = "windows"),
-    not(target_os = "openbsd"),
-    not(target_os = "aix"),
-    not(target_os = "android"),
-    any(
-        target_arch = "x86_64",
-        target_arch = "aarch64",
-        target_arch = "powerpc64",
-        target_arch = "riscv64"
-    )
-))]
+#[cfg(all(target_os = "linux", target_arch = "aarch64", target_env = "gnu"))]
 #[global_allocator]
 static ALLOCATOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
