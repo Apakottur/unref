@@ -12,6 +12,7 @@ nav = [
   { "Home" = "index.md" },
   { "Rules" = "rules.md" },
   { "Configuration" = "configuration.md" },
+  { "FAQ" = "faq.md" },
 ]
 
 [project.theme]

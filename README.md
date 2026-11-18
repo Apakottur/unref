@@ -30,6 +30,9 @@ An extremely fast Python dead code finder, written in Rust.
 
 **Documentation**: [unref.readthedocs.io](https://unref.readthedocs.io/)
 
+A definition is unused when no entry point of the project reaches it, see
+[what counts as unused](https://unref.readthedocs.io/en/latest/faq/#what-counts-as-unused).
+
 ## Getting Started
 
 Run it with [`uvx`](https://docs.astral.sh/uv/):
