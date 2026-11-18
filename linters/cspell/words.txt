@@ -19,6 +19,7 @@ dataclass
 dataclasses
 deadcode
 delenv
+Deque
 direnv
 docstrings
 dunder

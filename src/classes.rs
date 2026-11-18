@@ -1,6 +1,7 @@
 //! The classes of a project, with the base classes that they inherit from and their decorators.
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -34,6 +35,15 @@ pub(crate) struct ClassHierarchy {
     resolved_decorators: Cache,
     resolved: Cache,
     followed: RefCell<FxHashMap<String, Names>>,
+    star_imported: RefCell<FxHashMap<String, Rc<StarImport>>>,
+}
+
+/// A name that a module may star import, followed through the star imports of the modules.
+struct StarImport {
+    /// The names on the way to the modules that give the name out, with the names in those modules.
+    names: FxHashSet<String>,
+    /// The names in the modules that give the name out, which are followed further from there.
+    sources: Vec<String>,
 }
 
 impl ClassHierarchy {
@@ -60,6 +70,7 @@ impl ClassHierarchy {
             resolved_decorators: RefCell::default(),
             resolved: RefCell::default(),
             followed: RefCell::default(),
+            star_imported: RefCell::default(),
         }
     }
 
@@ -190,17 +201,12 @@ impl ClassHierarchy {
                     found.extend(self.follow(&join(&imported, rest), seen));
                 }
             } else if !symbols.bases.contains_key(first) {
-                // A name that the module may star import. A star import of a submodule binds the
-                // submodule itself under its name, so that name is the submodule and not one that a
-                // star import gives out.
-                let star_modules: FxHashSet<Option<String>> = symbols
-                    .stars
-                    .iter()
-                    .map(|(source, level)| symbols.name.resolve(source.as_deref(), *level))
-                    .collect();
-                if !star_modules.contains(&Some(format!("{}.{first}", symbols.name.name))) {
-                    for star_module in star_modules.into_iter().flatten() {
-                        found.extend(self.follow(&format!("{star_module}.{symbol}"), seen));
+                // A name that the module may star import.
+                for star_module in star_modules(&symbols, first) {
+                    let star = self.star_imported(&join(&star_module, &symbol));
+                    found.extend(star.names.iter().cloned());
+                    for source in &star.sources {
+                        found.extend(self.follow(source, seen));
                     }
                 }
                 // A name that the `__getattr__` of the module imports, which it gives out.
@@ -211,6 +217,77 @@ impl ClassHierarchy {
                 }
             }
         }
+        found
+    }
+
+    /// Follow a name through the star imports of the modules, to the modules that give it out.
+    ///
+    /// `name` is a name in a module that the module may star import, such as `package.Model` when
+    /// `package` star imports `package.models`, which defines `Model`. A module gives out a name that
+    /// it defines, imports or gives out from its `__getattr__`. A module that is not found, such as a
+    /// compiled one, may give out any name.
+    ///
+    /// The star imports of a package often import the package back, so they are followed through
+    /// their cycles once for each name, rather than once for each class that reads the name.
+    fn star_imported(&self, name: &str) -> Rc<StarImport> {
+        if let Some(found) = self.star_imported.borrow().get(name) {
+            return found.clone();
+        }
+
+        // The name that each name is first star imported by, which is on the shortest way to it. The
+        // other ways go round a cycle, through names that are no more the name than the shortest.
+        let mut importers: FxHashMap<String, Option<String>> = FxHashMap::default();
+        importers.insert(name.to_string(), None);
+        let mut pending = VecDeque::from([name.to_string()]);
+        let mut sources = Vec::new();
+        while let Some(current) = pending.pop_front() {
+            let located = self.locate(&current);
+            if located.is_empty() {
+                sources.push(current);
+                continue;
+            }
+            let mut gives_out = false;
+            for (file, symbol) in located {
+                let symbols = self.module(file);
+                let first = symbol
+                    .split_once('.')
+                    .map_or(symbol.as_str(), |(first, _)| first);
+                if symbols.bases.contains_key(&symbol)
+                    || symbols.bindings.contains_key(first)
+                    || symbols.lazy.contains_key(first)
+                {
+                    gives_out = true;
+                } else if !symbols.bases.contains_key(first) {
+                    for star_module in star_modules(&symbols, first) {
+                        let imported = join(&star_module, &symbol);
+                        if !importers.contains_key(&imported) {
+                            importers.insert(imported.clone(), Some(current.clone()));
+                            pending.push_back(imported);
+                        }
+                    }
+                }
+            }
+            if gives_out {
+                sources.push(current);
+            }
+        }
+
+        // The names on the shortest way to each module that gives the name out. A name that leads to
+        // none is not a name of it.
+        let mut names: FxHashSet<String> = FxHashSet::default();
+        for source in &sources {
+            let mut current = Some(source);
+            while let Some(name) = current
+                && names.insert(name.clone())
+            {
+                current = importers[name].as_ref();
+            }
+        }
+
+        let found = Rc::new(StarImport { names, sources });
+        self.star_imported
+            .borrow_mut()
+            .insert(name.to_string(), found.clone());
         found
     }
 
@@ -279,6 +356,25 @@ fn cached(
     let found = Rc::new(compute());
     cache.borrow_mut().insert(key, found.clone());
     found
+}
+
+/// Get the modules that a module star imports, to look up a name in them by its first part.
+///
+/// A star import of a submodule binds the submodule itself under its name, so that name is the
+/// submodule and not one that a star import gives out.
+fn star_modules(module: &ModuleSymbols, first: &str) -> Vec<String> {
+    let mut star_modules: Vec<String> = Vec::new();
+    for (source, level) in &module.stars {
+        if let Some(star_module) = module.name.resolve(source.as_deref(), *level)
+            && !star_modules.contains(&star_module)
+        {
+            star_modules.push(star_module);
+        }
+    }
+    if star_modules.contains(&format!("{}.{first}", module.name.name)) {
+        return Vec::new();
+    }
+    star_modules
 }
 
 /// Get the dotted name that an imported name of a module stands for.
