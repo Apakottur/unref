@@ -80,6 +80,6 @@ Unused code piles up in every codebase, faster than ever now that AI tools write
   in another.
 - **Ruff-style**: same conventions, options and output style, ty-style rule codes and configuration in
   `pyproject.toml`.
-- **Fast**: written in Rust on Ruff's parser, it checks all of CPython in under a second.
+- **Fast**: written in Rust on Ruff's parser, it checks all of CPython's Python code in under a second.
 
 The name is short for "unreferenced".

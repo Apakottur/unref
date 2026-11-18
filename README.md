@@ -12,12 +12,12 @@ An extremely fast Python dead code finder, written in Rust.
 </p>
 
 <p align="center">
-  <i>Checking the whole <a href="https://github.com/python/cpython">CPython</a> codebase (v3.15.0, about 2,300 files),
+  <i>Checking the whole <a href="https://github.com/python/cpython">CPython</a> codebase (v3.15.0, about 2,300 Python files),
   measured with <a href="https://github.com/Apakottur/unref/blob/main/scripts/benchmark.py"><code>scripts/benchmark.py</code></a>.</i>
 </p>
 
-- **Fast**: 20x faster than [vulture](https://github.com/jendrikseipp/vulture), it checks all of CPython in under a
-  second.
+- **Fast**: 20x faster than [vulture](https://github.com/jendrikseipp/vulture), it checks all of CPython's Python code in
+  under a second.
 - **Just works**: built-in rules for pytest, Pydantic, SQLAlchemy and
   [more](https://unref.readthedocs.io/en/latest/configuration/#frameworks), so most projects need little or no
   configuration.
