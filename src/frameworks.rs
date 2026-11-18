@@ -33,8 +33,8 @@
 //! - Flask calls the functions that the decorators of an application or a blueprint register, such as
 //!   `app.route` or `bp.errorhandler`: of a variable that is set to `Flask()` or `Blueprint()`, or to
 //!   an instance of a subclass of them, at the top level of a module, or in the function that the
-//!   decorated function is defined in, of a variable at the top level that is set to what a factory
-//!   makes, and of `current_app`. It calls the methods of a `MethodView` named after HTTP methods, and
+//!   decorated function is defined in, of a parameter of that function that is annotated as one, of a
+//!   variable at the top level that is set to what a factory makes, and of `current_app`. It calls the methods of a `MethodView` named after HTTP methods, and
 //!   the `dispatch_request` method of a `View`. Its CLI runs the commands that `cli.command` and
 //!   `cli.group` of an application or a blueprint add, and those that `command` and `group` of a group
 //!   add, a group being an instance of `AppGroup` or a function that such a decorator makes one. It
@@ -442,6 +442,10 @@ impl<'a> FrameworkRules<'a> {
         }
         if rules.enabled(Framework::Flask) {
             rules.flask_apps.locals = local_instances(files, hierarchy, &FLASK_APPS);
+            rules
+                .flask_apps
+                .locals
+                .extend(annotated_parameters(files, hierarchy, &FLASK_APPS));
             rules
                 .flask_apps
                 .variables
@@ -950,6 +954,24 @@ impl<'a> FrameworkRules<'a> {
     fn dotted_name(&self, module: usize, name: &str) -> String {
         format!("{}.{name}", self.module_names[module].name)
     }
+}
+
+/// Find the parameters of the functions of a project that are annotated with one of the given classes,
+/// or with a subclass of one of them, given by their dotted names.
+fn annotated_parameters(
+    files: &[ProjectFile],
+    hierarchy: &ClassHierarchy,
+    classes: &[&str],
+) -> FxHashSet<(usize, u32, String)> {
+    let mut parameters = FxHashSet::default();
+    for (module, (_, _, references)) in files.iter().enumerate() {
+        for ((function, name), annotation) in &references.annotated_parameters {
+            if has_any(&hierarchy.resolve(module, annotation), classes) {
+                parameters.insert((module, *function, name.clone()));
+            }
+        }
+    }
+    parameters
 }
 
 /// Find the local variables of the functions of a project that are set to an instance of one of the
