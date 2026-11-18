@@ -1,6 +1,6 @@
 [project]
 site_name = "unref"
-site_description = "Find unreferenced Python code."
+site_description = "An extremely fast Python dead code finder, written in Rust."
 site_url = "https://unref.readthedocs.io/"
 repo_name = "Apakottur/unref"
 repo_url = "https://github.com/Apakottur/unref"

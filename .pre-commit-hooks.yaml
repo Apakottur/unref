@@ -1,6 +1,6 @@
 - id: unref
   name: unref
-  description: Find unreferenced Python code.
+  description: An extremely fast Python dead code finder, written in Rust.
   entry: unref
   # The hook is built from the source of the repository with Cargo, which pre-commit and prek install if
   # it is missing.
