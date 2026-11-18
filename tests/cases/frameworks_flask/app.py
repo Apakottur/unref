@@ -76,15 +76,37 @@ def not_a_route():  # expect: 5 [unused-function]
     return None
 
 
-# An application made in a function is not followed.
-def create_app():  # expect: 5 [unused-function]
+# The Flask CLI calls a factory named `create_app` or `make_app` that makes an application, and
+# Flask calls the functions that the decorators of an application or a blueprint made in a function
+# register.
+def create_app():
     local = flask.Flask(__name__)
+    blueprint = flask.Blueprint("local", __name__)
 
     @local.route("/")
-    def local_index():  # expect: 9 [unused-function] transitive
+    def local_index():
+        return ""
+
+    @blueprint.route("/")
+    def blueprint_index():
         return ""
 
     return local
+
+
+def make_app():  # expect: 5 [unused-function]
+    return registry
+
+
+# Not named as a factory that the Flask CLI finds.
+def build_app():  # expect: 5 [unused-function]
+    return AdminApp("built")
+
+
+# `current_app` stands for the application.
+@flask.current_app.template_global()
+def site_name():
+    return ""
 
 
 print(views.Items, views.Page)

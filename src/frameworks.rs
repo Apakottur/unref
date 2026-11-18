@@ -31,9 +31,16 @@
 //!   an instance of a subclass of them, at the top level of a module, or in the function that the
 //!   decorated function is defined in.
 //! - Flask calls the functions that the decorators of an application or a blueprint register, such as
-//!   `app.route` or `bp.errorhandler`, of a variable at the top level of a module that is set to
-//!   `Flask()` or `Blueprint()`, or to an instance of a subclass of them. It calls the methods of a
-//!   `MethodView` named after HTTP methods, and the `dispatch_request` method of a `View`.
+//!   `app.route` or `bp.errorhandler`: of a variable that is set to `Flask()` or `Blueprint()`, or to
+//!   an instance of a subclass of them, at the top level of a module, or in the function that the
+//!   decorated function is defined in, of a variable at the top level that is set to what a factory
+//!   makes, and of `current_app`. It calls the methods of a `MethodView` named after HTTP methods, and
+//!   the `dispatch_request` method of a `View`. Its CLI runs the commands that `cli.command` and
+//!   `cli.group` of an application or a blueprint add, and those that `command` and `group` of a group
+//!   add, a group being an instance of `AppGroup` or a function that such a decorator makes one. It
+//!   calls a factory, a function at the top level named `create_app` or `make_app` that sets a local
+//!   variable to an application, and loads a variable at the top level named `app` or `application`
+//!   that is set to an application or to what a factory makes.
 //! - Sphinx runs its configuration file, `conf.py`, and reads the settings it sets at the top level,
 //!   its own and those of its extensions, which are open-ended, such as `myst_enable_extensions`. It
 //!   calls the `setup` function of the file as that of an extension, and `sphinx.ext.linkcode` calls
@@ -239,11 +246,17 @@ const FASTAPI_DECORATORS: [&str; 5] = [
 /// The classes of Flask's applications and blueprints, as `flask` gives them out, and where they are
 /// defined.
 const FLASK_APPS: [&str; 4] = [
-    "flask.Flask",
-    "flask.app.Flask",
+    FLASK_APPLICATIONS[0],
+    FLASK_APPLICATIONS[1],
     "flask.Blueprint",
     "flask.blueprints.Blueprint",
 ];
+const FLASK_APPLICATIONS: [&str; 2] = ["flask.Flask", "flask.app.Flask"];
+/// `current_app`, which stands for the application, as `flask` gives it out, and where it is defined.
+const FLASK_CURRENT_APP: [&str; 2] = ["flask.current_app", "flask.globals.current_app"];
+/// The factories and the variables of an application that the Flask CLI finds by their names.
+const FLASK_FACTORIES: [&str; 2] = ["create_app", "make_app"];
+const FLASK_APP_VARIABLES: [&str; 2] = ["app", "application"];
 /// The methods of an application or a blueprint that register the function they decorate.
 const FLASK_DECORATORS: [&str; 33] = [
     "route",
@@ -282,6 +295,13 @@ const FLASK_DECORATORS: [&str; 33] = [
     "before_first_request",
     "before_app_first_request",
 ];
+/// The decorators of an application or a blueprint that add a command or a group of commands to
+/// Flask's CLI.
+const FLASK_CLI_DECORATORS: [&str; 2] = ["cli.command", "cli.group"];
+/// The classes of the groups of commands of Flask's CLI, as `flask.cli` gives them out, with the
+/// methods that add a command or a group to a group.
+const FLASK_GROUPS: [&str; 2] = ["flask.cli.AppGroup", "flask.cli.FlaskGroup"];
+const FLASK_GROUP_DECORATORS: [&str; 2] = ["command", "group"];
 /// The class views of Flask, whose `dispatch_request` method it calls. `MethodView` inherits from
 /// `View`, and its `dispatch_request` calls its methods named after HTTP methods.
 const FLASK_VIEWS: [&str; 2] = ["flask.views.View", FLASK_METHOD_VIEW];
@@ -353,6 +373,10 @@ pub(crate) struct FrameworkRules<'a> {
     fastapi_routers: Instances,
     /// The applications and blueprints of Flask.
     flask_apps: Instances,
+    /// The groups of commands of Flask's CLI, as made with `AppGroup` or with a decorator.
+    flask_groups: Instances,
+    /// The factories of Flask's applications that the Flask CLI finds, by their dotted names.
+    flask_factories: FxHashSet<String>,
     /// The configuration files of Sphinx, by their indices.
     sphinx_configs: FxHashSet<usize>,
     /// The modules that Django reads by their names.
@@ -371,7 +395,7 @@ struct DjangoModules {
 }
 
 /// The instances of some classes, such as the applications of a web framework.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Instances {
     /// The variables at the top level of a module, by their dotted names.
     variables: FxHashSet<String>,
@@ -405,6 +429,8 @@ impl<'a> FrameworkRules<'a> {
             mapped_classes: FxHashSet::default(),
             fastapi_routers: Instances::default(),
             flask_apps: Instances::default(),
+            flask_groups: Instances::default(),
+            flask_factories: FxHashSet::default(),
             sphinx_configs: FxHashSet::default(),
             django: DjangoModules::default(),
         };
@@ -413,6 +439,15 @@ impl<'a> FrameworkRules<'a> {
         }
         if rules.enabled(Framework::Django) {
             rules.django = django_modules(files, module_names, hierarchy, django_settings);
+        }
+        if rules.enabled(Framework::Flask) {
+            rules.flask_apps.locals = local_instances(files, hierarchy, &FLASK_APPS);
+            rules
+                .flask_apps
+                .variables
+                .extend(FLASK_CURRENT_APP.map(String::from));
+            rules.flask_factories = rules.flask_factories(files);
+            rules.flask_groups.locals = local_instances(files, hierarchy, &FLASK_GROUPS);
         }
 
         // The classes of the project, and the base classes that it makes with SQLAlchemy's function or
@@ -460,9 +495,13 @@ impl<'a> FrameworkRules<'a> {
                         let router = rules.dotted_name(module, &name);
                         rules.fastapi_routers.variables.insert(router);
                     }
-                    if rules.enabled(Framework::Flask) && has_any(&called, &FLASK_APPS) {
-                        let app = rules.dotted_name(module, &name);
-                        rules.flask_apps.variables.insert(app);
+                    if rules.enabled(Framework::Flask) {
+                        let dotted = rules.dotted_name(module, &name);
+                        if has_any(&called, &FLASK_APPS) || rules.is_flask_factory(module, call) {
+                            rules.flask_apps.variables.insert(dotted);
+                        } else if has_any(&called, &FLASK_GROUPS) {
+                            rules.flask_groups.variables.insert(dotted);
+                        }
                     }
                 }
             }
@@ -470,6 +509,9 @@ impl<'a> FrameworkRules<'a> {
 
         if rules.enabled(Framework::Sqlalchemy) {
             rules.mapped_classes = rules.sqlalchemy_classes(&classes, &made);
+        }
+        if rules.enabled(Framework::Flask) {
+            rules.flask_groups = rules.flask_command_groups(files);
         }
         rules
     }
@@ -690,7 +732,100 @@ impl<'a> FrameworkRules<'a> {
                 return true;
             }
         }
-        self.registers(definition, module, &self.flask_apps, &[&FLASK_DECORATORS])
+        if is_top_level(definition) {
+            let name = definition.name.as_str();
+            if definition.kind == Kind::Function && FLASK_FACTORIES.contains(&name) {
+                return self
+                    .flask_factories
+                    .contains(&self.dotted_name(module, name));
+            }
+            if definition.kind == Kind::Variable && FLASK_APP_VARIABLES.contains(&name) {
+                return definition.call.as_ref().is_some_and(|call| {
+                    self.resolves_to(module, call, &FLASK_APPLICATIONS)
+                        || self.is_flask_factory(module, call)
+                });
+            }
+        }
+        self.registers(
+            definition,
+            module,
+            &self.flask_apps,
+            &[&FLASK_DECORATORS, &FLASK_CLI_DECORATORS],
+        ) || self.registers(
+            definition,
+            module,
+            &self.flask_groups,
+            &[&FLASK_GROUP_DECORATORS],
+        )
+    }
+
+    /// Find the factories of Flask's applications that the Flask CLI finds: the functions at the top
+    /// level of a module that are named as one, and set a local variable to an application.
+    fn flask_factories(&self, files: &[ProjectFile]) -> FxHashSet<String> {
+        let applications: FxHashSet<(usize, u32)> =
+            local_instances(files, self.hierarchy, &FLASK_APPLICATIONS)
+                .into_iter()
+                .map(|(module, function, _)| (module, function))
+                .collect();
+        let mut factories = FxHashSet::default();
+        for (module, (_, definitions, _)) in files.iter().enumerate() {
+            for definition in *definitions {
+                if definition.kind == Kind::Function
+                    && is_top_level(definition)
+                    && FLASK_FACTORIES.contains(&definition.name.as_str())
+                    && applications.contains(&(module, definition.line))
+                {
+                    factories.insert(self.dotted_name(module, &definition.name));
+                }
+            }
+        }
+        factories
+    }
+
+    /// Check whether a call of a module calls a factory of Flask's applications.
+    fn is_flask_factory(&self, module: usize, call: &str) -> bool {
+        self.flask_factories
+            .contains(&self.dotted_name(module, call))
+            || self
+                .hierarchy
+                .resolve(module, call)
+                .iter()
+                .any(|name| self.flask_factories.contains(name))
+    }
+
+    /// Get the groups of commands of Flask's CLI: the instances of `AppGroup`, and the functions that
+    /// the `cli.group` decorator of an application or a blueprint, or the `group` decorator of a group,
+    /// makes into a group, until no more are found.
+    fn flask_command_groups(&self, files: &[ProjectFile]) -> Instances {
+        let mut groups = self.flask_groups.clone();
+        loop {
+            let mut found = Instances::default();
+            for (module, (_, definitions, _)) in files.iter().enumerate() {
+                for definition in *definitions {
+                    if definition.kind != Kind::Function
+                        || !(self.registers(
+                            definition,
+                            module,
+                            &self.flask_apps,
+                            &[&["cli.group"]],
+                        ) || self.registers(definition, module, &groups, &[&["group"]]))
+                    {
+                        continue;
+                    }
+                    let name = definition.name.clone();
+                    match definition.owner {
+                        None => found.variables.insert(self.dotted_name(module, &name)),
+                        Some(function) => found.locals.insert((module, function, name)),
+                    };
+                }
+            }
+            let count = groups.variables.len() + groups.locals.len();
+            groups.variables.extend(found.variables);
+            groups.locals.extend(found.locals);
+            if groups.variables.len() + groups.locals.len() == count {
+                return groups;
+            }
+        }
     }
 
     /// Check whether a definition is a function that a decorator of one of the given instances, such
@@ -707,23 +842,34 @@ impl<'a> FrameworkRules<'a> {
         }
         for decorator in &definition.decorators {
             for name in self.hierarchy.resolve(module, decorator).iter() {
-                let (instance, method) = name.rsplit_once('.').unwrap_or(("", name));
-                // An instance of the module itself is left as it is written, and is named by its
-                // module, or is a local variable of the function that the definition is in.
-                if methods.iter().any(|methods| methods.contains(&method))
-                    && (instances.variables.contains(instance)
-                        || (name == decorator
-                            && (instances
-                                .variables
-                                .contains(&self.dotted_name(module, instance))
-                                || definition.owner.is_some_and(|function| {
-                                    instances.locals.contains(&(
-                                        module,
-                                        function,
-                                        instance.to_string(),
-                                    ))
-                                }))))
-                {
+                // A method can be that of an attribute of the instance, such as `cli.command`.
+                let registered = methods
+                    .iter()
+                    .flat_map(|methods| methods.iter())
+                    .any(|method| {
+                        let Some(instance) = name
+                            .strip_suffix(method)
+                            .and_then(|instance| instance.strip_suffix('.'))
+                        else {
+                            return false;
+                        };
+                        // An instance of the module itself is left as it is written, and is named
+                        // by its module, or is a local variable of the function that the definition
+                        // is in.
+                        instances.variables.contains(instance)
+                            || (name == decorator
+                                && (instances
+                                    .variables
+                                    .contains(&self.dotted_name(module, instance))
+                                    || definition.owner.is_some_and(|function| {
+                                        instances.locals.contains(&(
+                                            module,
+                                            function,
+                                            instance.to_string(),
+                                        ))
+                                    })))
+                    });
+                if registered {
                     return true;
                 }
             }
