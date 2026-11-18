@@ -1,0 +1,61 @@
+name: Bug report
+description: A false positive, a missed finding, a crash or other wrong behavior.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The smallest project that shows the bug helps the most: a few short files, the configuration
+        and the command.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: files
+    attributes:
+      label: Files
+      description: The Python files, each with its path.
+      value: |
+        `main.py`:
+        ```python
+
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: The `[tool.unref]` table of `pyproject.toml`, or the file given to `--config`. Leave empty if none.
+      render: toml
+
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      value: unref .
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: What the command printed.
+      render: text
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `unref --version`.
+      placeholder: unref 0.2.0
+    validations:
+      required: true
