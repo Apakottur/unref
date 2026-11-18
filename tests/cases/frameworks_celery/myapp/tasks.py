@@ -26,7 +26,7 @@ def refresh_cache() -> None:
 
 # Celery calls the `run` method and the handlers of a task class.
 class BaseTask(Task):
-    def on_failure(self, exc, task_id, args, kwargs, einfo):
+    def on_failure(self, exc, task_id, args, kwargs, exception_info):
         pass
 
     def run(self):
