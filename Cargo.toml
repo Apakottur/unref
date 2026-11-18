@@ -15,6 +15,8 @@ clap = { version = "4.6", features = ["derive"] }
 encoding_rs = "0.8.44"
 fancy-regex = "0.20"
 ignore = "0.4.34"
+# v2, as v3 holds about a third more memory when many threads check.
+mimalloc = { version = "0.1.52", features = ["v2"] }
 rayon = "1.12"
 regex = "1.13"
 rustc-hash = "2.1.3"

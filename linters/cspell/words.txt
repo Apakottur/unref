@@ -49,6 +49,7 @@ maxfail
 metaclass
 metaclasses
 metafunc
+mimalloc
 mkdocstrings
 modifyitems
 musllinux
@@ -78,6 +79,7 @@ rfind
 Rozantsev
 rsplit
 rustc
+saleor
 sdist
 setdefault
 showlocals

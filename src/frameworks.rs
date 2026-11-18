@@ -57,7 +57,9 @@
 //!   and `app_name` from each module that `include` names by a string. The server loads the
 //!   application that `get_wsgi_application()` or `get_asgi_application()` makes, by a dotted path.
 //!   Django makes the subclasses of `AppConfig` of the installed applications, reads their attributes
-//!   such as `name`, and calls their `ready` method.
+//!   such as `name`, and calls their `ready` method. Its migration commands load the class named
+//!   `Migration` of a migration module, a subclass of `Migration`, and read its attributes, such as
+//!   `operations`.
 //! - Celery's workers run the tasks that `shared_task` registers, and those that the `task` decorator of
 //!   an application registers: of a variable that is set to `Celery()`, or to an instance of a subclass
 //!   of it, at the top level of a module, or in the function that the decorated function is defined in,
@@ -356,6 +358,22 @@ const DJANGO_APP_CONFIG_ATTRIBUTES: [&str; 6] = [
     "default_auto_field",
 ];
 const DJANGO_APP_CONFIG_METHODS: [&str; 1] = ["ready"];
+/// `Migration`, as `django.db.migrations` gives it out, and where it is defined, with the attributes
+/// of its subclasses that Django reads.
+const DJANGO_MIGRATIONS: [&str; 2] = [
+    "django.db.migrations.Migration",
+    "django.db.migrations.migration.Migration",
+];
+/// The name of the class that Django loads from a migration module.
+const DJANGO_MIGRATION_CLASS: &str = "Migration";
+const DJANGO_MIGRATION_ATTRIBUTES: [&str; 6] = [
+    "operations",
+    "dependencies",
+    "run_before",
+    "replaces",
+    "initial",
+    "atomic",
+];
 
 /// The class of Celery's applications, as `celery` gives it out, and where it is defined.
 const CELERY_APPS: [&str; 3] = [
@@ -619,13 +637,21 @@ impl<'a> FrameworkRules<'a> {
             if definition.kind == Kind::Class {
                 return false;
             }
-            return ((definition.kind == Kind::Attribute
-                && DJANGO_APP_CONFIG_ATTRIBUTES.contains(&name))
-                || (definition.kind == Kind::Method && DJANGO_APP_CONFIG_METHODS.contains(&name)))
-                && self.inherits(module, class, &DJANGO_APP_CONFIGS);
+            let app_config_member = match definition.kind {
+                Kind::Attribute => DJANGO_APP_CONFIG_ATTRIBUTES.contains(&name),
+                Kind::Method => DJANGO_APP_CONFIG_METHODS.contains(&name),
+                _ => false,
+            };
+            let migration_member =
+                definition.kind == Kind::Attribute && DJANGO_MIGRATION_ATTRIBUTES.contains(&name);
+            return (app_config_member && self.inherits(module, class, &DJANGO_APP_CONFIGS))
+                || (migration_member && self.inherits(module, class, &DJANGO_MIGRATIONS));
         }
         if definition.kind == Kind::Class {
-            return definition.owner.is_none() && self.inherits(module, name, &DJANGO_APP_CONFIGS);
+            return definition.owner.is_none()
+                && (self.inherits(module, name, &DJANGO_APP_CONFIGS)
+                    || (name == DJANGO_MIGRATION_CLASS
+                        && self.inherits(module, name, &DJANGO_MIGRATIONS)));
         }
         if definition.kind != Kind::Variable || definition.owner.is_some() {
             return false;
