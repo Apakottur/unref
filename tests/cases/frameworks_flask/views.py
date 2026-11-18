@@ -43,3 +43,7 @@ class Page(View):
     # Not a method view: an HTTP method name is not called.
     def options(self):  # expect: 9 [unused-method]
         return ""
+
+
+# Not an application: the Flask CLI does not load it.
+application = dict()  # expect: 1 [unused-variable]
