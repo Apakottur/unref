@@ -21,7 +21,7 @@ docs = [
 [project]
 name = "unref"
 dynamic = ["version"]
-description = "Find unreferenced Python code"
+description = "An extremely fast Python dead code finder, written in Rust."
 authors = [{ name = "Yossi Rozantsev" }]
 license = "MIT"
 readme = "README.md"

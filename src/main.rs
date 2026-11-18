@@ -1,4 +1,4 @@
-//! Find unreferenced Python code.
+//! An extremely fast Python dead code finder, written in Rust.
 
 mod classes;
 mod config;
@@ -33,7 +33,7 @@ use crate::modules::resolve;
 /// larger than the default.
 const STACK_SIZE: usize = 64 * 1024 * 1024;
 
-/// Find unreferenced Python code.
+/// An extremely fast Python dead code finder, written in Rust.
 ///
 /// Exits with a non-zero status if anything is found.
 #[derive(Parser)]
