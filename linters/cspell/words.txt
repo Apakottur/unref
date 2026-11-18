@@ -78,6 +78,7 @@ rfind
 Rozantsev
 rsplit
 rustc
+saleor
 sdist
 setdefault
 showlocals
