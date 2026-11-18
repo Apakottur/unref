@@ -5,7 +5,7 @@ def forwards(apps, schema_editor):
     pass
 
 
-# Django's migration commands load the subclasses of `Migration` and read their attributes.
+# Django's migration commands load the class named `Migration` and read its attributes.
 class Migration(migrations.Migration):
     initial = True
     atomic = False
@@ -15,6 +15,11 @@ class Migration(migrations.Migration):
     operations = [migrations.RunPython(forwards)]
 
     unused_attribute = 1  # expect: 5 [unused-attribute]
+
+
+# Django loads only the class named `Migration`.
+class OtherMigration(migrations.Migration):  # expect: 7 [unused-class]
+    operations = []
 
 
 class NotMigration:  # expect: 7 [unused-class]

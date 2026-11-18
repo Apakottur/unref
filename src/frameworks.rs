@@ -57,8 +57,9 @@
 //!   and `app_name` from each module that `include` names by a string. The server loads the
 //!   application that `get_wsgi_application()` or `get_asgi_application()` makes, by a dotted path.
 //!   Django makes the subclasses of `AppConfig` of the installed applications, reads their attributes
-//!   such as `name`, and calls their `ready` method. Its migration commands load the subclasses of
-//!   `Migration` and read their attributes, such as `operations`.
+//!   such as `name`, and calls their `ready` method. Its migration commands load the class named
+//!   `Migration` of a migration module, a subclass of `Migration`, and read its attributes, such as
+//!   `operations`.
 //!
 //! pytest and unittest find the methods of a test class through its base classes as well, so a base
 //! class of a test class, wherever it is, holds tests.
@@ -357,6 +358,8 @@ const DJANGO_MIGRATIONS: [&str; 2] = [
     "django.db.migrations.Migration",
     "django.db.migrations.migration.Migration",
 ];
+/// The name of the class that Django loads from a migration module.
+const DJANGO_MIGRATION_CLASS: &str = "Migration";
 const DJANGO_MIGRATION_ATTRIBUTES: [&str; 6] = [
     "operations",
     "dependencies",
@@ -574,7 +577,8 @@ impl<'a> FrameworkRules<'a> {
         if definition.kind == Kind::Class {
             return definition.owner.is_none()
                 && (self.inherits(module, name, &DJANGO_APP_CONFIGS)
-                    || self.inherits(module, name, &DJANGO_MIGRATIONS));
+                    || (name == DJANGO_MIGRATION_CLASS
+                        && self.inherits(module, name, &DJANGO_MIGRATIONS)));
         }
         if definition.kind != Kind::Variable || definition.owner.is_some() {
             return false;
