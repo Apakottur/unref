@@ -1,10 +1,44 @@
 # unref
 
-Find dead code in Python projects.
+<p align="center">
+  <em>An extremely fast Python dead code finder, written in Rust.</em>
+</p>
 
-## Quick start
+<p align="center">
+  <a href="https://pypi.python.org/pypi/unref"><img alt="PyPI" src="https://img.shields.io/pypi/v/unref.svg"></a>
+  <a href="https://github.com/Apakottur/unref/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/pypi/l/unref.svg"></a>
+  <a href="https://pypi.python.org/pypi/unref"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/unref.svg"></a>
+</p>
 
-Run it with [`uvx`](https://docs.astral.sh/uv/):
+---
+
+**Documentation**: [unref.readthedocs.io](https://unref.readthedocs.io/)
+
+**Source Code**: [github.com/Apakottur/unref](https://github.com/Apakottur/unref)
+
+---
+
+## Introduction
+
+`unref` finds the functions, classes, methods, variables and attributes that nothing in a Python project
+uses. Unused code piles up in every codebase, faster than ever now that AI tools write much of it, and
+[Ruff](https://docs.astral.sh/ruff/) does not find it yet, see
+[astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). The name is short for "unreferenced".
+
+- **Fast**: 20x faster than [vulture](https://github.com/jendrikseipp/vulture), it checks all of CPython's Python
+  code in under a second.
+- **Just works**: built-in rules for pytest, Django, Flask, Pydantic, SQLAlchemy and
+  [more](configuration.md#frameworks), so most projects need little or no configuration.
+- **Flexible**: works for applications and libraries alike, see
+  [what counts as dead code](faq.md#what-counts-as-dead-code).
+- **Modern**: follows the conventions of [Ruff](https://docs.astral.sh/ruff/) and [ty](https://docs.astral.sh/ty/).
+- **Fits your workflow**: runs with `uvx`, as a pre-commit or prek hook, and in GitHub Actions.
+
+<p align="center">
+  <img alt="Time to check CPython with unref and other dead code finders" src="https://raw.githubusercontent.com/Apakottur/unref/main/assets/benchmark.svg">
+</p>
+
+## Example
 
 ```shell
 $ uvx unref
@@ -12,74 +46,4 @@ src/project/models.py:12:7: unused-class 'Account'
 src/project/utils.py:40:5: unused-function 'parse_date'
 ```
 
-Or as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) hook, alongside
-[Ruff](https://docs.astral.sh/ruff/):
-
-```yaml
-repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.4
-    hooks:
-      - id: ruff-check
-      - id: ruff-format
-  - repo: https://github.com/Apakottur/unref
-    rev: v0.2.0 # Or run `pre-commit autoupdate`.
-    hooks:
-      - id: unref
-```
-
-## Usage
-
-### Command line
-
-`unref` checks the project that the current directory is in, or only the files and directories it is given:
-
-```shell
-uvx unref src scripts
-```
-
-`unref` exits with a non-zero status if anything is found. See the [rules](rules.md) for what it reports
-and how to ignore a finding, and the [command line](configuration.md#command-line) for its options.
-
-### pre-commit and prek
-
-The hook in the [quick start](#quick-start) runs next to Ruff, which covers the unused imports and local
-variables that `unref` leaves out.
-
-Set `rev` to the [latest release](https://github.com/Apakottur/unref/releases), or let `pre-commit autoupdate`
-or `prek autoupdate` fill it in.
-
-The hook checks the whole project, not only the changed files: a definition is unused only if no file
-references it.
-
-### GitHub Actions
-
-With `--output-format github`, the findings show as annotations on the files of a pull request:
-
-```yaml
-jobs:
-  unref:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
-      - run: uv sync # Optional: lets unref follow base classes from the dependencies, see `python`.
-      - run: uvx unref --output-format github
-```
-
-## Why
-
-Unused code piles up in every codebase, faster than ever now that AI tools write much of it.
-
-[Ruff](https://docs.astral.sh/ruff/) does not find unused code yet, see
-[astral-sh/ruff#872](https://github.com/astral-sh/ruff/issues/872). `unref` fills that gap until it does:
-
-- **Just works**: built-in rules for [many frameworks](configuration.md#frameworks), so most projects need
-  little or no configuration.
-- **Accurate**: names are matched by module, so a used `parse` in one module does not hide an unused `parse`
-  in another.
-- **Ruff-style**: same conventions, options and output style, ty-style rule codes and configuration in
-  `pyproject.toml`.
-- **Fast**: written in Rust on Ruff's parser, it checks all of CPython's Python code in under a second.
-
-The name is short for "unreferenced".
+See [usage](usage.md) for the command line, pre-commit and prek, and GitHub Actions.
