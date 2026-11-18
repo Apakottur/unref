@@ -39,6 +39,8 @@ ignorelist
 isenabled
 isort
 isupper
+jemalloc
+jemallocator
 kwonlyargs
 longpaths
 lucide
@@ -94,6 +96,7 @@ subclassing
 Swatinem
 taplo
 Tarjan
+tikv
 typer
 typeshed
 unref

@@ -29,9 +29,14 @@ use crate::external::interpreter_environment;
 use crate::models::Finding;
 use crate::modules::resolve;
 
-// The check makes many small allocations, which mimalloc serves faster than the allocator of the system.
+// The check makes many small allocations, which these serve faster than the allocator of the system.
+#[cfg(not(all(target_os = "linux", target_arch = "aarch64", target_env = "gnu")))]
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[cfg(all(target_os = "linux", target_arch = "aarch64", target_env = "gnu"))]
+#[global_allocator]
+static ALLOCATOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 /// The stack of the thread that runs the check. Following base classes and imports recurses, so it is
 /// larger than the default.
