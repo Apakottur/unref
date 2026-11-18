@@ -1,0 +1,16 @@
+import os
+import sys
+
+
+def main():
+    # Django reads the settings module that `DJANGO_SETTINGS_MODULE` names.
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mysite.settings")
+    # Another variable names no settings module.
+    os.environ.setdefault("OTHER_SETTINGS_MODULE", "other.settings")
+    from django.core.management import execute_from_command_line
+
+    execute_from_command_line(sys.argv)
+
+
+if __name__ == "__main__":
+    main()

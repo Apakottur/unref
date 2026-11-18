@@ -41,19 +41,29 @@
 //!   option of the `frameworks.sphinx` table names, or else each `conf.py` that sets `project`,
 //!   `extensions` or `html_theme` at the top level, as `sphinx-quickstart` writes. No setting starts
 //!   with an underscore, so such a name is left to be reported.
+//! - Django reads the settings of its settings modules: the names at the top level that are all
+//!   uppercase, and not the others. Its settings modules are those that `DJANGO_SETTINGS_MODULE` is set
+//!   to with `os.environ.setdefault`, as `startproject` writes in `manage.py`, `wsgi.py` and `asgi.py`,
+//!   those that the `settings` option of the `frameworks.django` table names, and the modules that they
+//!   star import, such as a `base.py` of split settings. It reads `urlpatterns` and the error handlers,
+//!   such as `handler404`, from the module that the `ROOT_URLCONF` setting names, and `urlpatterns`
+//!   and `app_name` from each module that `include` names by a string. The server loads the
+//!   application that `get_wsgi_application()` or `get_asgi_application()` makes, by a dotted path.
+//!   Django makes the subclasses of `AppConfig` of the installed applications, reads their attributes
+//!   such as `name`, and calls their `ready` method.
 //!
 //! pytest and unittest find the methods of a test class through its base classes as well, so a base
 //! class of a test class, wherever it is, holds tests.
 
 use std::path::{Path, PathBuf};
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::ClassHierarchy;
 use crate::definitions::{Definition, Kind};
 use crate::models::{Framework, fnmatch};
-use crate::modules::resolve;
-use crate::references::LocalCalls;
+use crate::modules::{ModuleName, resolve};
+use crate::references::References;
 
 const PYTEST_FILES: [&str; 2] = ["test_*.py", "*_test.py"];
 const PYTEST_CONFTEST: &str = "conftest.py";
@@ -284,6 +294,43 @@ const SPHINX_MARKERS: [&str; 3] = ["project", "extensions", "html_theme"];
 /// The functions of the configuration file that Sphinx and its extensions call.
 const SPHINX_FUNCTIONS: [&str; 2] = ["setup", "linkcode_resolve"];
 
+/// The environment variable that names the settings module of Django, and `os.environ.setdefault`,
+/// which `startproject` sets it with.
+const DJANGO_SETTINGS_VARIABLE: &str = "DJANGO_SETTINGS_MODULE";
+const OS_ENVIRON_SETDEFAULT: [&str; 1] = ["os.environ.setdefault"];
+/// The setting that names the module of the root URLs.
+const DJANGO_ROOT_URLCONF: &str = "ROOT_URLCONF";
+/// `include`, which names a module of URLs, as `django.urls` gives it out, where it is defined, and as
+/// `django.conf.urls` gave it out before Django 4.
+const DJANGO_INCLUDES: [&str; 3] = [
+    "django.urls.include",
+    "django.urls.conf.include",
+    "django.conf.urls.include",
+];
+/// The variables that Django reads from a module of URLs, and those that it reads from the module of
+/// the root URLs only, or from an included one only.
+const DJANGO_URLS_VARIABLES: [&str; 1] = ["urlpatterns"];
+const DJANGO_ROOT_URLS_VARIABLES: [&str; 4] =
+    ["handler400", "handler403", "handler404", "handler500"];
+const DJANGO_INCLUDED_URLS_VARIABLES: [&str; 1] = ["app_name"];
+/// The functions that make the application that a server loads.
+const DJANGO_APPLICATIONS: [&str; 2] = [
+    "django.core.wsgi.get_wsgi_application",
+    "django.core.asgi.get_asgi_application",
+];
+/// `AppConfig`, as `django.apps` gives it out, and where it is defined, with the attributes and
+/// methods of its subclasses that Django reads and calls.
+const DJANGO_APP_CONFIGS: [&str; 2] = ["django.apps.AppConfig", "django.apps.config.AppConfig"];
+const DJANGO_APP_CONFIG_ATTRIBUTES: [&str; 6] = [
+    "name",
+    "label",
+    "verbose_name",
+    "path",
+    "default",
+    "default_auto_field",
+];
+const DJANGO_APP_CONFIG_METHODS: [&str; 1] = ["ready"];
+
 /// Check whether a set of dotted names has one of the given names.
 fn has_any(names: &FxHashSet<String>, wanted: &[&str]) -> bool {
     wanted.iter().any(|name| names.contains(*name))
@@ -294,7 +341,7 @@ pub(crate) struct FrameworkRules<'a> {
     /// The frameworks whose rules apply.
     frameworks: &'a FxHashSet<Framework>,
     /// The module name of each file of the project, by its index.
-    module_names: &'a [String],
+    module_names: &'a [ModuleName],
     hierarchy: &'a ClassHierarchy,
     /// The classes that the test classes inherit from, by their dotted names.
     pytest_bases: FxHashSet<String>,
@@ -308,6 +355,19 @@ pub(crate) struct FrameworkRules<'a> {
     flask_apps: Instances,
     /// The configuration files of Sphinx, by their indices.
     sphinx_configs: FxHashSet<usize>,
+    /// The modules that Django reads by their names.
+    django: DjangoModules,
+}
+
+/// The modules that Django reads by their names, by their indices.
+#[derive(Default)]
+struct DjangoModules {
+    /// The settings modules.
+    settings: FxHashSet<usize>,
+    /// The modules of the root URLs, which `ROOT_URLCONF` names.
+    root_urls: FxHashSet<usize>,
+    /// The modules of URLs that `include` names.
+    included_urls: FxHashSet<usize>,
 }
 
 /// The instances of some classes, such as the applications of a web framework.
@@ -320,20 +380,21 @@ struct Instances {
     locals: FxHashSet<(usize, u32, String)>,
 }
 
-/// A file of a project, with its definitions and the local variables that its functions assign the
-/// result of a call to.
-pub(crate) type ProjectFile<'a> = (&'a Path, &'a [Definition], &'a LocalCalls);
+/// A file of a project, with its definitions and what it refers to.
+pub(crate) type ProjectFile<'a> = (&'a Path, &'a [Definition], &'a References);
 
 impl<'a> FrameworkRules<'a> {
     /// Make the rules of the given frameworks, for the files of a project, each with its definitions.
     /// The configuration files of Sphinx are the given ones, as resolved paths, or else are found by
-    /// their contents.
+    /// their contents. The settings modules of Django are the given ones, as resolved paths, and those
+    /// that are found.
     pub(crate) fn new(
         frameworks: &'a FxHashSet<Framework>,
         files: &[ProjectFile],
-        module_names: &'a [String],
+        module_names: &'a [ModuleName],
         hierarchy: &'a ClassHierarchy,
         sphinx_configuration: Option<&FxHashSet<PathBuf>>,
+        django_settings: &FxHashSet<PathBuf>,
     ) -> Self {
         let mut rules = Self {
             frameworks,
@@ -345,9 +406,13 @@ impl<'a> FrameworkRules<'a> {
             fastapi_routers: Instances::default(),
             flask_apps: Instances::default(),
             sphinx_configs: FxHashSet::default(),
+            django: DjangoModules::default(),
         };
         if rules.enabled(Framework::Fastapi) {
             rules.fastapi_routers.locals = local_instances(files, hierarchy, &FASTAPI_ROUTERS);
+        }
+        if rules.enabled(Framework::Django) {
+            rules.django = django_modules(files, module_names, hierarchy, django_settings);
         }
 
         // The classes of the project, and the base classes that it makes with SQLAlchemy's function or
@@ -425,6 +490,38 @@ impl<'a> FrameworkRules<'a> {
                 ))
             || (self.enabled(Framework::Flask) && self.flask_uses(definition, module))
             || (self.enabled(Framework::Sphinx) && self.sphinx_uses(definition, module))
+            || (self.enabled(Framework::Django) && self.django_uses(definition, module))
+    }
+
+    /// Check whether Django or a server reads or calls a definition by itself.
+    fn django_uses(&self, definition: &Definition, module: usize) -> bool {
+        let name = definition.name.as_str();
+        if let Some(class) = &definition.class {
+            if definition.kind == Kind::Class {
+                return false;
+            }
+            return ((definition.kind == Kind::Attribute
+                && DJANGO_APP_CONFIG_ATTRIBUTES.contains(&name))
+                || (definition.kind == Kind::Method && DJANGO_APP_CONFIG_METHODS.contains(&name)))
+                && self.inherits(module, class, &DJANGO_APP_CONFIGS);
+        }
+        if definition.kind == Kind::Class {
+            return definition.owner.is_none() && self.inherits(module, name, &DJANGO_APP_CONFIGS);
+        }
+        if definition.kind != Kind::Variable || definition.owner.is_some() {
+            return false;
+        }
+        let django = &self.django;
+        (django.settings.contains(&module) && is_uppercase(name))
+            || ((django.root_urls.contains(&module) || django.included_urls.contains(&module))
+                && DJANGO_URLS_VARIABLES.contains(&name))
+            || (django.root_urls.contains(&module) && DJANGO_ROOT_URLS_VARIABLES.contains(&name))
+            || (django.included_urls.contains(&module)
+                && DJANGO_INCLUDED_URLS_VARIABLES.contains(&name))
+            || definition
+                .call
+                .as_ref()
+                .is_some_and(|call| self.resolves_to(module, call, &DJANGO_APPLICATIONS))
     }
 
     /// Check whether Sphinx reads or calls a definition of its configuration file by itself.
@@ -705,7 +802,7 @@ impl<'a> FrameworkRules<'a> {
     /// Get the dotted name of a class or variable of a module, as it is among the base classes of a
     /// class.
     fn dotted_name(&self, module: usize, name: &str) -> String {
-        format!("{}.{name}", self.module_names[module])
+        format!("{}.{name}", self.module_names[module].name)
     }
 }
 
@@ -717,8 +814,8 @@ fn local_instances(
     classes: &[&str],
 ) -> FxHashSet<(usize, u32, String)> {
     let mut instances = FxHashSet::default();
-    for (module, (_, _, calls)) in files.iter().enumerate() {
-        for ((function, name), called) in *calls {
+    for (module, (_, _, references)) in files.iter().enumerate() {
+        for ((function, name), called) in &references.local_calls {
             if called
                 .iter()
                 .any(|call| has_any(&hierarchy.resolve(module, call), classes))
@@ -728,6 +825,82 @@ fn local_instances(
         }
     }
     instances
+}
+
+/// Find the modules that Django reads by their names, given the settings modules that are given by
+/// their resolved paths.
+fn django_modules(
+    files: &[ProjectFile],
+    module_names: &[ModuleName],
+    hierarchy: &ClassHierarchy,
+    given: &FxHashSet<PathBuf>,
+) -> DjangoModules {
+    let mut by_name: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
+    for (module, name) in module_names.iter().enumerate() {
+        by_name.entry(name.name.as_str()).or_default().push(module);
+    }
+    let modules = |name: &str| by_name.get(name).into_iter().flatten().copied();
+
+    let mut pending: Vec<usize> = Vec::new();
+    let mut included_urls = FxHashSet::default();
+    for (module, (path, _, references)) in files.iter().enumerate() {
+        if !given.is_empty() && given.contains(&resolve(path)) {
+            pending.push(module);
+        }
+        for (called, arguments) in &references.string_calls {
+            let resolves_to = |names: &[&str]| has_any(&hierarchy.resolve(module, called), names);
+            match arguments.as_slice() {
+                [variable, settings, ..]
+                    if variable == DJANGO_SETTINGS_VARIABLE
+                        && resolves_to(&OS_ENVIRON_SETDEFAULT) =>
+                {
+                    pending.extend(modules(settings));
+                }
+                [urls, ..] if resolves_to(&DJANGO_INCLUDES) => included_urls.extend(modules(urls)),
+                _ => {}
+            }
+        }
+    }
+
+    // The modules that a settings module star imports give out their settings through it.
+    let mut settings = FxHashSet::default();
+    while let Some(module) = pending.pop() {
+        if !settings.insert(module) {
+            continue;
+        }
+        for import in &files[module].2.imports {
+            if import.name == "*"
+                && let Some(name) =
+                    module_names[module].resolve(import.module.as_deref(), import.level)
+            {
+                pending.extend(modules(&name));
+            }
+        }
+    }
+
+    let mut root_urls = FxHashSet::default();
+    for &module in &settings {
+        for definition in files[module].1 {
+            if definition.kind == Kind::Variable
+                && is_top_level(definition)
+                && definition.name == DJANGO_ROOT_URLCONF
+                && let Some(urls) = &definition.string
+            {
+                root_urls.extend(modules(urls));
+            }
+        }
+    }
+    DjangoModules {
+        settings,
+        root_urls,
+        included_urls,
+    }
+}
+
+/// Check whether a name is uppercase, as Python's `str.isupper`: it has a cased letter, and no
+/// lowercase one.
+fn is_uppercase(name: &str) -> bool {
+    name.chars().any(char::is_uppercase) && !name.chars().any(char::is_lowercase)
 }
 
 /// The name of a file, without its directory.

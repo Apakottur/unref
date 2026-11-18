@@ -79,6 +79,9 @@ pub(crate) struct Import {
 
 /// The methods of a mapping that read a key, given as their first argument.
 const KEY_METHODS: [&str; 3] = ["get", "pop", "setdefault"];
+/// The functions and methods whose string arguments frameworks read: Django's `include`, which names a
+/// module of URLs, and `os.environ.setdefault`, which can set `DJANGO_SETTINGS_MODULE`.
+const STRING_CALLS: [&str; 2] = ["include", "setdefault"];
 
 /// What a Python module refers to.
 ///
@@ -116,6 +119,10 @@ pub(crate) struct References {
     pub local_reads: FxHashSet<(Owner, usize)>,
     /// The local variables of the functions that are assigned the result of a call.
     pub local_calls: LocalCalls,
+    /// The calls of the functions and methods whose string arguments frameworks read, each by the
+    /// dotted name of what it calls as it is written, such as `os.environ.setdefault`, and its leading
+    /// positional arguments that are string literals.
+    pub string_calls: FxHashSet<(String, Vec<String>)>,
 }
 
 /// The local variables of each function of a module that are assigned the result of a call, by the
@@ -306,7 +313,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             ),
             Stmt::TypeAlias(alias) => {
                 // Its value is evaluated when it is used, but what it reads is still read.
-                self.define_target(&alias.name, false, None, None);
+                self.define_target(&alias.name, false, None, None, None);
                 walk_stmt(self, stmt);
                 self.visit_type_strings(&alias.value);
             }
@@ -319,7 +326,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
         // loop is not collected: like Ruff, which leaves it to a rule of its own, unref does not count
         // an unused loop variable as an unused variable.
         if let Some(target) = &item.optional_vars {
-            self.define_target(target, false, None, None);
+            self.define_target(target, false, None, None, None);
         }
         walk_with_item(self, item);
     }
@@ -407,7 +414,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             }
             Expr::Named(named) => {
                 // The target of a walrus is assigned, as by an assignment.
-                self.define_target(&named.target, false, None, None);
+                self.define_target(&named.target, false, None, None, None);
                 walk_expr(self, expr);
             }
             _ => walk_expr(self, expr),
@@ -534,6 +541,7 @@ impl<'a> Walker<'_, '_> {
         {
             self.add_key(first);
         }
+        self.add_string_call(call);
         let (base, attributes) = match &*call.func {
             Expr::Attribute(func) => attribute_chain(func),
             func => (func, Vec::new()),
@@ -874,8 +882,18 @@ impl<'a> Walker<'_, '_> {
                 Some(Expr::Call(call)) => dotted_name(&call.func, Unwrap::Call),
                 _ => None,
             };
+            let string = match value {
+                Some(Expr::StringLiteral(literal)) => Some(literal.value.to_str().to_string()),
+                _ => None,
+            };
             for target in targets {
-                self.define_target(target, false, annotation.as_ref(), call.as_ref());
+                self.define_target(
+                    target,
+                    false,
+                    annotation.as_ref(),
+                    call.as_ref(),
+                    string.as_ref(),
+                );
             }
         }
         if targets.iter().any(is_all) {
@@ -954,6 +972,7 @@ impl<'a> Walker<'_, '_> {
         in_unpacking: bool,
         annotation: Option<&String>,
         call: Option<&String>,
+        string: Option<&String>,
     ) {
         if let (Expr::Name(name), Some(call)) = (target, call) {
             let binder = self.binder;
@@ -989,12 +1008,12 @@ impl<'a> Walker<'_, '_> {
             }
             Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
                 for element in elts {
-                    self.define_target(element, true, None, None);
+                    self.define_target(element, true, None, None, None);
                 }
                 return;
             }
             Expr::Starred(starred) => {
-                self.define_target(&starred.value, true, None, None);
+                self.define_target(&starred.value, true, None, None, None);
                 return;
             }
             // A local variable, or an assignment into an object that is defined elsewhere.
@@ -1024,12 +1043,13 @@ impl<'a> Walker<'_, '_> {
             unpacked,
             annotation: annotation.cloned(),
             call: call.cloned(),
+            string: string.cloned(),
             ..self.definition(kind, name, position)
         });
     }
 
     /// Start a definition of a name at a position, in the function that the node is in, with no
-    /// decorators, class, base classes, annotation or call, and not unpacked.
+    /// decorators, class, base classes, annotation, call or string, and not unpacked.
     fn definition(&self, kind: Kind, name: &str, position: TextSize) -> Definition {
         let (line, column) = self.positions.line_column(position);
         Definition {
@@ -1046,7 +1066,30 @@ impl<'a> Walker<'_, '_> {
             unpacked: false,
             annotation: None,
             call: None,
+            string: None,
         }
+    }
+
+    /// Add a call of a function or method whose string arguments frameworks read, with its leading
+    /// positional arguments that are string literals.
+    fn add_string_call(&mut self, call: &ast::ExprCall) {
+        let Some(called) = dotted_name(&call.func, Unwrap::Call) else {
+            return;
+        };
+        let last = called.rsplit('.').next().unwrap_or_default();
+        if !STRING_CALLS.contains(&last) {
+            return;
+        }
+        let arguments = call
+            .arguments
+            .args
+            .iter()
+            .map_while(|argument| match argument {
+                Expr::StringLiteral(literal) => Some(literal.value.to_str().to_string()),
+                _ => None,
+            })
+            .collect();
+        self.references.string_calls.insert((called, arguments));
     }
 
     /// Add a read of a key, if it is a string literal.

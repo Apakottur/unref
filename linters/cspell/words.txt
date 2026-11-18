@@ -4,6 +4,7 @@ anyio
 Apakottur
 appcontext
 asdict
+asgi
 asname
 asyncio
 attribs
@@ -36,6 +37,7 @@ httpx
 ignorelist
 isenabled
 isort
+isupper
 kwonlyargs
 longpaths
 lucide
@@ -50,6 +52,7 @@ mkdocstrings
 modifyitems
 musllinux
 mypy
+mysite
 pathlib
 pathspec
 peekable
@@ -81,6 +84,7 @@ shpyx
 skylos
 softprops
 sqlalchemy
+startproject
 staticmethod
 strerror
 subclassing
@@ -90,6 +94,9 @@ Tarjan
 typer
 typeshed
 unref
+URLCONF
+urlpatterns
 vararg
 venv
+wsgi
 Yossi

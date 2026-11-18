@@ -76,6 +76,9 @@ pub(crate) struct Definition {
     /// what it calls as it is written, such as `mapped_column` for `mapped_column(Integer)`, or None
     /// if the value is not a call of a dotted name.
     pub call: Option<String>,
+    /// For a variable or an attribute that is first assigned a string literal, its value, such as
+    /// `project.urls` for `ROOT_URLCONF = "project.urls"`.
+    pub string: Option<String>,
 }
 
 impl Definition {

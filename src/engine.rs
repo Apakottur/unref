@@ -165,13 +165,12 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     let classes = Classes::new(&project, &hierarchy, &fields);
     let uses = find_uses(&project, &classes);
 
-    let module_names: Vec<String> = project.names.iter().map(|name| name.name.clone()).collect();
     let file_definitions: Vec<ProjectFile> = (0..project.files.len())
         .map(|index| {
             (
                 &*project.files[index],
                 project.file_definitions(index),
-                &project.facts[index].references.local_calls,
+                &project.facts[index].references,
             )
         })
         .collect();
@@ -179,12 +178,18 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         .sphinx_configuration
         .as_ref()
         .map(|files| files.iter().map(|file| resolve(file)).collect());
+    let django_settings: FxHashSet<PathBuf> = options
+        .django_settings
+        .iter()
+        .map(|file| resolve(file))
+        .collect();
     let rules = FrameworkRules::new(
         &enabled,
         &file_definitions,
-        &module_names,
+        &project.names,
         &hierarchy,
         sphinx_configuration.as_ref(),
+        &django_settings,
     );
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
 

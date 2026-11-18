@@ -1,0 +1,2 @@
+[tool.unref.frameworks.django]
+settings = ["config/settings/production.py"]
