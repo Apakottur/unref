@@ -205,14 +205,27 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         .collect();
     let is_transitive = transitive_definitions(&project, &graph, &unused);
 
-    findings(
+    let findings = findings(
         &project,
         &discovered,
         &syntax_errors,
         &all_used,
         &needed,
         &is_transitive,
-    )
+    );
+
+    // The command exits after the check, and the system frees its memory at once, which is faster than
+    // dropping the many small parts of these one by one, as clang does too. A caller that checks many
+    // times in one process would need them dropped.
+    std::mem::forget(graph);
+    std::mem::forget(rules);
+    std::mem::forget(file_definitions);
+    std::mem::forget(uses);
+    std::mem::forget(classes);
+    std::mem::forget(hierarchy);
+    std::mem::forget(project);
+
+    findings
 }
 
 impl Project {
