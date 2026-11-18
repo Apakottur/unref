@@ -1,6 +1,6 @@
 # FAQ
 
-## What counts as unused?
+## What counts as dead code?
 
 A definition is unused when no entry point of the project reaches it. The entry points are:
 

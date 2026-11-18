@@ -18,20 +18,15 @@ An extremely fast Python dead code finder, written in Rust.
 
 - **Fast**: 20x faster than [vulture](https://github.com/jendrikseipp/vulture), it checks all of CPython's Python code in
   under a second.
-- **Just works**: built-in rules for pytest, Pydantic, SQLAlchemy and
+- **Just works**: built-in rules for pytest, Django, Flask, Pydantic, SQLAlchemy and
   [more](https://unref.readthedocs.io/en/latest/configuration/#frameworks), so most projects need little or no
   configuration.
-- **Accurate**: names are matched by module, so a used `parse` in one module does not hide an unused `parse`
-  in another.
-- **Ruff-style**: same conventions, options and output style as [Ruff](https://docs.astral.sh/ruff/), and it
-  finds the unused code Ruff leaves out.
-- **Modern**: ty-style rule codes, configuration in `pyproject.toml`, built on Ruff's parser.
+- **Flexible**: works for applications and libraries alike, see
+  [what counts as dead code](https://unref.readthedocs.io/en/latest/faq/#what-counts-as-dead-code).
+- **Modern**: follows the conventions of [Ruff](https://docs.astral.sh/ruff/) and [ty](https://docs.astral.sh/ty/).
 - **Fits your workflow**: runs with `uvx`, as a pre-commit or prek hook, and in GitHub Actions.
 
 **Documentation**: [unref.readthedocs.io](https://unref.readthedocs.io/)
-
-A definition is unused when no entry point of the project reaches it, see
-[what counts as unused](https://unref.readthedocs.io/en/latest/faq/#what-counts-as-unused).
 
 ## Getting Started
 
