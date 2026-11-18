@@ -119,6 +119,10 @@ pub(crate) struct References {
     pub local_reads: FxHashSet<(Owner, usize)>,
     /// The local variables of the functions that are assigned the result of a call.
     pub local_calls: LocalCalls,
+    /// The annotated parameters of the functions, by the line of the name of the function and the
+    /// name of the parameter, each with the dotted name of its annotation as it is written, without
+    /// its type arguments, such as `Flask` for `app: Flask`.
+    pub annotated_parameters: FxHashMap<(u32, String), String>,
     /// The calls of the functions and methods whose string arguments frameworks read, each by the
     /// dotted name of what it calls as it is written, such as `os.environ.setdefault`, and its leading
     /// positional arguments that are string literals.
@@ -687,6 +691,14 @@ impl<'a> Walker<'_, '_> {
                 }
                 if let Some(annotation) = parameter.annotation() {
                     annotations.push(annotation);
+                    if let Some((_, line)) = &defined {
+                        let name = annotation_name(annotation);
+                        if !name.is_empty() {
+                            self.references
+                                .annotated_parameters
+                                .insert((*line, parameter.name().to_string()), name);
+                        }
+                    }
                 }
             }
         }
