@@ -39,6 +39,8 @@ ignorelist
 isenabled
 isort
 isupper
+jemalloc
+jemallocator
 kwonlyargs
 longpaths
 lucide
@@ -76,6 +78,7 @@ pytype
 pyvenv
 reconstructor
 rfind
+riscv
 Rozantsev
 rsplit
 rustc
@@ -93,6 +96,7 @@ subclassing
 Swatinem
 taplo
 Tarjan
+tikv
 typer
 typeshed
 unref
