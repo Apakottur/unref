@@ -15,7 +15,7 @@ from pathlib import Path
 import shpyx
 import typer
 
-# Projects that use the frameworks that unref knows, and Python itself.
+# Projects that use the frameworks that unref knows.
 _PROJECTS = {
     "django": "https://github.com/django/django",
     "fastapi": "https://github.com/fastapi/fastapi",
@@ -25,6 +25,7 @@ _PROJECTS = {
     "pydantic": "https://github.com/pydantic/pydantic",
     "pytest": "https://github.com/pytest-dev/pytest",
     "rich": "https://github.com/Textualize/rich",
+    "saleor": "https://github.com/saleor/saleor",
     "sphinx": "https://github.com/sphinx-doc/sphinx",
     "sqlalchemy": "https://github.com/sqlalchemy/sqlalchemy",
 }
