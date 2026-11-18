@@ -265,6 +265,12 @@ impl ClassHierarchy {
                     gives_out = true;
                 } else if !symbols.bases.contains_key(first) {
                     for star_module in star_modules(&symbols, first) {
+                        // A star import of a module that is not found gives out no names. Its name
+                        // would otherwise be looked for in the package above it, which can star import
+                        // it again, with a longer name each time.
+                        if !self.exists(star_module) {
+                            continue;
+                        }
                         let imported = join(star_module, &symbol);
                         if !importers.contains_key(&imported) {
                             importers.insert(imported.clone(), Some(current.clone()));
@@ -344,6 +350,11 @@ impl ClassHierarchy {
             }
         }
         Vec::new()
+    }
+
+    /// Tell whether a module is found, in the project or outside it.
+    fn exists(&self, name: &str) -> bool {
+        self.files_by_name.contains_key(name) || self.external.borrow_mut().exists(name)
     }
 
     /// Get the module that is imported from outside the project by its name, and add its symbols to
