@@ -34,9 +34,9 @@ _TOOLS = {
 _RUNS = 5
 _COMPARE_RUNS = 15
 _TIME_LIMIT = 30.0
-# A change above this fraction is shown in red under a warning, as a big speedup can mean that unref stopped doing
-# some of its work. A slowdown above it on a single core fails the comparison, as multi core times are too noisy
-# on CI runners to judge.
+# A change above this fraction is shown with a warning, red if slower and green if faster, as a big speedup can
+# mean that unref stopped doing some of its work. A slowdown above it on a single core fails the comparison, as
+# multi core times are too noisy on CI runners to judge.
 _CHANGE_LIMIT = 0.10
 _CHART = Path(__file__).parent.parent / "assets" / "benchmark.svg"
 
@@ -173,7 +173,8 @@ def compare(base: Path, head: Path, report: Path) -> None:
                 # GitHub colors text in Markdown only through its math, in which `%` starts a comment. The Markdown
                 # turns `\\%` into the `\%` that the math needs.
                 escaped = cell.replace("%", r"\\%")
-                cell = rf"$\color{{red}}{{{escaped}}}$"
+                color = "red" if change > 0 else "green"
+                cell = rf"⚠️ $\color{{{color}}}{{{escaped}}}$"
                 if options and change > 0:
                     slowdown = change
             rows.append(f"| {name} | {_label(base_median)} | {_label(head_median)} | {cell} |")
