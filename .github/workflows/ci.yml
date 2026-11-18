@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+  # Saves the caches, which pull requests can read only from main.
+  push:
+    branches: [main]
+
   workflow_dispatch:
 
 # A new push to a PR supersedes its in-flight run; manual runs are never cancelled.
@@ -21,14 +25,23 @@ jobs:
       - name: Setup Python
         uses: ./.github/workflows/util/setup_python
 
-      - name: prek cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the prek cache
+        id: prek-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/prek
           key: ci-prek-cache-${{ hashFiles('prek.toml') }}
 
       - name: Run prek
         run: prek run -v --show-diff-on-failure --color=always --all-files
+
+      # Only main saves caches, as each pull request would save its own copy.
+      - name: Save the prek cache
+        if: github.ref == 'refs/heads/main' && steps.prek-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/prek
+          key: ${{ steps.prek-cache.outputs.cache-primary-key }}
 
   docs:
     name: Docs
@@ -38,9 +51,13 @@ jobs:
 
       - name: Setup Python
         uses: ./.github/workflows/util/setup_python
+        with:
+          install-project: "false"
 
       - name: Build docs
-        run: uv run --group docs zensical build --strict
+        run: |
+          uv sync --frozen --no-install-project --group docs
+          zensical build --strict
 
   type-check:
     name: Type Checks
@@ -81,8 +98,8 @@ jobs:
       pull-requests: write
     steps:
       # A pull request is checked out as its merge into the current main, which is the merge's first parent. The
-      # base SHA of the event can be an older main, whose later commits would count as changes of the PR. A manual
-      # run compares the branch it runs on with main.
+      # base SHA of the event can be an older main, whose later commits would count as changes of the PR. A push to
+      # main compares with the previous commit of main. A manual run compares the branch it runs on with main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
@@ -91,7 +108,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
         run: |
-          if [ "$EVENT" = "pull_request" ]; then
+          if [ "$EVENT" != "workflow_dispatch" ]; then
             base=HEAD^1
           else
             git fetch --depth=1 origin main
@@ -110,6 +127,7 @@ jobs:
           workspaces: |
             . -> target
             base -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build the head and the base
         run: |
