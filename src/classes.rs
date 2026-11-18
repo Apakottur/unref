@@ -36,6 +36,7 @@ pub(crate) struct ClassHierarchy {
     resolved: Cache,
     followed: RefCell<FxHashMap<String, Names>>,
     star_imported: RefCell<FxHashMap<String, Rc<StarImport>>>,
+    located: RefCell<FxHashMap<String, Located>>,
 }
 
 /// A name that a module may star import, followed through the star imports of the modules.
@@ -71,6 +72,7 @@ impl ClassHierarchy {
             resolved: RefCell::default(),
             followed: RefCell::default(),
             star_imported: RefCell::default(),
+            located: RefCell::default(),
         }
     }
 
@@ -88,7 +90,7 @@ impl ClassHierarchy {
             let mut found = FxHashSet::default();
             let symbols = self.module(module);
             for base in symbols.bases.get(name).into_iter().flatten() {
-                found.extend(self.resolve_written(module, base, &mut seen));
+                self.resolve_written(module, base, &mut seen, &mut found);
             }
             found
         })
@@ -136,7 +138,9 @@ impl ClassHierarchy {
     /// imported through several modules has the name of each.
     pub(crate) fn resolve(&self, module: usize, written: &str) -> Names {
         cached(&self.resolved, module, written, || {
-            self.resolve_written(module, written, &mut FxHashSet::default())
+            let mut found = FxHashSet::default();
+            self.resolve_written(module, written, &mut FxHashSet::default(), &mut found);
+            found
         })
     }
 
@@ -146,78 +150,80 @@ impl ClassHierarchy {
         if let Some(found) = self.followed.borrow().get(name) {
             return found.clone();
         }
-        let found = Rc::new(self.follow(name, &mut FxHashSet::default()));
+        let mut found = FxHashSet::default();
+        self.follow(name, &mut FxHashSet::default(), &mut found);
+        let found = Rc::new(found);
         self.followed
             .borrow_mut()
             .insert(name.to_string(), found.clone());
         found
     }
 
-    /// Get the dotted names of a base class or decorator, as it is written in a module, and of the
+    /// Add the dotted names of a base class or decorator, as it is written in a module, and of the
     /// base classes of a base class.
     fn resolve_written(
         &self,
         module: usize,
         written: &str,
         seen: &mut FxHashSet<String>,
-    ) -> FxHashSet<String> {
+        found: &mut FxHashSet<String>,
+    ) {
         let symbols = self.module(module);
         let (first, rest) = written.split_once('.').unwrap_or((written, ""));
 
         if symbols.bases.contains_key(first) {
             // A class or function of the module itself.
-            return self.follow(&format!("{}.{written}", symbols.name.name), seen);
-        }
-
-        if let Some(binding) = symbols.bindings.get(first) {
+            self.follow(&format!("{}.{written}", symbols.name.name), seen, found);
+        } else if let Some(binding) = symbols.bindings.get(first) {
             // A name that the module imports.
-            return match imported(&symbols, binding) {
-                None => FxHashSet::default(),
-                Some(imported) => self.follow(&join(&imported, rest), seen),
-            };
+            if let Some(imported) = imported(&symbols, binding) {
+                self.follow(&join(&imported, rest), seen, found);
+            }
+        } else {
+            // A builtin, or a name that the module does not define at its top level.
+            found.insert(written.to_string());
         }
-
-        // A builtin, or a name that the module does not define at its top level.
-        FxHashSet::from_iter([written.to_string()])
     }
 
-    /// Get a dotted name, and the dotted names of what it stands for in the project: the base classes
+    /// Add a dotted name, and the dotted names of what it stands for in the project: the base classes
     /// of a class, and the origin of an imported name.
-    fn follow(&self, name: &str, seen: &mut FxHashSet<String>) -> FxHashSet<String> {
+    ///
+    /// The names are added to one set as they are found, rather than returned and copied at each step
+    /// of a long chain of imports.
+    fn follow(&self, name: &str, seen: &mut FxHashSet<String>, found: &mut FxHashSet<String>) {
         if !seen.insert(name.to_string()) {
-            return FxHashSet::default();
+            return;
         }
 
-        let mut found = FxHashSet::from_iter([name.to_string()]);
+        found.insert(name.to_string());
         for (file, symbol) in self.locate(name) {
             let symbols = self.module(file);
             let (first, rest) = symbol.split_once('.').unwrap_or((&symbol, ""));
             if let Some(bases) = symbols.bases.get(&symbol) {
                 for base in bases {
-                    found.extend(self.resolve_written(file, base, seen));
+                    self.resolve_written(file, base, seen, found);
                 }
             } else if let Some(binding) = symbols.bindings.get(first) {
                 if let Some(imported) = imported(&symbols, binding) {
-                    found.extend(self.follow(&join(&imported, rest), seen));
+                    self.follow(&join(&imported, rest), seen, found);
                 }
             } else if !symbols.bases.contains_key(first) {
                 // A name that the module may star import.
                 for star_module in star_modules(&symbols, first) {
-                    let star = self.star_imported(&join(&star_module, &symbol));
+                    let star = self.star_imported(&join(star_module, &symbol));
                     found.extend(star.names.iter().cloned());
                     for source in &star.sources {
-                        found.extend(self.follow(source, seen));
+                        self.follow(source, seen, found);
                     }
                 }
                 // A name that the `__getattr__` of the module imports, which it gives out.
                 for binding in symbols.lazy.get(first).into_iter().flatten() {
                     if let Some(imported) = imported(&symbols, binding) {
-                        found.extend(self.follow(&join(&imported, rest), seen));
+                        self.follow(&join(&imported, rest), seen, found);
                     }
                 }
             }
         }
-        found
     }
 
     /// Follow a name through the star imports of the modules, to the modules that give it out.
@@ -259,7 +265,7 @@ impl ClassHierarchy {
                     gives_out = true;
                 } else if !symbols.bases.contains_key(first) {
                     for star_module in star_modules(&symbols, first) {
-                        let imported = join(&star_module, &symbol);
+                        let imported = join(star_module, &symbol);
                         if !importers.contains_key(&imported) {
                             importers.insert(imported.clone(), Some(current.clone()));
                             pending.push_back(imported);
@@ -298,8 +304,28 @@ impl ClassHierarchy {
     /// longest one that is a module outside the project. A module outside the project without a source,
     /// such as a compiled module, has no file, and a shorter start is not taken in its place.
     fn locate(&self, name: &str) -> Vec<(usize, String)> {
+        let Some((module, last)) = name.rsplit_once('.') else {
+            return Vec::new();
+        };
+        let cached = self.located.borrow().get(module).cloned();
+        let located = cached.unwrap_or_else(|| {
+            let located: Located = self.locate_module(module).into();
+            self.located
+                .borrow_mut()
+                .insert(module.to_string(), located.clone());
+            located
+        });
+        located
+            .iter()
+            .map(|(file, rest)| (*file, join(rest, last)))
+            .collect()
+    }
+
+    /// Get the modules that the longest start of a dotted name is, as `locate` takes them, each with
+    /// the rest of the name.
+    fn locate_module(&self, name: &str) -> Vec<(usize, String)> {
         let parts: Vec<&str> = name.split('.').collect();
-        let starts: Vec<(String, String)> = (1..parts.len())
+        let starts: Vec<(String, String)> = (1..=parts.len())
             .rev()
             .map(|index| (parts[..index].join("."), parts[index..].join(".")))
             .collect();
@@ -336,6 +362,9 @@ impl ClassHierarchy {
     }
 }
 
+/// The modules that a dotted name is in, each with the rest of the name in the module.
+type Located = Rc<[(usize, String)]>;
+
 /// A cache of sets of dotted names, by a module and a name in it.
 type Cache = RefCell<FxHashMap<(usize, String), Names>>;
 
@@ -362,19 +391,15 @@ fn cached(
 ///
 /// A star import of a submodule binds the submodule itself under its name, so that name is the
 /// submodule and not one that a star import gives out.
-fn star_modules(module: &ModuleSymbols, first: &str) -> Vec<String> {
-    let mut star_modules: Vec<String> = Vec::new();
-    for (source, level) in &module.stars {
-        if let Some(star_module) = module.name.resolve(source.as_deref(), *level)
-            && !star_modules.contains(&star_module)
-        {
-            star_modules.push(star_module);
-        }
+fn star_modules<'a>(module: &'a ModuleSymbols, first: &str) -> &'a [String] {
+    if module
+        .stars
+        .binary_search(&format!("{}.{first}", module.name.name))
+        .is_ok()
+    {
+        return &[];
     }
-    if star_modules.contains(&format!("{}.{first}", module.name.name)) {
-        return Vec::new();
-    }
-    star_modules
+    &module.stars
 }
 
 /// Get the dotted name that an imported name of a module stands for.

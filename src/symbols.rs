@@ -19,9 +19,8 @@ pub(crate) struct ModuleSymbols {
     pub name: ModuleName,
     /// The names that the module imports at its top level.
     pub bindings: FxHashMap<String, Binding>,
-    /// The modules that the module star imports at its top level, each as it is written and with its
-    /// number of leading dots.
-    pub stars: Vec<(Option<String>, u32)>,
+    /// The modules that the module star imports at its top level, by their dotted names, sorted.
+    pub stars: Vec<String>,
     /// The names that the module gives out from its `__getattr__`, each with the imports of it.
     pub lazy: FxHashMap<String, Vec<Binding>>,
     /// The classes and functions of the module, by their name in the module (`Outer.Inner` for a
@@ -43,11 +42,11 @@ impl ModuleSymbols {
         references: &References,
         lazy: FxHashMap<String, Vec<Binding>>,
     ) -> Self {
-        let mut stars: Vec<(Option<String>, u32)> = references
+        let mut stars: Vec<String> = references
             .imports
             .iter()
             .filter(|import| import.owner.is_none() && import.name == "*")
-            .map(|import| (import.module.clone(), import.level))
+            .filter_map(|import| name.resolve(import.module.as_deref(), import.level))
             .collect();
         stars.sort();
         stars.dedup();
