@@ -17,11 +17,15 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
         enable-cache: true
+        # Only main saves caches, as each pull request would save its own copy.
+        save-cache: ${{ github.ref == 'refs/heads/main' }}
 
     # The Rust toolchain of the runner builds unref, whose build is cached.
     - name: Rust cache
       if: inputs.install-project == 'true'
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}
 
     - name: Install Python dependencies
       shell: bash
