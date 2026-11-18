@@ -29,6 +29,10 @@ use crate::external::interpreter_environment;
 use crate::models::Finding;
 use crate::modules::resolve;
 
+// The check makes many small allocations, which mimalloc serves faster than the allocator of the system.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// The stack of the thread that runs the check. Following base classes and imports recurses, so it is
 /// larger than the default.
 const STACK_SIZE: usize = 64 * 1024 * 1024;
