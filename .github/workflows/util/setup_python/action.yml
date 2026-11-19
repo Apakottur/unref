@@ -16,6 +16,9 @@ runs:
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         python-version: ${{ inputs.python-version }}
+        # Put the project virtual environment on PATH for subsequent steps, so tools can be
+        # invoked directly (e.g. `pytest`).
+        activate-environment: true
         enable-cache: true
         # Only main saves caches, as each pull request would save its own copy.
         save-cache: ${{ github.ref == 'refs/heads/main' }}
@@ -37,10 +40,3 @@ runs:
           else
             uv sync --frozen --no-install-project
           fi
-
-    # Put the project virtual environment on PATH for subsequent steps, so tools can be
-    # invoked directly (e.g. `pytest`).
-    # zizmor flags writes to GITHUB_PATH, but this path is the project's own venv.
-    - name: Activate Python venv
-      shell: bash
-      run: echo "$(pwd)/.venv/bin" >> "$GITHUB_PATH" # zizmor: ignore[github-env]
