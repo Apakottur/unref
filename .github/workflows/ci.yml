@@ -239,7 +239,7 @@ jobs:
   check:
     name: Check All
     if: always()
-    needs: [linters, docs, type-check, unit-tests, compare]
+    needs: [linters, docs, type-check, unit-tests, minimum-rust, compare]
     runs-on: ubuntu-latest
     steps:
       - name: Decide whether the needed jobs succeeded or failed

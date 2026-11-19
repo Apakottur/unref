@@ -862,15 +862,13 @@ fn search_path(files: &[Arc<Path>], names: &[ModuleName], python: Option<&Path>)
         .zip(names)
         .map(|(path, name)| import_root(path, name));
     // The directories of `PYTHONPATH` come before the installed packages, as Python puts them.
-    let python_path: Vec<PathBuf> = std::env::var_os("PYTHONPATH")
-        .map(|paths| {
-            std::env::split_paths(&paths)
-                .filter(|path| path.is_dir())
-                .map(|path| resolve(&path))
-                .collect()
-        })
-        .unwrap_or_default();
-    let installed = python.map(environment_paths).unwrap_or_default();
+    let python_path: Vec<PathBuf> = std::env::var_os("PYTHONPATH").map_or_default(|paths| {
+        std::env::split_paths(&paths)
+            .filter(|path| path.is_dir())
+            .map(|path| resolve(&path))
+            .collect()
+    });
+    let installed = python.map_or_default(environment_paths);
     for path in roots
         .chain(python_path)
         .chain(installed)
@@ -1531,8 +1529,7 @@ fn entry_objects(
         };
         let attributes: Vec<&str> = found
             .name("attributes")
-            .map(|attributes| attributes.as_str().split('.').collect())
-            .unwrap_or_default();
+            .map_or_default(|attributes| attributes.as_str().split('.').collect());
         for &file in files_by_name.get(&found["module"]).into_iter().flatten() {
             objects
                 .entry(file)

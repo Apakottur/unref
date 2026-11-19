@@ -111,8 +111,7 @@ pub(crate) fn import_root(path: &Path, name: &ModuleName) -> PathBuf {
 /// The name of a file without its last suffix.
 fn stem(path: &Path) -> String {
     path.file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_default()
+        .map_or_default(|stem| stem.to_string_lossy().into_owned())
 }
 
 /// Make a path absolute and resolve its links, as Python's `Path.resolve` does, also for a path that
