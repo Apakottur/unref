@@ -89,17 +89,15 @@ struct Project {
 /// are those that nothing references.
 ///
 /// Returns a finding for each unused definition, for each problem with an ignore comment, and for each
-/// file that does not parse, sorted by file, line and column.
+/// file that does not parse or path that cannot be read, sorted by path, line and column.
 pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     let enabled: FxHashSet<Framework> = Framework::ALL
         .into_iter()
         .filter(|framework| options.frameworks.get(framework).copied().unwrap_or(true))
         .collect();
 
-    let discovered: Vec<Arc<Path>> = discover(paths, options)
-        .into_iter()
-        .map(Arc::from)
-        .collect();
+    let discovery = discover(paths, options);
+    let discovered: Vec<Arc<Path>> = discovery.files.into_iter().map(Arc::from).collect();
     let mut syntax_errors: FxHashMap<Arc<Path>, Finding> = FxHashMap::default();
     let mut files = Vec::new();
     let mut facts = Vec::new();
@@ -216,7 +214,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         .collect();
     let is_transitive = transitive_definitions(&project, &graph, &unused);
 
-    let findings = findings(
+    let mut findings = findings(
         &project,
         &discovered,
         &syntax_errors,
@@ -224,6 +222,12 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         &needed,
         &is_transitive,
     );
+    if !discovery.errors.is_empty() {
+        findings.extend(discovery.errors);
+        findings.sort_by(|left, right| {
+            (&left.path, left.line, left.column).cmp(&(&right.path, right.line, right.column))
+        });
+    }
 
     // The command exits after the check, and the system frees its memory at once, which is faster than
     // dropping the many small parts of these one by one, as clang does too. A caller that checks many
