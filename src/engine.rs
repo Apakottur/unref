@@ -1156,27 +1156,54 @@ fn search_path(files: &[Arc<Path>], names: &[ModuleName], python: Option<&Path>)
 }
 
 /// A package initializer takes precedence over a same-named module beside the package.
+fn shadowed_sibling_modules(project: &Project) -> FxHashSet<usize> {
+    let mut shadowed = FxHashSet::default();
+    for files in project
+        .files_by_name
+        .values()
+        .filter(|files| files.len() > 1)
+    {
+        if files.iter().all(|&file| project.names[file].is_package) {
+            continue;
+        }
+        let package_directories: FxHashSet<_> = files
+            .iter()
+            .copied()
+            .filter(|&file| project.names[file].is_package)
+            .filter_map(|file| project.files[file].parent().and_then(Path::parent))
+            .map(resolve)
+            .collect();
+        if package_directories.is_empty() {
+            continue;
+        }
+        shadowed.extend(files.iter().copied().filter(|&file| {
+            !project.names[file].is_package
+                && project.files[file]
+                    .parent()
+                    .is_some_and(|directory| package_directories.contains(&resolve(directory)))
+        }));
+    }
+    shadowed
+}
+
 fn sibling_import_files<'a>(
     project: &'a Project,
+    shadowed: &'a FxHashSet<usize>,
     module: &str,
 ) -> impl Iterator<Item = usize> + 'a {
-    let files = project
+    project
         .files_by_name
         .get(module)
-        .map_or(&[][..], Vec::as_slice);
-    files.iter().copied().filter(|&file| {
-        project.names[file].is_package
-            || !files.iter().any(|&package| {
-                project.names[package].is_package
-                    && project.files[package].parent().and_then(Path::parent)
-                        == project.files[file].parent()
-            })
-    })
+        .into_iter()
+        .flatten()
+        .copied()
+        .filter(|file| !shadowed.contains(file))
 }
 
 /// Whether a module's unconditional wildcard imports provide the given attribute.
 fn has_star_imported_name(
     project: &Project,
+    shadowed: &FxHashSet<usize>,
     file: usize,
     name: &str,
     mut resolve: impl FnMut(usize, &Binding) -> Option<String>,
@@ -1208,7 +1235,7 @@ fn has_star_imported_name(
 
         for binding in &references.star_imports {
             if let Some(module) = resolve(provider, binding) {
-                pending.extend(sibling_import_files(project, &module));
+                pending.extend(sibling_import_files(project, shadowed, &module));
             }
         }
     }
@@ -1235,6 +1262,7 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
     if modules.is_empty() {
         return imports;
     }
+    let shadowed = shadowed_sibling_modules(project);
     imports.roots = modules.len();
     // The names of the modules and packages of the project, with every package above a module.
     let known: FxHashSet<&str> = files_by_name
@@ -1318,7 +1346,7 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
                 if let Some(name) = imported.filter(|name| *name != "*") {
                     let child = join(&qualified, name);
                     if files_by_name.contains_key(&child)
-                        && !sibling_import_files(project, &qualified).any(|file| {
+                        && !sibling_import_files(project, &shadowed, &qualified).any(|file| {
                             let facts = &facts[file];
                             facts.lazy.contains_key(name)
                                 || facts.references.bindings.primary.get(name).is_some_and(
@@ -1342,6 +1370,7 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
                                         .or_insert_with(|| {
                                             has_star_imported_name(
                                                 project,
+                                                &shadowed,
                                                 file,
                                                 name,
                                                 |file, binding| {
@@ -1410,7 +1439,7 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
                 .map(|(end, _)| start + end)
                 .chain([sibling.len()]);
             for end in ends {
-                for imported in sibling_import_files(project, &sibling[..end]) {
+                for imported in sibling_import_files(project, &shadowed, &sibling[..end]) {
                     let loaded = *indices.entry((imported, package)).or_insert_with(|| {
                         let index = modules.len();
                         modules.push((imported, package));
