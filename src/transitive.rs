@@ -1,4 +1,4 @@
-//! The nodes of a graph that are reached only from outside their strongly connected component.
+//! The nodes of a graph that are reached from outside their strongly connected component.
 
 /// Find the nodes of a directed graph that are reached from outside their strongly connected
 /// component.

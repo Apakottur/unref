@@ -75,8 +75,12 @@ Nothing is imported or run.
 python = ".venv"
 ```
 
-Defaults to the active virtual environment, or else the `.venv` of the project root. An environment that
-runs `unref` itself, such as that of a pre-commit or prek hook, is skipped.
+Defaults to the first of these that exists, in this order:
+
+1. The active virtual environment, unless it is the one that `unref` is installed in, such as that of a
+   pre-commit or prek hook.
+2. The `.venv` of the project root.
+3. The virtual environment that `unref` is installed in.
 
 ### `dummy-variable-rgx`
 

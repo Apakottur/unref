@@ -59,7 +59,7 @@ struct Cli {
     #[arg(long, short, value_parser = parse_jobs)]
     jobs: Option<NonZeroUsize>,
 
-    /// Python environment or interpreter of the project. Defaults to the active one, or else the .venv of the project root.
+    /// Python environment or interpreter of the project. Defaults to the active one, or else the .venv of the project root, or else the one that unref is installed in.
     #[arg(long)]
     python: Option<PathBuf>,
 

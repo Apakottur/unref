@@ -812,10 +812,7 @@ impl<'a> FrameworkRules<'a> {
     fn sqlalchemy_uses(&self, definition: &Definition, module: usize) -> bool {
         if definition.kind.is_function() {
             return definition.decorators.iter().any(|decorator| {
-                is_sqlalchemy(
-                    &self.hierarchy.resolve(module, decorator),
-                    &SQLALCHEMY_DECORATORS,
-                )
+                self.resolves_to_sqlalchemy(module, decorator, &SQLALCHEMY_DECORATORS)
             });
         }
         let Some(class) = &definition.class else {
@@ -827,15 +824,9 @@ impl<'a> FrameworkRules<'a> {
         self.mapped_classes
             .contains(&self.dotted_name(module, class))
             && (definition.annotation.as_ref().is_some_and(|annotation| {
-                is_sqlalchemy(
-                    &self.hierarchy.resolve(module, annotation),
-                    &SQLALCHEMY_ANNOTATIONS,
-                )
+                self.resolves_to_sqlalchemy(module, annotation, &SQLALCHEMY_ANNOTATIONS)
             }) || definition.call.as_ref().is_some_and(|call| {
-                is_sqlalchemy(
-                    &self.hierarchy.resolve(module, call),
-                    &SQLALCHEMY_CONSTRUCTS,
-                )
+                self.resolves_to_sqlalchemy(module, call, &SQLALCHEMY_CONSTRUCTS)
             }))
     }
 
@@ -1047,12 +1038,18 @@ impl<'a> FrameworkRules<'a> {
     /// Check whether a class of a module inherits from one of the given classes, by their dotted
     /// names.
     fn inherits(&self, module: usize, class: &str, bases: &[&str]) -> bool {
-        has_any(&self.hierarchy.ancestors(module, class), bases)
+        self.hierarchy.inherits(module, class, bases)
     }
 
     /// Check whether an expression of a module resolves to one of the given dotted names.
     fn resolves_to(&self, module: usize, expression: &str, names: &[&str]) -> bool {
-        has_any(&self.hierarchy.resolve(module, expression), names)
+        self.hierarchy.resolves_to(module, expression, names)
+    }
+
+    /// Check whether an expression of a module resolves to a name of SQLAlchemy that ends with one of
+    /// the given ends.
+    fn resolves_to_sqlalchemy(&self, module: usize, expression: &str, ends: &[&str]) -> bool {
+        is_sqlalchemy(&self.hierarchy.resolve(module, expression), ends)
     }
 
     /// Check whether a definition of a module has a decorator that resolves to one of the given
@@ -1081,7 +1078,7 @@ fn annotated_parameters(
     let mut parameters = FxHashSet::default();
     for (module, (_, _, references)) in files.iter().enumerate() {
         for ((function, name), annotation) in &references.annotated_parameters {
-            if has_any(&hierarchy.resolve(module, annotation), classes) {
+            if hierarchy.resolves_to(module, annotation, classes) {
                 parameters.insert((module, *function, name.clone()));
             }
         }
@@ -1101,7 +1098,7 @@ fn local_instances(
         for ((function, name), called) in &references.local_calls {
             if called
                 .iter()
-                .any(|call| has_any(&hierarchy.resolve(module, call), classes))
+                .any(|call| hierarchy.resolves_to(module, call, classes))
             {
                 instances.insert((module, *function, name.clone()));
             }
@@ -1131,7 +1128,7 @@ fn django_modules(
             pending.push(module);
         }
         for (called, arguments) in &references.string_calls {
-            let resolves_to = |names: &[&str]| has_any(&hierarchy.resolve(module, called), names);
+            let resolves_to = |names: &[&str]| hierarchy.resolves_to(module, called, names);
             match arguments.as_slice() {
                 [variable, settings, ..]
                     if variable == DJANGO_SETTINGS_VARIABLE

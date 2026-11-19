@@ -218,7 +218,8 @@ struct Scope {
     /// The names that the scope imports, each with what it stands for.
     imports: FxHashMap<String, Binding>,
     /// In a function, the functions and classes that it defines, by their name, each with its index
-    /// in the definitions of the module.
+    /// in the definitions of the module. A scope nested in it passes up those that it defines by a
+    /// name that is not local to it, such as one declared `nonlocal`.
     functions_and_classes: FxHashMap<String, Vec<usize>>,
     /// The reads of names in the scope, or in a scope nested in it, that are not local to the scopes
     /// in between.
@@ -297,7 +298,7 @@ struct Walker<'p, 'a> {
     /// The scope that the names bound at the node belong to, which holds its definitions. It is the
     /// scope of the node, except in what a class or function evaluates where it is defined. The
     /// decorators, type parameters and base classes of a class bind in the class body. The decorators,
-    /// default values and annotations of a function bind in a scope of their own that is then dropped,
+    /// default values and annotations of a function bind in a scope of their own that is never closed,
     /// since the names that they bind are not tracked.
     binder: usize,
     /// The function that the node is in, or None for code that runs when the module is imported.
