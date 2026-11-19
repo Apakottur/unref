@@ -16,7 +16,7 @@ use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::ignores::{apply_ignore_comments, ignored_codes};
 use crate::models::{Finding, Framework, Override, fnmatch};
 use crate::modules::{ModuleName, import_root, module_name, resolve};
-use crate::references::{Binding, Owner, Receiver};
+use crate::references::{Binding, ClassBase, Owner, Receiver};
 use crate::symbols::ModuleSymbols;
 use crate::transitive::transitive;
 
@@ -608,7 +608,7 @@ struct AbstractMethods {
 impl AbstractMethods {
     fn new(project: &Project, hierarchy: &ClassHierarchy) -> Self {
         let mut methods = Self::default();
-        let mut contracts: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
+        let mut contracts: FxHashMap<DefinitionId, Vec<DefinitionId>> = FxHashMap::default();
         for (file, facts) in project.facts.iter().enumerate() {
             let first = project.first_definition[file];
             for method in &facts.references.methods {
@@ -617,10 +617,8 @@ impl AbstractMethods {
                         .resolve_binding(file, binding, rest)
                         .contains("abc.abstractmethod")
                 }) {
-                    let class = &project.definitions[first + method.class];
-                    let dotted = join(&project.names[file].name, &class.qualified_name());
                     contracts
-                        .entry(dotted)
+                        .entry(first + method.class)
                         .or_default()
                         .push(first + method.definition);
                 }
@@ -630,25 +628,21 @@ impl AbstractMethods {
             return methods;
         }
 
+        let bases = project_class_bases(project, hierarchy);
         for (file, facts) in project.facts.iter().enumerate() {
             let first = project.first_definition[file];
-            let mut inherited: FxHashMap<DefinitionId, FxHashSet<DefinitionId>> =
-                FxHashMap::default();
+            let mut inherited: FxHashMap<DefinitionId, Vec<DefinitionId>> = FxHashMap::default();
             for method in &facts.references.methods {
                 let class = first + method.class;
                 let definition = first + method.definition;
                 let inherited = inherited.entry(class).or_insert_with(|| {
-                    // Use this definition's bases. Two factories can each define a class with the
-                    // same name and give it different base classes.
-                    let class = &project.definitions[class];
-                    let own_name = join(&project.names[file].name, &class.qualified_name());
-                    let mut found = FxHashSet::default();
-                    for base in &class.bases {
-                        for ancestor in hierarchy.resolve(file, base).iter() {
-                            if *ancestor != own_name {
-                                found
-                                    .extend(contracts.get(ancestor).into_iter().flatten().copied());
-                            }
+                    let mut seen = FxHashSet::from_iter([class]);
+                    let mut pending = bases.get(&class).cloned().unwrap_or_default();
+                    let mut found = Vec::new();
+                    while let Some(base) = pending.pop() {
+                        if seen.insert(base) {
+                            found.extend(contracts.get(&base).into_iter().flatten().copied());
+                            pending.extend(bases.get(&base).into_iter().flatten().copied());
                         }
                     }
                     found
@@ -702,6 +696,43 @@ impl AbstractMethods {
             }
         }
     }
+}
+
+/// Connect each class to the project definitions that it directly inherits from.
+fn project_class_bases(
+    project: &Project,
+    hierarchy: &ClassHierarchy,
+) -> FxHashMap<DefinitionId, Vec<DefinitionId>> {
+    let mut exports: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
+    for (file, facts) in project.facts.iter().enumerate() {
+        for (name, &class) in &facts.references.exported_classes {
+            exports
+                .entry(join(&project.names[file].name, name))
+                .or_default()
+                .push(project.first_definition[file] + class);
+        }
+    }
+    let mut bases = FxHashMap::default();
+    for (file, facts) in project.facts.iter().enumerate() {
+        let first = project.first_definition[file];
+        for (&class, written) in &facts.references.class_bases {
+            let mut found = Vec::new();
+            for base in written {
+                match base {
+                    ClassBase::Local(base) => found.push(first + base),
+                    ClassBase::Imported(binding, rest) => {
+                        for name in hierarchy.imported_project_bases(file, binding, rest).iter() {
+                            found.extend(exports.get(name).into_iter().flatten().copied());
+                        }
+                    }
+                }
+            }
+            if !found.is_empty() {
+                bases.insert(first + class, found);
+            }
+        }
+    }
+    bases
 }
 
 /// Check whether a base class of a class, as it is written in its module, is not known: it is

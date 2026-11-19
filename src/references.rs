@@ -36,6 +36,15 @@ pub(crate) struct Method {
     pub decorator_imports: Vec<(Binding, String)>,
 }
 
+/// The direct base of a class, resolved in the scope of its class statement.
+#[derive(Debug)]
+pub(crate) enum ClassBase {
+    /// A class defined in this file, by its definition index.
+    Local(usize),
+    /// An imported name and any attributes read from it.
+    Imported(Binding, String),
+}
+
 /// The code that a reference or a definition is in: the line of the name of the function that it is
 /// in, or None for code that runs when the module is imported.
 pub(crate) type Owner = Option<u32>;
@@ -121,6 +130,10 @@ pub(crate) struct References {
     pub bindings: FxHashMap<String, Binding>,
     /// The methods of the file and their containing classes.
     pub methods: Vec<Method>,
+    /// The direct bases of each class, keyed by its definition index in the file.
+    pub class_bases: FxHashMap<usize, Vec<ClassBase>>,
+    /// The classes available by name from this module, including nested classes and aliases.
+    pub exported_classes: FxHashMap<String, usize>,
     /// The functions and classes that are local variables of a function, by their index in the
     /// definitions of the module. A read of their name elsewhere is not a reference to them.
     pub local_definitions: FxHashSet<usize>,
@@ -173,8 +186,16 @@ pub(crate) fn walk_module(
         binder: 0,
         owner: None,
         in_signature: false,
+        class_members: FxHashMap::default(),
+        returned_classes: FxHashMap::default(),
+        module_imports: FxHashMap::default(),
+        module_calls: FxHashMap::default(),
+        import_order: 0,
+        deferred_decorators: Vec::new(),
     };
     walker.visit_body(&module.body);
+    walker.resolve_deferred_decorators();
+    walker.collect_exported_classes();
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
@@ -204,6 +225,8 @@ struct Scope {
     imports: FxHashMap<String, Binding>,
     /// Changes to the first import of a name, for decorators evaluated in source order.
     rebound_imports: FxHashMap<String, Option<Binding>>,
+    /// The classes, functions and known class aliases currently bound in the scope.
+    scoped_definitions: FxHashMap<String, usize>,
     /// The parameter names of a function, which can shadow imports used by decorators.
     parameters: Vec<String>,
     /// The scope that supplies names missing from this one.
@@ -250,6 +273,7 @@ impl Scope {
             nonlocal_names: FxHashSet::default(),
             imports: FxHashMap::default(),
             rebound_imports: FxHashMap::default(),
+            scoped_definitions: FxHashMap::default(),
             parameters: Vec::new(),
             lexical_parent: None,
             functions_and_classes: FxHashMap::default(),
@@ -276,6 +300,23 @@ enum Target {
     Module,
 }
 
+/// A global name used as a decorator when a function builds a class.
+struct DeferredDecorator {
+    method: usize,
+    function: u32,
+    root: String,
+    rest: String,
+}
+
+enum ScopedName<'a> {
+    Definition(usize),
+    Imported(&'a Binding),
+    Deferred(u32),
+    Unknown,
+}
+
+type ImportHistory = FxHashMap<String, Vec<(usize, Option<Binding>)>>;
+
 /// Walk a module once, and add what it defines and refers to.
 struct Walker<'p, 'a> {
     /// The file of the module.
@@ -300,6 +341,15 @@ struct Walker<'p, 'a> {
     owner: Owner,
     /// Whether the node is in the annotation of a parameter or the return of a function.
     in_signature: bool,
+    class_members: FxHashMap<(usize, String), usize>,
+    /// The class returned by each function whose return statements all name the same class.
+    returned_classes: FxHashMap<u32, Option<usize>>,
+    /// The module's bindings as they change during import.
+    module_imports: ImportHistory,
+    /// The import order at each direct module-level call to a function of this module.
+    module_calls: FxHashMap<u32, Vec<usize>>,
+    import_order: usize,
+    deferred_decorators: Vec<DeferredDecorator>,
 }
 
 impl<'a> Visitor<'a> for Walker<'_, '_> {
@@ -309,6 +359,23 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             Stmt::ClassDef(class) => self.visit_class(class),
             Stmt::Import(import) => self.visit_import(import),
             Stmt::ImportFrom(import) => self.visit_import_from(import),
+            Stmt::Return(statement) => {
+                if let Some(owner) = self.owner {
+                    let class = statement
+                        .value
+                        .as_deref()
+                        .and_then(|value| self.class_value(value));
+                    self.returned_classes
+                        .entry(owner)
+                        .and_modify(|previous| {
+                            if *previous != class {
+                                *previous = None;
+                            }
+                        })
+                        .or_insert(class);
+                }
+                walk_stmt(self, stmt);
+            }
             Stmt::Global(global) => {
                 // The names are not local variables.
                 let binder = self.binder;
@@ -581,6 +648,16 @@ impl<'a> Walker<'_, '_> {
             self.visit_expr(&call.func);
         }
         self.visit_arguments(&call.arguments);
+        if self.owner.is_none()
+            && let Expr::Name(name) = &*call.func
+            && let ScopedName::Definition(definition) = self.scoped_name(name.id.as_str(), false)
+            && self.definitions[definition].kind == Kind::Function
+        {
+            self.module_calls
+                .entry(self.definitions[definition].line)
+                .or_default()
+                .push(self.import_order);
+        }
         for argument in type_arguments(call) {
             self.visit_type_strings(argument);
         }
@@ -691,6 +768,9 @@ impl<'a> Walker<'_, '_> {
             Some((body_scope, line)),
             FunctionBody::Statements(&function.body),
         );
+        if function.is_async || !matches!(function.body.last(), Some(Stmt::Return(_))) {
+            self.returned_classes.remove(&line);
+        }
         // The name is bound once the function is defined, after its decorators are evaluated.
         self.bind_definition(function.name.as_str(), index);
     }
@@ -824,6 +904,25 @@ impl<'a> Walker<'_, '_> {
         class_scope.outer = Some(self.reads_target(self.scope));
         let index = self.definitions.len();
         class_scope.class_definition = Some(index);
+        let scoped_bases: Vec<_> = definition
+            .bases
+            .iter()
+            .filter_map(|base| {
+                let (root, rest) = base.split_once('.').unwrap_or((base, ""));
+                match self.scoped_name(root, false) {
+                    ScopedName::Definition(index) => {
+                        self.class_member(index, rest).map(ClassBase::Local)
+                    }
+                    ScopedName::Imported(binding) => {
+                        Some(ClassBase::Imported(binding.clone(), rest.to_string()))
+                    }
+                    ScopedName::Deferred(_) | ScopedName::Unknown => None,
+                }
+            })
+            .collect();
+        if !scoped_bases.is_empty() {
+            self.references.class_bases.insert(index, scoped_bases);
+        }
         self.definitions.push(definition);
 
         let (scope, binder) = (self.scope, self.binder);
@@ -962,8 +1061,14 @@ impl<'a> Walker<'_, '_> {
                 self.visit_type_strings(value);
             }
         }
+        let class = value.and_then(|value| self.class_value(value));
         for target in targets {
             self.visit_expr(target);
+            if let (Expr::Name(name), Some(class)) = (target, class) {
+                self.scopes[self.binder]
+                    .scoped_definitions
+                    .insert(name.id.to_string(), class);
+            }
         }
     }
 
@@ -995,17 +1100,29 @@ impl<'a> Walker<'_, '_> {
         }
         let decorators = decorator_names(&function.decorator_list);
         if let Some(class) = enclosing.class_definition {
+            let method = self.references.methods.len();
+            let mut decorator_imports = Vec::new();
+            for decorator in &decorators {
+                let (root, rest) = decorator.split_once('.').unwrap_or((decorator, ""));
+                match self.scoped_name(root, true) {
+                    ScopedName::Imported(binding) => {
+                        decorator_imports.push((binding.clone(), rest.to_string()));
+                    }
+                    ScopedName::Deferred(function) => {
+                        self.deferred_decorators.push(DeferredDecorator {
+                            method,
+                            function,
+                            root: root.to_string(),
+                            rest: rest.to_string(),
+                        });
+                    }
+                    ScopedName::Definition(_) | ScopedName::Unknown => {}
+                }
+            }
             self.references.methods.push(Method {
                 definition: self.definitions.len(),
                 class,
-                decorator_imports: decorators
-                    .iter()
-                    .filter_map(|decorator| {
-                        let (root, rest) = decorator.split_once('.').unwrap_or((decorator, ""));
-                        self.decorator_import(root)
-                            .map(|binding| (binding.clone(), rest.to_string()))
-                    })
-                    .collect(),
+                decorator_imports,
             });
         }
         let definition = Definition {
@@ -1018,16 +1135,27 @@ impl<'a> Walker<'_, '_> {
         (scope, line)
     }
 
-    /// Find the import visible where a method's decorator is evaluated.
-    fn decorator_import(&self, name: &str) -> Option<&Binding> {
+    /// Find a name in the class body or its enclosing scopes.
+    fn scoped_name(&self, name: &str, defer_module: bool) -> ScopedName<'_> {
         let mut index = self.scope;
         loop {
+            if index == 0
+                && defer_module
+                && let Some(function) = self.owner
+            {
+                return ScopedName::Deferred(function);
+            }
             let scope = &self.scopes[index];
+            if let Some(&definition) = scope.scoped_definitions.get(name) {
+                return ScopedName::Definition(definition);
+            }
             if let Some(binding) = scope.rebound_imports.get(name) {
-                return binding.as_ref();
+                return binding
+                    .as_ref()
+                    .map_or(ScopedName::Unknown, ScopedName::Imported);
             }
             if let Some(binding) = scope.imports.get(name) {
-                return Some(binding);
+                return ScopedName::Imported(binding);
             }
             index = if scope.global_names.contains(name) && index != 0 {
                 0
@@ -1035,10 +1163,104 @@ impl<'a> Walker<'_, '_> {
                 || !scope.bound.contains(name)
                     && !scope.parameters.iter().any(|value| value == name)
             {
-                scope.lexical_parent?
+                let Some(parent) = scope.lexical_parent else {
+                    return ScopedName::Unknown;
+                };
+                parent
             } else {
+                return ScopedName::Unknown;
+            };
+        }
+    }
+
+    /// Follow nested classes from a class known by definition.
+    fn class_member(&self, mut index: usize, rest: &str) -> Option<usize> {
+        if self.definitions[index].kind != Kind::Class {
+            return None;
+        }
+        if !rest.is_empty() {
+            for part in rest.split('.') {
+                index = *self.class_members.get(&(index, part.to_string()))?;
+            }
+        }
+        Some(index)
+    }
+
+    /// Recognize a class alias or a call to a function that returns a known class.
+    fn class_value(&self, value: &Expr) -> Option<usize> {
+        if let Expr::Call(call) = value {
+            let Expr::Name(name) = &*call.func else {
                 return None;
             };
+            let ScopedName::Definition(index) = self.scoped_name(name.id.as_str(), false) else {
+                return None;
+            };
+            let function = &self.definitions[index];
+            return if function.kind == Kind::Function && function.decorators.is_empty() {
+                self.returned_classes.get(&function.line).copied().flatten()
+            } else {
+                None
+            };
+        }
+        let name = dotted_name(value, Unwrap::Subscript)?;
+        let (root, rest) = name.split_once('.').unwrap_or((&name, ""));
+        if let ScopedName::Definition(index) = self.scoped_name(root, false) {
+            return self.class_member(index, rest);
+        }
+        None
+    }
+
+    /// Use the module binding at direct calls, or its final binding for calls from elsewhere.
+    fn resolve_deferred_decorators(&mut self) {
+        for decorator in std::mem::take(&mut self.deferred_decorators) {
+            let Some(history) = self.module_imports.get(&decorator.root) else {
+                continue;
+            };
+            let final_order = [self.import_order];
+            let calls = self
+                .module_calls
+                .get(&decorator.function)
+                .map_or(final_order.as_slice(), Vec::as_slice);
+            let imports = &mut self.references.methods[decorator.method].decorator_imports;
+            for &order in calls {
+                let end = history.partition_point(|(at, _)| *at <= order);
+                if let Some((_, Some(binding))) = history[..end].last() {
+                    let resolved = (binding.clone(), decorator.rest.clone());
+                    if !imports.contains(&resolved) {
+                        imports.push(resolved);
+                    }
+                }
+            }
+        }
+    }
+
+    fn record_module_import(&mut self, name: &str, binding: Option<Binding>) {
+        self.import_order += 1;
+        self.module_imports
+            .entry(name.to_string())
+            .or_default()
+            .push((self.import_order, binding));
+    }
+
+    fn collect_exported_classes(&mut self) {
+        let mut pending: Vec<_> = self.scopes[0]
+            .scoped_definitions
+            .iter()
+            .filter(|&(_, &definition)| self.definitions[definition].kind == Kind::Class)
+            .map(|(name, &definition)| (name.clone(), definition))
+            .collect();
+        let mut children: FxHashMap<usize, Vec<(&str, usize)>> = FxHashMap::default();
+        for ((parent, name), &definition) in &self.class_members {
+            children
+                .entry(*parent)
+                .or_default()
+                .push((name, definition));
+        }
+        while let Some((name, definition)) = pending.pop() {
+            for &(child, index) in children.get(&definition).into_iter().flatten() {
+                pending.push((format!("{name}.{child}"), index));
+            }
+            self.references.exported_classes.insert(name, definition);
         }
     }
 
@@ -1182,10 +1404,14 @@ impl<'a> Walker<'_, '_> {
     fn bind(&mut self, name: &str) {
         let mut scope = Some(self.binder);
         while let Some(index) = scope {
+            self.scopes[index].scoped_definitions.remove(name);
             if self.scopes[index].imports.contains_key(name) {
                 self.scopes[index]
                     .rebound_imports
                     .insert(name.to_string(), None);
+                if index == 0 {
+                    self.record_module_import(name, None);
+                }
             }
             self.scopes[index].bound.insert(name.to_string());
             scope = self.scopes[index].enclosing;
@@ -1198,11 +1424,17 @@ impl<'a> Walker<'_, '_> {
     fn bind_definition(&mut self, name: &str, index: usize) {
         let binder = self.binder;
         let scope = &mut self.scopes[binder];
+        if self.definitions[index].kind == Kind::Class
+            && let Some(class) = scope.class_definition
+        {
+            self.class_members.insert((class, name.to_string()), index);
+        }
         let definitions = match scope.kind {
             ScopeKind::Module => {
-                if scope.imports.contains_key(name) {
-                    scope.rebound_imports.insert(name.to_string(), None);
-                }
+                self.bind(name);
+                self.scopes[binder]
+                    .scoped_definitions
+                    .insert(name.to_string(), index);
                 return;
             }
             ScopeKind::Class => &mut scope.members,
@@ -1210,6 +1442,9 @@ impl<'a> Walker<'_, '_> {
         };
         definitions.entry(name.to_string()).or_default().push(index);
         self.bind(name);
+        self.scopes[binder]
+            .scoped_definitions
+            .insert(name.to_string(), index);
     }
 
     /// Bind the names that a statement imports.
@@ -1220,6 +1455,9 @@ impl<'a> Walker<'_, '_> {
         for (name, binding) in statement {
             self.bind(&name);
             let binder = self.binder;
+            if binder == 0 {
+                self.record_module_import(&name, Some(binding.clone()));
+            }
             if let Some(first) = self.scopes[binder].rebound_imports.get_mut(&name) {
                 *first = Some(binding);
             } else {

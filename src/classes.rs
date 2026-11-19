@@ -35,6 +35,7 @@ pub(crate) struct ClassHierarchy {
     resolved_decorators: Cache,
     resolved: Cache,
     followed: RefCell<FxHashMap<String, Names>>,
+    project_bases: RefCell<FxHashMap<String, Names>>,
     star_imported: RefCell<FxHashMap<String, Rc<StarImport>>>,
     located: RefCell<FxHashMap<String, Located>>,
 }
@@ -71,6 +72,7 @@ impl ClassHierarchy {
             resolved_decorators: RefCell::default(),
             resolved: RefCell::default(),
             followed: RefCell::default(),
+            project_bases: RefCell::default(),
             star_imported: RefCell::default(),
             located: RefCell::default(),
         }
@@ -90,7 +92,7 @@ impl ClassHierarchy {
             let mut found = FxHashSet::default();
             let symbols = self.module(module);
             for base in symbols.bases.get(name).into_iter().flatten() {
-                self.resolve_written(module, base, &mut seen, &mut found);
+                self.resolve_written(module, base, &mut seen, &mut found, false);
             }
             found
         })
@@ -139,7 +141,13 @@ impl ClassHierarchy {
     pub(crate) fn resolve(&self, module: usize, written: &str) -> Names {
         cached(&self.resolved, module, written, || {
             let mut found = FxHashSet::default();
-            self.resolve_written(module, written, &mut FxHashSet::default(), &mut found);
+            self.resolve_written(
+                module,
+                written,
+                &mut FxHashSet::default(),
+                &mut found,
+                false,
+            );
             found
         })
     }
@@ -150,6 +158,28 @@ impl ClassHierarchy {
             .map_or_else(Names::default, |name| self.follow_name(&join(&name, rest)))
     }
 
+    /// Follow an imported base through re-exports and external bases, stopping at project classes.
+    /// Their bases are tracked by definition in the project.
+    pub(crate) fn imported_project_bases(
+        &self,
+        module: usize,
+        binding: &Binding,
+        rest: &str,
+    ) -> Names {
+        let Some(name) = imported(&self.module(module), binding) else {
+            return Names::default();
+        };
+        let name = join(&name, rest);
+        if let Some(found) = self.project_bases.borrow().get(&name) {
+            return found.clone();
+        }
+        let mut found = FxHashSet::default();
+        self.follow(&name, &mut FxHashSet::default(), &mut found, true);
+        let found = Rc::new(found);
+        self.project_bases.borrow_mut().insert(name, found.clone());
+        found
+    }
+
     /// Get the dotted names that a dotted name stands for: the name itself, the origin of an imported
     /// name, and the base classes of a class, directly or not.
     pub(crate) fn follow_name(&self, name: &str) -> Names {
@@ -157,7 +187,7 @@ impl ClassHierarchy {
             return found.clone();
         }
         let mut found = FxHashSet::default();
-        self.follow(name, &mut FxHashSet::default(), &mut found);
+        self.follow(name, &mut FxHashSet::default(), &mut found, false);
         let found = Rc::new(found);
         self.followed
             .borrow_mut()
@@ -173,17 +203,23 @@ impl ClassHierarchy {
         written: &str,
         seen: &mut FxHashSet<String>,
         found: &mut FxHashSet<String>,
+        stop_at_project: bool,
     ) {
         let symbols = self.module(module);
         let (first, rest) = written.split_once('.').unwrap_or((written, ""));
 
         if symbols.bases.contains_key(first) {
             // A class or function of the module itself.
-            self.follow(&format!("{}.{written}", symbols.name.name), seen, found);
+            self.follow(
+                &format!("{}.{written}", symbols.name.name),
+                seen,
+                found,
+                stop_at_project,
+            );
         } else if let Some(binding) = symbols.bindings.get(first) {
             // A name that the module imports.
             if let Some(imported) = imported(&symbols, binding) {
-                self.follow(&join(&imported, rest), seen, found);
+                self.follow(&join(&imported, rest), seen, found, stop_at_project);
             }
         } else {
             // A builtin, or a name that the module does not define at its top level.
@@ -196,7 +232,13 @@ impl ClassHierarchy {
     ///
     /// The names are added to one set as they are found, rather than returned and copied at each step
     /// of a long chain of imports.
-    fn follow(&self, name: &str, seen: &mut FxHashSet<String>, found: &mut FxHashSet<String>) {
+    fn follow(
+        &self,
+        name: &str,
+        seen: &mut FxHashSet<String>,
+        found: &mut FxHashSet<String>,
+        stop_at_project: bool,
+    ) {
         if !seen.insert(name.to_string()) {
             return;
         }
@@ -205,27 +247,31 @@ impl ClassHierarchy {
         for (file, symbol) in self.locate(name) {
             let symbols = self.module(file);
             let (first, rest) = symbol.split_once('.').unwrap_or((&symbol, ""));
-            if let Some(bases) = symbols.bases.get(&symbol) {
+            let project = stop_at_project && file < self.project_count;
+            if project && symbols.exported_classes.contains(first) {
+                continue;
+            }
+            if !project && let Some(bases) = symbols.bases.get(&symbol) {
                 for base in bases {
-                    self.resolve_written(file, base, seen, found);
+                    self.resolve_written(file, base, seen, found, stop_at_project);
                 }
             } else if let Some(binding) = symbols.bindings.get(first) {
                 if let Some(imported) = imported(&symbols, binding) {
-                    self.follow(&join(&imported, rest), seen, found);
+                    self.follow(&join(&imported, rest), seen, found, stop_at_project);
                 }
-            } else if !symbols.bases.contains_key(first) {
+            } else if project || !symbols.bases.contains_key(first) {
                 // A name that the module may star import.
                 for star_module in star_modules(&symbols, first) {
                     let star = self.star_imported(&join(star_module, &symbol));
                     found.extend(star.names.iter().cloned());
                     for source in &star.sources {
-                        self.follow(source, seen, found);
+                        self.follow(source, seen, found, stop_at_project);
                     }
                 }
                 // A name that the `__getattr__` of the module imports, which it gives out.
                 for binding in symbols.lazy.get(first).into_iter().flatten() {
                     if let Some(imported) = imported(&symbols, binding) {
-                        self.follow(&join(&imported, rest), seen, found);
+                        self.follow(&join(&imported, rest), seen, found, stop_at_project);
                     }
                 }
             }

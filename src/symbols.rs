@@ -26,6 +26,8 @@ pub(crate) struct ModuleSymbols {
     /// The classes and functions of the module, by their name in the module (`Outer.Inner` for a
     /// nested class), with their base classes as they are written. A function has none.
     pub bases: FxHashMap<String, Vec<String>>,
+    /// The classes available as attributes of this module.
+    pub exported_classes: FxHashSet<String>,
     /// The classes of the module, by their name in the module, with their decorators as they are
     /// written.
     pub decorators: FxHashMap<String, Vec<String>>,
@@ -58,6 +60,7 @@ impl ModuleSymbols {
             stars,
             lazy,
             bases: FxHashMap::default(),
+            exported_classes: references.exported_classes.keys().cloned().collect(),
             decorators: FxHashMap::default(),
             members: FxHashMap::default(),
         };
