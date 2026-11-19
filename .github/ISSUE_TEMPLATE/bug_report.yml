@@ -44,20 +44,19 @@ body:
       required: true
 
   - type: textarea
-    id: expected
+    id: output
     attributes:
-      label: Expected output
-      description: What the command should print.
+      label: Command output
+      description: What the command printed.
       render: text
     validations:
       required: true
 
   - type: textarea
-    id: actual
+    id: problem
     attributes:
-      label: Actual output
-      description: What the command printed.
-      render: text
+      label: What is wrong
+      description: Which findings are wrong or missing, or what else should have happened.
     validations:
       required: true
 
