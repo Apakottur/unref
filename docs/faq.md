@@ -6,7 +6,7 @@ A definition is unused when no entry point of the project reaches it. The entry 
 
 - The code at the top level of every checked file, including tests and scripts.
 - The [entry points](configuration.md#entry-points) in `pyproject.toml`.
-- What the [frameworks](configuration.md#frameworks) call by themselves, such as pytest's tests.
+- What the [frameworks](frameworks.md) call by themselves, such as pytest's tests.
 - The names in [`used-names`](configuration.md#used-names) and the decorators in
   [`used-decorators`](configuration.md#used-decorators).
 - The names in the `__all__` of a module.

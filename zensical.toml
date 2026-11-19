@@ -12,6 +12,7 @@ nav = [
   { "Home" = "index.md" },
   { "Usage" = "usage.md" },
   { "Rules" = "rules.md" },
+  { "Frameworks" = "frameworks.md" },
   { "Configuration" = "configuration.md" },
   { "FAQ" = "faq.md" },
 ]
