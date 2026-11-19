@@ -126,7 +126,7 @@ const STRING_CALLS: [&str; 2] = ["include", "setdefault"];
 /// What a Python module refers to.
 ///
 /// Each reference is made from an owner: the function that it is in, or the module itself.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct References {
     /// The reads of the names of the module itself, without the local variables and parameters. A name
     /// that is listed in `__all__` is read as a plain name. A plain read of a name that the module

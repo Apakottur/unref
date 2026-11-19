@@ -123,6 +123,21 @@ def test_default_path(tmp_path: Path) -> None:
             f"{Path('pkg/tasks.py')}:1:5: unused-function 'only_if_loaded'\n",
             id="only-live-functions-load-siblings",
         ),
+        pytest.param(
+            {
+                "pkg/run.py": (
+                    "class Other:\n    def execute(self):\n        import sub.dormant\n\n"
+                    "Other()\n\ndef start():\n    from helpers import Actual\n    Actual().execute()\n\n"
+                    'if __name__ == "__main__": start()\n'
+                ),
+                "pkg/helpers.py": "class Actual:\n    def execute(self): print(7)\n",
+                "pkg/sub/dormant.py": "from tasks import only_if_loaded\nprint(only_if_loaded())\n",
+                "pkg/tasks.py": "def only_if_loaded(): return -1\n",
+            },
+            f"{Path('pkg/run.py')}:2:9: unused-method 'execute'\n"
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'only_if_loaded'\n",
+            id="qualified-receiver-keeps-unrelated-method-unused",
+        ),
     ],
 )
 def test_script_sibling_contexts(tmp_path: Path, files: dict[str, str], unused: str) -> None:
