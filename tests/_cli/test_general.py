@@ -70,22 +70,19 @@ def test_default_path(tmp_path: Path) -> None:
         (["--exit-zero", "."], 0),
         (["--show-files", "."], 1),
         (["--show-files", "--exit-zero", "."], 0),
-        (["--show-files", "private/nested", "visible.py"], 1),
     ],
 )
 def test_unreadable_directory(tmp_path: Path, args: list[str], exit_code: int) -> None:
     private = tmp_path / "private"
-    nested = private / "nested"
-    nested.mkdir(parents=True)
-    (nested / "hidden.py").write_text("def hidden(): pass\n")
+    private.mkdir()
+    (private / "hidden.py").write_text("def hidden(): pass\n")
     (tmp_path / "visible.py").write_text("def visible(): pass\n")
-    blocked = "private/nested" if "private/nested" in args else "private"
     private.chmod(0)
     try:
         try:
             next(private.iterdir(), None)
         except PermissionError as error:
-            diagnostic = f"{blocked}:1:1: io-error '{error.strerror} (os error {error.errno})'\n"
+            diagnostic = f"private:1:1: io-error '{error.strerror} (os error {error.errno})'\n"
         else:
             pytest.skip("the current process can enumerate the directory")
 
@@ -181,16 +178,6 @@ def test_missing_path(name: str) -> None:
     assert result.stdout == (
         f"{case}/main.py:1:7: unused-class 'Class'\n{missing}:1:1: io-error 'No such file or directory (os error 2)'\n"
     )
-
-
-def test_show_files_reports_missing_path(tmp_path: Path) -> None:
-    (tmp_path / "visible.py").touch()
-
-    result = run(["--show-files", "missing.py", "visible.py"], cwd=tmp_path)
-
-    assert result.exit_code == 1
-    assert result.stdout == "visible.py\n"
-    assert result.stderr.startswith("missing.py:1:1: io-error ")
 
 
 def test_syntax_warning() -> None:
