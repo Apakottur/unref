@@ -6,6 +6,10 @@ on:
 
   workflow_dispatch:
 
+# Jobs that need more ask for it themselves.
+permissions:
+  contents: read
+
 # The wheels can be built from any branch by hand, but only a version tag is released.
 jobs:
   wheels:
@@ -36,6 +40,8 @@ jobs:
         run: git config --global core.longpaths true
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set the version from the tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -60,6 +66,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set the version from the tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -81,6 +89,7 @@ jobs:
     name: Release
     needs: [wheels, sdist]
     runs-on: ubuntu-latest
+    environment: pypi
 
     permissions:
       # Required for PyPI Trusted Publishing (OIDC), so no API token is stored.
@@ -101,7 +110,6 @@ jobs:
         run: uv publish --trusted-publishing always dist/*
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
-        with:
-          generate_release_notes: true
-          files: dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes dist/*

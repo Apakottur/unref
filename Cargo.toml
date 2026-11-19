@@ -32,7 +32,7 @@ ruff_text_size = { git = "https://github.com/astral-sh/ruff", tag = "0.17.5" }
 mimalloc = { version = "0.1.52", default-features = false, features = ["v2"] }
 
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64", target_env = "gnu"))'.dependencies]
-tikv-jemallocator = { version = "0.6.0", default-features = false, features = [
+tikv-jemallocator = { version = "0.7.0", default-features = false, features = [
   "background_threads_runtime_support",
 ] }
 

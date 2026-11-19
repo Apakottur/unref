@@ -1,9 +1,11 @@
 //! The unused definitions of a Python project, which are those that nothing references.
 
+use std::cell::OnceCell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
+use ruff_python_ast::name::Name;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::{ClassHierarchy, join};
@@ -47,14 +49,14 @@ type ClassId = usize;
 #[derive(Default)]
 struct Uses {
     /// The names of the modules of the project that the code uses, each with its module.
-    names: FxHashSet<(usize, String)>,
+    names: FxHashSet<(usize, Name)>,
     /// The names that the code reads as attributes of an object.
-    attributes: FxHashSet<String>,
+    attributes: FxHashSet<Name>,
     /// The string keys that the code reads from a mapping.
     keys: FxHashSet<String>,
     /// The objects of the modules of the project that the code reads, each with its module and its
     /// name in the module followed by the attributes that are read from it, in order.
-    objects: FxHashSet<(usize, Vec<String>)>,
+    objects: FxHashSet<(usize, Vec<Name>)>,
     /// The modules that the code star imports.
     stars: FxHashSet<usize>,
     /// The functions and classes that are local variables of a function, the members of a class read
@@ -332,7 +334,7 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
                 if import.name == "*" {
                     owner_uses.stars.insert(imported);
                 } else {
-                    owner_uses.names.insert((imported, import.name.clone()));
+                    owner_uses.names.insert((imported, Name::new(&import.name)));
                 }
             }
         }
@@ -370,11 +372,11 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
 impl Uses {
     /// Add a read of a member: the definitions that it can stand for, or its name if it is not known
     /// what it is read from.
-    fn add_member(&mut self, found: Option<Vec<DefinitionId>>, name: &str) {
+    fn add_member(&mut self, found: Option<Vec<DefinitionId>>, name: &Name) {
         match found {
             Some(found) => self.definitions.extend(found),
             None => {
-                self.attributes.insert(name.to_string());
+                self.attributes.insert(name.clone());
             }
         }
     }
@@ -397,8 +399,12 @@ struct Classes<'a> {
     descendants: Vec<Vec<ClassId>>,
     /// Whether each class is a metaclass, whose instances are classes of their own.
     metaclasses: Vec<bool>,
-    /// The members of each class by their name. A field of a `TypedDict` is read as a key instead.
-    by_member: FxHashMap<(ClassId, String), Vec<DefinitionId>>,
+    /// The classes that a member read from the first parameter of a method of each class can be in,
+    /// and from `super()` in it, found when first needed.
+    lineages: Vec<[OnceCell<Vec<ClassId>>; 2]>,
+    /// The members of the classes, by their name and then their class. A field of a `TypedDict` is
+    /// read as a key instead.
+    by_member: FxHashMap<String, FxHashMap<ClassId, Vec<DefinitionId>>>,
     /// The members, by their name, of the classes that any member read can stand for: the
     /// protocols, which a class matches without inheriting from them, and the classes that inherit
     /// from a base class that is not known, such as a call or a variable, and the classes that
@@ -479,7 +485,8 @@ impl<'a> Classes<'a> {
                         .any(|&class| unknown_bases[class])
             })
             .collect();
-        let mut by_member: FxHashMap<(ClassId, String), Vec<DefinitionId>> = FxHashMap::default();
+        let mut by_member: FxHashMap<String, FxHashMap<ClassId, Vec<DefinitionId>>> =
+            FxHashMap::default();
         let mut loose: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         for (id, (file, definition)) in project
             .definition_files
@@ -492,7 +499,9 @@ impl<'a> Classes<'a> {
                 && let Some(&class) = ids.get(&(*file, class_name.clone()))
             {
                 by_member
-                    .entry((class, definition.name.clone()))
+                    .entry(definition.name.clone())
+                    .or_default()
+                    .entry(class)
                     .or_default()
                     .push(id);
                 if is_loose[class] {
@@ -506,6 +515,9 @@ impl<'a> Classes<'a> {
             by_dotted,
             names,
             ancestors,
+            lineages: std::iter::repeat_with(Default::default)
+                .take(descendants.len())
+                .collect(),
             descendants,
             metaclasses,
             by_member,
@@ -522,9 +534,10 @@ impl<'a> Classes<'a> {
         classes: impl IntoIterator<Item = ClassId>,
         name: &str,
     ) -> Option<Vec<DefinitionId>> {
+        let by_class = self.by_member.get(name)?;
         let mut found = Vec::new();
         for class in classes {
-            if let Some(members) = self.by_member.get(&(class, name.to_string())) {
+            if let Some(members) = by_class.get(&class) {
                 found.extend(members);
             }
         }
@@ -574,21 +587,24 @@ impl<'a> Classes<'a> {
         skip_own: bool,
     ) -> Option<Vec<DefinitionId>> {
         let &id = self.ids.get(&(file, class.to_string()))?;
-        if self.metaclasses[id] {
+        if self.metaclasses[id] || !self.by_member.contains_key(name) {
             return None;
         }
-        let mut lineage: FxHashSet<ClassId> = FxHashSet::default();
-        for &instance in std::iter::once(&id).chain(&self.descendants[id]) {
-            lineage.insert(instance);
-            lineage.extend(&self.ancestors[instance]);
-        }
-        if skip_own {
-            lineage.remove(&id);
-            for descendant in &self.descendants[id] {
-                lineage.remove(descendant);
+        let lineage = self.lineages[id][usize::from(skip_own)].get_or_init(|| {
+            let mut lineage: FxHashSet<ClassId> = FxHashSet::default();
+            for &instance in std::iter::once(&id).chain(&self.descendants[id]) {
+                lineage.insert(instance);
+                lineage.extend(&self.ancestors[instance]);
             }
-        }
-        self.members(lineage, name)
+            if skip_own {
+                lineage.remove(&id);
+                for descendant in &self.descendants[id] {
+                    lineage.remove(descendant);
+                }
+            }
+            lineage.into_iter().collect()
+        });
+        self.members(lineage.iter().copied(), name)
     }
 }
 
@@ -770,7 +786,7 @@ fn is_unknown_class(
 /// The dotted name that an imported name and the attributes read from it stand for, as its parts,
 /// and each shorter start of it that is a module of the project, shortest first, as its number of
 /// parts with its files.
-type Resolved = (Vec<String>, Vec<(usize, Vec<usize>)>);
+type Resolved = (Vec<Name>, Vec<(usize, Vec<usize>)>);
 
 /// Find the dotted name that an imported name, and the attributes read from it, stand for.
 ///
@@ -778,13 +794,13 @@ type Resolved = (Vec<String>, Vec<(usize, Vec<usize>)>);
 fn resolve_import(
     module: &ModuleName,
     binding: &Binding,
-    attributes: &[String],
+    attributes: &[Name],
     files_by_name: &FxHashMap<String, Vec<usize>>,
 ) -> Option<Resolved> {
     let resolved = module.resolve(binding.module.as_deref(), binding.level)?;
-    let mut parts: Vec<String> = resolved.split('.').map(ToString::to_string).collect();
+    let mut parts: Vec<Name> = resolved.split('.').map(Name::new).collect();
     if let Some(name) = binding.name.as_ref().filter(|name| !name.is_empty()) {
-        parts.push(name.clone());
+        parts.push(Name::new(name));
     }
     parts.extend(attributes.iter().cloned());
     let starts = (1..parts.len())
@@ -801,11 +817,11 @@ fn resolve_import(
 /// it, stand for, through the modules that import the name in turn.
 ///
 /// Returns each object with its module, and its name in the module followed by the attributes.
-fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize, Vec<String>)> {
+fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize, Vec<Name>)> {
     let mut found = FxHashSet::default();
     // Each binding that is followed is followed once, which ends a cycle of modules that import the
     // names of each other.
-    let mut followed: FxHashSet<(usize, String)> = FxHashSet::default();
+    let mut followed: FxHashSet<(usize, Name)> = FxHashSet::default();
     let mut pending = vec![resolved.clone()];
     while let Some((parts, starts)) = pending.pop() {
         let Some((index, modules)) = starts.last() else {
@@ -822,7 +838,7 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
         // longest module is followed, as `package.module.name` reads `name` from `package.module`.
         for &module in modules {
             let name = &parts[*index];
-            if let Some(binding) = project.facts[module].references.bindings.get(name)
+            if let Some(binding) = project.facts[module].references.bindings.get(name.as_str())
                 && followed.insert((module, name.clone()))
                 && let Some(next) = resolve_import(
                     &project.names[module],
@@ -1175,7 +1191,7 @@ struct Graph<'a> {
     /// The members of each enum of the project, by its file and its name in the module, with their
     /// names.
     enums: FxHashMap<(usize, String), (Vec<DefinitionId>, FxHashSet<String>)>,
-    by_name: FxHashMap<(usize, String), Vec<DefinitionId>>,
+    by_name: FxHashMap<(usize, Name), Vec<DefinitionId>>,
     by_attribute: FxHashMap<String, Vec<DefinitionId>>,
     by_key: FxHashMap<String, Vec<DefinitionId>>,
     public: FxHashMap<usize, Vec<DefinitionId>>,
@@ -1190,10 +1206,10 @@ struct Graph<'a> {
 /// What the uses of the owners followed so far read, so that each is looked up once.
 #[derive(Default)]
 struct Seen {
-    names: FxHashSet<(usize, String)>,
-    attributes: FxHashSet<String>,
+    names: FxHashSet<(usize, Name)>,
+    attributes: FxHashSet<Name>,
     keys: FxHashSet<String>,
-    objects: FxHashSet<(usize, Vec<String>)>,
+    objects: FxHashSet<(usize, Vec<Name>)>,
     stars: FxHashSet<usize>,
 }
 
@@ -1205,7 +1221,7 @@ impl<'a> Graph<'a> {
         enums: FxHashMap<(usize, String), Vec<DefinitionId>>,
         abstract_methods: AbstractMethods,
     ) -> Self {
-        let mut by_name: FxHashMap<(usize, String), Vec<DefinitionId>> = FxHashMap::default();
+        let mut by_name: FxHashMap<(usize, Name), Vec<DefinitionId>> = FxHashMap::default();
         let mut by_attribute: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         let mut by_key: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         let mut public: FxHashMap<usize, Vec<DefinitionId>> = FxHashMap::default();
@@ -1224,7 +1240,7 @@ impl<'a> Graph<'a> {
                 .contains(&(id - project.first_definition[*file]));
             if !is_local && definition.class.is_none() {
                 by_name
-                    .entry((*file, definition.name.clone()))
+                    .entry((*file, Name::new(&definition.name)))
                     .or_default()
                     .push(id);
             }
@@ -1343,7 +1359,7 @@ impl<'a> Graph<'a> {
             {
                 found.extend(
                     self.by_attribute
-                        .get(attribute)
+                        .get(attribute.as_str())
                         .into_iter()
                         .flatten()
                         .copied(),
@@ -1379,11 +1395,11 @@ impl<'a> Graph<'a> {
     /// A member read as an attribute, as in `Color.RED`, is used by its name. Any other read of an enum,
     /// such as `Color(value)`, `list(Color)`, `Color.parse(text)` or an annotation, can reach any
     /// member, so it uses them all.
-    fn enums_read(&self, file: usize, parts: &[String]) -> Vec<DefinitionId> {
+    fn enums_read(&self, file: usize, parts: &[Name]) -> Vec<DefinitionId> {
         let mut found = Vec::new();
         for index in 1..=parts.len() {
             if let Some((members, names)) = self.enums.get(&(file, parts[..index].join(".")))
-                && (index == parts.len() || !names.contains(&parts[index]))
+                && (index == parts.len() || !names.contains(parts[index].as_str()))
             {
                 found.extend(members);
             }

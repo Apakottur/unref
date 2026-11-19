@@ -68,6 +68,7 @@ profdata
 profraw
 purelib
 pycache
+pypi
 Pydantic
 Pydocstyle
 pypackages
@@ -82,6 +83,7 @@ rfind
 Rozantsev
 rsplit
 rustc
+rustup
 saleor
 sdist
 setdefault
@@ -107,3 +109,4 @@ vararg
 venv
 wsgi
 Yossi
+zizmor

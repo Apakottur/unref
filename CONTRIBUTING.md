@@ -10,6 +10,7 @@ All checks (linters, type checks, and tests) run automatically in CI through Git
 `unref` is written in Rust, on [Ruff](https://github.com/astral-sh/ruff)'s parser, and ships in a Python
 wheel built with [maturin](https://www.maturin.rs/), as Ruff does. Local development needs a
 [Rust toolchain](https://rustup.rs/) and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+`rustup` installs the version of Rust that `rust-toolchain.toml` pins on the first build.
 
 Install the development dependencies, which builds `unref` and installs it in `.venv`:
 
