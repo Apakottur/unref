@@ -9,4 +9,4 @@ class Plain:
     table_name = {}  # expect: 5 [unused-attribute]
 
 
-print(Model, Plain)
+Model, Plain

@@ -100,4 +100,4 @@ class Plain:
     other = Column(Integer)  # expect: 5 [unused-attribute]
 
 
-print(User, Address, Tag, Item, Plain)
+User, Address, Tag, Item, Plain

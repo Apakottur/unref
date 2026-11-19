@@ -15,5 +15,5 @@ class Formatter:
         return text.splitlines()
 
 
-print(Parser().parse_text("a b"))
-print(Formatter().format_words(["a"]))
+Parser().parse_text("a b")
+Formatter().format_words(["a"])

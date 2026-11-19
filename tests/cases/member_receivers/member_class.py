@@ -4,7 +4,7 @@ import shapes
 from shapes import models
 from shapes.models import Circle, Shape
 
-print(shapes.Square.sides)
-print(models.Square().area())
-print(Shape.describe(models.Square()))
-print(Circle)
+shapes.Square.sides
+models.Square().area()
+Shape.describe(models.Square())
+Circle

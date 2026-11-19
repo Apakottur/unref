@@ -82,4 +82,4 @@ def from_class_body():
     return 7
 
 
-print(also_from_used(), Holder().used(), outer(), from_lambda)
+also_from_used(), Holder().used(), outer(), from_lambda

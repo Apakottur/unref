@@ -4,15 +4,15 @@ def pair():
 
 first, unused_second = pair()
 third, also_ignored_value = pair()
-print(first, third)
+first, third
 
 # The default pattern no longer applies.
 fourth, _fifth = pair()  # expect: 9 [unused-variable]
-print(fourth)
+fourth
 
 # `_` is never reported, whatever the pattern.
 sixth, _ = pair()
-print(sixth)
+sixth
 
 # Where the binding can be dropped, the name is reported.
 unused_plain = 3  # expect: 1 [unused-variable]

@@ -12,4 +12,4 @@ class Holder:
         pass
 
 
-print(Holder)
+Holder

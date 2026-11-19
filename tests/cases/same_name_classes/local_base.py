@@ -40,4 +40,4 @@ def top_level():
     return Child()
 
 
-print(Base(), make(), outer(), top_level())
+Base(), make(), outer(), top_level()

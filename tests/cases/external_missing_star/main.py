@@ -17,4 +17,4 @@ class Handler(Base):
         return self
 
 
-print(solve, Handler)
+solve, Handler

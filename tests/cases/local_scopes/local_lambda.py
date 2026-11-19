@@ -2,4 +2,4 @@
 value = 1  # expect: 1 [unused-variable]
 other = 2
 
-print(lambda value: value + other)
+lambda value: value + other

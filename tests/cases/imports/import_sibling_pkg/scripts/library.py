@@ -2,4 +2,4 @@
 # names, as it is imported rather than run.
 from unreached import name
 
-print(name)
+name

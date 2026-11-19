@@ -5,4 +5,4 @@ class Model(BaseModel):
     table_name = {}  # expect: 5 [unused-attribute]
 
 
-print(Model)
+Model

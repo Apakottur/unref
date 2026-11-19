@@ -26,7 +26,7 @@ def hidden_by_parameter(helpers):
     return helpers.hidden_by_parameter()
 
 
-print(
+(
     # An attribute of an imported module refers to a name in that module.
     helpers.by_module(),
     renamed.by_renamed_module(),

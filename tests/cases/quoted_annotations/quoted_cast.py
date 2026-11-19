@@ -16,4 +16,4 @@ class OnlyAsValue:  # expect: 7 [unused-class]
     pass
 
 
-print(cast("OnlyInCast", 1), typing.cast("list[InTypingCast]", "OnlyAsValue"))
+cast("OnlyInCast", 1), typing.cast("list[InTypingCast]", "OnlyAsValue")

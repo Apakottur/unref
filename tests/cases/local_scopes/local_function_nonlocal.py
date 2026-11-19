@@ -59,4 +59,4 @@ def redefine_nested():
     return helper()
 
 
-print(read_only(), rebind(), redefine(), redefine_nested())
+read_only(), rebind(), redefine(), redefine_nested()

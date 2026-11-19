@@ -5,4 +5,4 @@ def helper():
 
 LIMIT = 2
 
-print(helper(), LIMIT)
+helper(), LIMIT

@@ -26,4 +26,4 @@ class Child(Shared):
         pass
 
 
-print(define(), other(), Shared().helper(), Child())
+define(), other(), Shared().helper(), Child()

@@ -106,4 +106,4 @@ class Plain:
         orm_mode = True  # expect: 9 [unused-attribute] transitive
 
 
-print(User, FromModule, FromMain, Admin, Settings, Legacy, Plain)
+User, FromModule, FromMain, Admin, Settings, Legacy, Plain

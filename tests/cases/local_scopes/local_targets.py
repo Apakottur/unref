@@ -10,25 +10,25 @@ deleted = 7  # expect: 1 [unused-variable]
 
 def function(items):
     for index in items:
-        print(index)
+        index
 
     with open(__file__) as handle:
-        print(handle)
+        handle
 
     try:
-        print(items)
+        items
     except ValueError as error:
-        print(error)
+        error
 
     if matched := len(items):
-        print(matched)
+        matched
 
     first, (second, *_) = items
-    print(first, second)
+    first, second
 
     deleted = 8
     del deleted
-    print(deleted)
+    deleted
 
 
 function([])

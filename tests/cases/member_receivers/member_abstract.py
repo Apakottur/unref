@@ -23,7 +23,7 @@ class Storage(ABC):
 class Disk(Storage):
     @staticmethod
     def save(data: bytes) -> None:
-        print(data)
+        data
 
     def close(self) -> None: ...
 
@@ -62,7 +62,7 @@ class Task(ABC):
 
 class PrintTask(Task):
     def run(self) -> None:  # expect: 9 [unused-method] transitive
-        print("run")
+        "run"
 
 
 def run_task(task: Task) -> None:  # expect: 5 [unused-function]
@@ -71,4 +71,4 @@ def run_task(task: Task) -> None:  # expect: 5 [unused-function]
 
 Disk.save(b"data")
 Storage.close(Disk())
-print(Disk().describe(), Null, BufferedNull, PrintTask)
+Disk().describe(), Null, BufferedNull, PrintTask

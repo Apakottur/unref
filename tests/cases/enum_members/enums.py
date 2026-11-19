@@ -90,5 +90,5 @@ def unused():  # expect: 5 [unused-function]
     return list(Unit)
 
 
-print(Status.ACTIVE, Color(1), list(Size), Mode["READ"], Point, Priority.parse("low"), Weekday.__members__)
-print(paint, Unit.METER, Plain.RED)
+Status.ACTIVE, Color(1), list(Size), Mode["READ"], Point, Priority.parse("low"), Weekday.__members__
+paint, Unit.METER, Plain.RED

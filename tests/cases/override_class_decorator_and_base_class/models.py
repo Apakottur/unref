@@ -19,4 +19,4 @@ class OnlyBase(Base):
     field: int  # expect: 5 [unused-attribute]
 
 
-print(Both, OnlyDecorator, OnlyBase)
+Both, OnlyDecorator, OnlyBase

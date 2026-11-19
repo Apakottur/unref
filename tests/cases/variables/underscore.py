@@ -7,9 +7,9 @@ _: int = len("annotated")
 first, _ = 1, 2  # expect: 1 [unused-variable]
 *_, last = 1, 2, 3  # expect: 5 [unused-variable]
 for _ in range(2):
-    print("loop")
+    "loop"
 with open(__file__) as _:
-    print("with")
+    "with"
 
 
 @dataclass
@@ -27,14 +27,14 @@ class Holder:
 
 @singledispatch
 def show(value):
-    print(value)
+    value
 
 
 @show.register
 def _(value: int):
-    print(value)
+    value
 
 
 Holder()
 show(1)
-print(Point(x=1))
+Point(x=1)

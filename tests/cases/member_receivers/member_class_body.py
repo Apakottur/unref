@@ -23,6 +23,6 @@ class Third:
     size = 0
 
 
-print(First().doubled)
-print(Second().doubled)
+First().doubled
+Second().doubled
 Third()

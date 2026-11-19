@@ -15,4 +15,4 @@ else:
             pass
 
 
-print(Handler())
+Handler()

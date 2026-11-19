@@ -12,16 +12,16 @@ head, *_rest = [3, 4, 5]
 outer, (_inner, *_others) = 6, (7, 8)
 [listed, _listed] = pair()
 __, ___many = pair()
-print(key, head, outer, listed)
+key, head, outer, listed
 
 for _attempt in range(3):
-    print("attempt")
+    "attempt"
 
 for _index, row in enumerate([9]):
-    print(row)
+    row
 
-print([value for _position, value in enumerate([10])])
-print({value for (_place, value) in enumerate([11])})
+[value for _position, value in enumerate([10])]
+{value for (_place, value) in enumerate([11])}
 
 
 class Holder:
@@ -32,7 +32,7 @@ class Holder:
         self.kept, self._kept = pair()  # expect: 14 [unused-attribute], 25 [unused-attribute]
 
 
-print(Holder().left)
+Holder().left
 
 
 # Where the binding can be dropped, the name is reported.
@@ -48,7 +48,7 @@ class Settings:  # expect: 7 [unused-class]
 
 # A name that does not match the pattern is reported in an unpacking.
 used, _trailing_ = pair()  # expect: 7 [unused-variable]
-print(used)
+used
 
 
 # In a function, every shape is the same: local variables are not reported.
@@ -56,8 +56,8 @@ async def function(items, stream):  # expect: 11 [unused-function]
     used, _unused = pair()
     _a, _b = pair()
     for _attempt in range(3):
-        print(used)
+        used
     async for _item, value in stream:
-        print(value)
-    print([value for _index, value in items])
+        value
+    [value for _index, value in items]
     _plain = 16

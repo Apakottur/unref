@@ -8,4 +8,4 @@ def unused():  # expect: 5 [unused-function]
     return 1
 
 
-print(used())
+used()

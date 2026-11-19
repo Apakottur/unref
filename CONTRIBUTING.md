@@ -62,6 +62,16 @@ def unused():  # expect: 5 [unused-function]
 To test a new behavior, add files to the case whose theme fits. Add a new directory only when the case
 needs its own `pyproject.toml` or layout.
 
+Keep cases small. The cases are never run, so to use a name, write it as a bare expression rather
+than passing it to `print`:
+
+```python
+first, second
+```
+
+Passing a value to a function from outside the project, such as `print`, can count as reading all of
+it, so use one only to test that.
+
 ### Type checks
 
 Run the type checks of the tests and scripts with `mypy` and `ty` (both run in CI):

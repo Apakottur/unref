@@ -7,4 +7,4 @@ def install():
 
 
 install()
-print(helper())
+helper()
