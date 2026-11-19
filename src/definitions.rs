@@ -124,16 +124,32 @@ pub(crate) fn annotation_name(annotation: &Expr) -> String {
 ///
 /// Returns None if the expression is not a dotted name, for example `@decorators[0]` or `make_base()`.
 pub(crate) fn dotted_name(expression: &Expr, unwrap: Unwrap) -> Option<String> {
+    let mut name = String::new();
+    push_dotted_name(expression, unwrap, &mut name).then_some(name)
+}
+
+/// Add the dotted name of an expression to the end of a string, which is built in place since many
+/// calls and assignments are checked.
+///
+/// Returns false if the expression is not a dotted name.
+fn push_dotted_name(expression: &Expr, unwrap: Unwrap, name: &mut String) -> bool {
     match expression {
-        Expr::Call(call) if unwrap == Unwrap::Call => dotted_name(&call.func, unwrap),
+        Expr::Call(call) if unwrap == Unwrap::Call => push_dotted_name(&call.func, unwrap, name),
         Expr::Subscript(subscript) if unwrap == Unwrap::Subscript => {
-            dotted_name(&subscript.value, unwrap)
+            push_dotted_name(&subscript.value, unwrap, name)
         }
-        Expr::Name(name) => Some(name.id.to_string()),
+        Expr::Name(root) => {
+            name.push_str(root.id.as_str());
+            true
+        }
         Expr::Attribute(attribute) => {
-            let prefix = dotted_name(&attribute.value, unwrap)?;
-            Some(format!("{prefix}.{}", attribute.attr.as_str()))
+            if !push_dotted_name(&attribute.value, unwrap, name) {
+                return false;
+            }
+            name.push('.');
+            name.push_str(attribute.attr.as_str());
+            true
         }
-        _ => None,
+        _ => false,
     }
 }
