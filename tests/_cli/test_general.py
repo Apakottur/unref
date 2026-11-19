@@ -60,6 +60,46 @@ def test_default_path(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory permissions")
+@pytest.mark.parametrize(
+    ("args", "exit_code"),
+    [
+        (["."], 1),
+        (["private"], 1),
+        ([".", "private"], 1),
+        (["--exit-zero", "."], 0),
+        (["--show-files", "."], 1),
+        (["--show-files", "--exit-zero", "."], 0),
+    ],
+)
+def test_unreadable_directory(tmp_path: Path, args: list[str], exit_code: int) -> None:
+    private = tmp_path / "private"
+    private.mkdir()
+    (private / "hidden.py").write_text("def hidden(): pass\n")
+    (tmp_path / "visible.py").write_text("def visible(): pass\n")
+    private.chmod(0)
+    try:
+        try:
+            next(private.iterdir(), None)
+        except PermissionError as error:
+            diagnostic = f"private:1:1: io-error '{error.strerror} (os error {error.errno})'\n"
+        else:
+            pytest.skip("the current process can enumerate the directory")
+
+        result = run(args, cwd=tmp_path)
+    finally:
+        private.chmod(0o700)
+
+    assert result.exit_code == exit_code
+    if "--show-files" in args:
+        assert result.stdout == "visible.py\n"
+        assert result.stderr == diagnostic
+    else:
+        visible_finding = "visible.py:1:5: unused-function 'visible'\n" if "." in args else ""
+        assert result.stdout == diagnostic + visible_finding
+        assert result.stderr == ""
+
+
 def test_gitignored_given_directory() -> None:
     # A directory that git ignores is still checked when it is given directly, as with ruff and ty.
     result = run(["main.py", "generated"], cwd=CASES_DIR / "gitignore")

@@ -184,19 +184,19 @@ fn run(cli: Cli) -> ExitCode {
     };
 
     if cli.show_files {
-        let (files, errors) = discover_for_listing(&paths, &options);
+        let discovery = discover_for_listing(&paths, &options);
         let mut stdout = std::io::BufWriter::new(std::io::stdout().lock());
-        for file in &files {
+        for file in &discovery.files {
             if writeln!(stdout, "{}", file.display()).is_err() {
                 break;
             }
         }
         let _ = stdout.flush();
         let mut stderr = std::io::stderr().lock();
-        for error in &errors {
+        for error in &discovery.errors {
             let _ = writeln!(stderr, "{error}");
         }
-        return if errors.is_empty() || cli.exit_zero {
+        return if discovery.errors.is_empty() || cli.exit_zero {
             ExitCode::SUCCESS
         } else {
             ExitCode::FAILURE
