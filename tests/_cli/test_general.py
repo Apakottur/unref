@@ -103,6 +103,44 @@ def test_read_alias_inside_main_guard_branch(tmp_path: Path) -> None:
     )
 
 
+def test_read_before_main_guard_uses_earlier_import(tmp_path: Path) -> None:
+    (tmp_path / "entry.py").write_text(
+        "import earlier as source\n"
+        "print(source.value())\n"
+        'if __name__ == "__main__":\n'
+        "    import later as source\n"
+        "else:\n"
+        "    import another as source\n"
+    )
+    for name in ("earlier", "later", "another"):
+        (tmp_path / f"{name}.py").write_text("def value(): return 7\n")
+    (tmp_path / "inspect_entry.py").write_text("import entry\n")
+
+    result = run([], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == "another.py:1:5: unused-function 'value'\nlater.py:1:5: unused-function 'value'\n"
+
+
+def test_base_of_class_in_main_guard(tmp_path: Path) -> None:
+    (tmp_path / "entry.py").write_text(
+        'if __name__ == "__main__":\n'
+        "    from script_classes import Base\n"
+        "    class Derived(Base): pass\n"
+        "    print(Derived().execute())\n"
+        "else:\n"
+        "    from imported_classes import Base\n"
+    )
+    for name in ("script_classes", "imported_classes"):
+        (tmp_path / f"{name}.py").write_text("class Base:\n    def execute(self): return 7\n")
+    (tmp_path / "inspect_entry.py").write_text("import entry\n")
+
+    result = run([], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == "imported_classes.py:2:9: unused-method 'execute'\n"
+
+
 def test_gitignored_given_directory() -> None:
     # A directory that git ignores is still checked when it is given directly, as with ruff and ty.
     result = run(["main.py", "generated"], cwd=CASES_DIR / "gitignore")
