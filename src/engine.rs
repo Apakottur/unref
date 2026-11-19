@@ -19,7 +19,7 @@ use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::ignores::{apply_ignore_comments, ignored_codes};
 use crate::models::{Finding, Framework, Override, fnmatch};
 use crate::modules::{ModuleName, import_root, module_name, resolve};
-use crate::references::{Binding, Import, ImportedRead, Owner, Receiver, References};
+use crate::references::{Binding, Import, ImportedRead, Owner, Receiver};
 use crate::symbols::ModuleSymbols;
 use crate::transitive::transitive;
 
@@ -1178,14 +1178,10 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
                 .chain([name.as_str()])
         })
         .collect();
-    let packages = modules.iter().map(|&(_, package)| package).collect();
-    let relevant_imports = script_import_dependencies(project, &known, &packages);
-    if relevant_imports.is_empty() {
-        return SiblingImports::default();
-    }
     let mut indices: FxHashMap<_, _> = modules.iter().copied().zip(0..).collect();
     let mut is_elsewhere: FxHashMap<String, bool> = FxHashMap::default();
     let mut scopes = FxHashMap::default();
+    let mut flat_loads = Vec::new();
     while let Some(&(file, package)) = modules.get(imports.contexts.len()) {
         let next_scope = scopes.len();
         let mut context = SiblingContext {
@@ -1194,53 +1190,59 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
             qualifications: FxHashMap::default(),
             loads: FxHashMap::default(),
         };
-        let mut loads = FxHashSet::default();
+        let mut siblings: FxHashSet<(Owner, String)> = FxHashSet::default();
+        let mut flat_modules = FxHashSet::default();
         let mut visit_import = |module: Option<&str>,
                                 level,
                                 imported: Option<&str>,
-                                owner: Owner| {
-            let mut first_prefix = 0;
+                                owner: Owner,
+                                known_to_flat_walk| {
             let qualified = if level == 0 {
                 let Some(module) = module else { return };
                 let top = module.split('.').next().unwrap_or_default();
-                if known.contains(top) {
-                    module.to_owned()
-                } else if known.contains(format!("{package}.{top}").as_str())
-                    && !*is_elsewhere
+                let sibling = format!("{package}.{top}");
+                if known.contains(top)
+                    || !known.contains(sibling.as_str())
+                    || *is_elsewhere
                         .entry(top.to_string())
                         .or_insert_with(|| external.exists(top))
                 {
-                    first_prefix = package.len() + 1;
-                    let qualified = format!("{package}.{module}");
-                    context
-                        .qualifications
-                        .insert(module.to_string(), qualified.clone());
-                    let targets = imports
-                        .qualifications
-                        .entry(file)
-                        .or_default()
-                        .entry(module.to_string())
-                        .or_default();
-                    if !targets.contains(&qualified) {
-                        targets.push(qualified.clone());
-                    }
-                    qualified
-                } else {
                     return;
                 }
+                format!("{package}.{module}")
             } else if let Some(resolved) = names[file].resolve(module, level) {
-                if resolved
-                    .strip_prefix(package)
-                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
-                {
-                    first_prefix = package.len() + 1;
-                }
                 resolved
             } else {
                 return;
             };
+            if !qualified
+                .strip_prefix(package)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+            {
+                return;
+            }
+            if level == 0
+                && let Some(module) = module
+            {
+                if known_to_flat_walk && !module.contains('.') {
+                    flat_modules.insert(qualified.clone());
+                }
+                context
+                    .qualifications
+                    .insert(module.to_string(), qualified.clone());
+                let targets = imports
+                    .qualifications
+                    .entry(file)
+                    .or_default()
+                    .entry(module.to_string())
+                    .or_default();
+                if !targets.contains(&qualified) {
+                    targets.push(qualified.clone());
+                }
+            }
 
-            // Keep the script's search directory through relative and fully qualified imports.
+            // An explicit relative import can load another module of the same package. Keep the
+            // script's search directory for that module too.
             if let Some(name) = imported.filter(|name| *name != "*") {
                 let child = join(&qualified, name);
                 if files_by_name.contains_key(&child)
@@ -1269,131 +1271,95 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
                         })
                 {
                     // A from-import tries a submodule only if the package lacks the attribute.
-                    loads.insert((owner, child, first_prefix));
+                    siblings.insert((owner, child));
                 }
             }
-            loads.insert((owner, qualified, first_prefix));
+            siblings.insert((owner, qualified));
         };
-        for (module, level, name, owner) in import_references(&facts[file].references) {
-            visit_import(module, level, name, owner);
+        let file_facts = &facts[file];
+        let references = &file_facts.references;
+        for (owner, module) in &references.module_imports {
+            visit_import(
+                Some(module.as_str()),
+                0,
+                None,
+                *owner,
+                !matches!(owner, Owner::Function(_)),
+            );
+        }
+        for import in &references.imports {
+            visit_import(
+                import.module.as_deref(),
+                import.level,
+                Some(&import.name),
+                import.owner,
+                true,
+            );
+        }
+        for read in &references.imported_reads {
+            let binding = &read.binding;
+            visit_import(
+                binding.module.as_deref(),
+                binding.level,
+                binding.name.as_deref(),
+                read.owner,
+                true,
+            );
         }
 
-        for (owner, module, start) in loads {
+        let mut flat = FxHashSet::default();
+        for (owner, sibling) in siblings {
             // A dotted import loads the package initializers along its path. The script's own
             // package is outside the import as it was written, so start below it.
-            let Some(relative) = module.get(start..) else {
+            let Some(relative) = sibling
+                .strip_prefix(package)
+                .and_then(|rest| rest.strip_prefix('.'))
+            else {
                 continue;
             };
+            let start = package.len() + 1;
             let ends = relative
                 .match_indices('.')
                 .map(|(end, _)| start + end)
-                .chain([module.len()]);
+                .chain([sibling.len()]);
             for end in ends {
-                for &imported in files_by_name.get(&module[..end]).into_iter().flatten() {
-                    if !relevant_imports.contains(&imported) {
-                        continue;
-                    }
+                for &imported in files_by_name.get(&sibling[..end]).into_iter().flatten() {
                     let loaded = *indices.entry((imported, package)).or_insert_with(|| {
                         let index = modules.len();
                         modules.push((imported, package));
                         index
                     });
                     context.loads.entry(owner).or_default().insert(loaded);
-                }
-            }
-        }
-        imports.contexts.push(context);
-    }
-    imports
-}
-
-/// The imports that can load project modules, including the modules named through aliases.
-fn import_references(
-    references: &References,
-) -> impl Iterator<Item = (Option<&str>, u32, Option<&str>, Owner)> {
-    references
-        .module_imports
-        .iter()
-        .map(|(owner, module)| (Some(module.as_str()), 0, None, *owner))
-        .chain(references.imports.iter().map(|import| {
-            (
-                import.module.as_deref(),
-                import.level,
-                Some(import.name.as_str()),
-                import.owner,
-            )
-        }))
-        .chain(references.imported_reads.iter().map(|read| {
-            (
-                read.binding.module.as_deref(),
-                read.binding.level,
-                read.binding.name.as_deref(),
-                read.owner,
-            )
-        }))
-}
-
-/// Find modules that can reach an import whose source depends on the script directory.
-fn script_import_dependencies(
-    project: &Project,
-    known: &FxHashSet<&str>,
-    packages: &FxHashSet<&str>,
-) -> FxHashSet<usize> {
-    let sibling_names: FxHashSet<&str> = known
-        .iter()
-        .filter_map(|name| name.rsplit_once('.'))
-        .filter_map(|(parent, child)| {
-            (packages.contains(parent) && !known.contains(child)).then_some(child)
-        })
-        .collect();
-    if sibling_names.is_empty() {
-        return FxHashSet::default();
-    }
-    let mut candidates = FxHashSet::default();
-    let mut importers: FxHashMap<usize, FxHashSet<usize>> = FxHashMap::default();
-    for (file, facts) in project.facts.iter().enumerate() {
-        for (module, level, name, _) in import_references(&facts.references) {
-            if level == 0
-                && module.is_some_and(|module| {
-                    sibling_names.contains(module.split('.').next().unwrap_or_default())
-                })
-            {
-                candidates.insert(file);
-            }
-            let Some(module) = project.names[file].resolve(module, level) else {
-                continue;
-            };
-            let child = name.map(|name| join(&module, name));
-            let paths = module
-                .match_indices('.')
-                .map(|(end, _)| &module[..end])
-                .chain([module.as_str()])
-                .chain(child.as_deref());
-            for path in paths {
-                for &imported in project.files_by_name.get(path).into_iter().flatten() {
-                    if imported != file {
-                        importers.entry(imported).or_default().insert(file);
+                    if end == sibling.len()
+                        && flat_modules.contains(&sibling)
+                        && !names[imported].is_package
+                    {
+                        flat.insert(loaded);
                     }
                 }
             }
         }
+        flat_loads.push(flat);
+        imports.contexts.push(context);
     }
-    include_dependencies(candidates, &importers)
-}
 
-fn include_dependencies(
-    mut files: FxHashSet<usize>,
-    dependents: &FxHashMap<usize, FxHashSet<usize>>,
-) -> FxHashSet<usize> {
-    let mut pending: Vec<_> = files.iter().copied().collect();
-    while let Some(file) = pending.pop() {
-        for &dependent in dependents.get(&file).into_iter().flatten() {
-            if files.insert(dependent) {
-                pending.push(dependent);
-            }
+    // The existing flat sibling walk counts loads without considering the containing function.
+    // Keep that behavior for modules it could already reach. Loads discovered by visiting a
+    // dotted import need a live owner before their module runs.
+    let mut pending: Vec<_> = (0..imports.roots).collect();
+    let mut seen: FxHashSet<_> = pending.iter().copied().collect();
+    while let Some(context) = pending.pop() {
+        let loads = &flat_loads[context];
+        if !loads.is_empty() {
+            imports.contexts[context]
+                .loads
+                .entry(Owner::Module)
+                .or_default()
+                .extend(loads);
+            pending.extend(loads.iter().copied().filter(|loaded| seen.insert(*loaded)));
         }
     }
-    files
+    imports
 }
 
 /// Qualify sibling bindings for symbol lookup and keep the raw imports for reachability.
@@ -1736,7 +1702,6 @@ struct Graph<'a> {
     contexts_by_file: FxHashMap<usize, Vec<usize>>,
     contexts_by_scope: FxHashMap<(usize, usize), usize>,
     scoped_files: FxHashSet<usize>,
-    scoped_script_files: FxHashSet<usize>,
     contexts: Vec<ContextReachability>,
     root_functions: FxHashMap<usize, Vec<DefinitionId>>,
     /// The members of each enum of the project, by its file and its name in the module, with their
@@ -1764,9 +1729,8 @@ struct Graph<'a> {
 #[derive(Default)]
 struct ContextReachability {
     active: bool,
-    entry: bool,
     imported: bool,
-    functions: Vec<u32>,
+    waiting: Vec<u32>,
 }
 
 #[derive(Default)]
@@ -1897,7 +1861,6 @@ impl<'a> Graph<'a> {
             contexts_by_file,
             contexts_by_scope,
             scoped_files: FxHashSet::default(),
-            scoped_script_files,
             contexts: (0..sibling_uses.len())
                 .map(|_| ContextReachability::default())
                 .collect(),
@@ -1920,12 +1883,13 @@ impl<'a> Graph<'a> {
         }
         for script in scoped_entries {
             graph.activate_context(script);
-            graph.activate_guard(script, Owner::Script, Owner::ScriptFunction);
+            graph.visit_context_owner(script, Owner::Script);
         }
         graph
     }
 
-    /// A script scope matters for code that can reach a context-dependent load or member.
+    /// A script context is needed only where the ordinary call graph can reach a scoped import
+    /// or member. Code outside this set shares the ordinary reachability traversal.
     fn files_requiring_scopes(&self) -> FxHashSet<usize> {
         let mut scoped: FxHashSet<_> = self.contexts_by_file.keys().copied().collect();
         let mut callers: FxHashMap<usize, FxHashSet<usize>> = FxHashMap::default();
@@ -1951,7 +1915,15 @@ impl<'a> Graph<'a> {
                 }
             }
         }
-        include_dependencies(scoped, &callers)
+        let mut pending: Vec<_> = scoped.iter().copied().collect();
+        while let Some(file) = pending.pop() {
+            for &caller in callers.get(&file).into_iter().flatten() {
+                if scoped.insert(caller) {
+                    pending.push(caller);
+                }
+            }
+        }
+        scoped
     }
 
     /// Visit the module and any functions already reached in this script scope.
@@ -1963,37 +1935,14 @@ impl<'a> Graph<'a> {
         state.active = true;
         self.pending.extend(
             state
-                .functions
-                .iter()
-                .map(|&line| PendingUses::Sibling(context, Owner::Function(line))),
+                .waiting
+                .drain(..)
+                .map(|line| PendingUses::Sibling(context, Owner::Function(line))),
         );
-        let SiblingUses { file, scope, .. } = self.sibling_uses[context];
-        if !self.project.facts[file].is_script {
-            state.functions.clear();
-        }
         self.visit_context_owner(context, Owner::Module);
+        let SiblingUses { file, scope, .. } = self.sibling_uses[context];
         let roots = self.root_functions.get(&file).cloned().unwrap_or_default();
         self.add(roots.into_iter().map(|id| (Some(scope), id)));
-    }
-
-    fn activate_guard(&mut self, context: usize, owner: Owner, function: fn(u32) -> Owner) {
-        let state = &mut self.contexts[context];
-        let active = if owner == Owner::Script {
-            &mut state.entry
-        } else {
-            &mut state.imported
-        };
-        if std::mem::replace(active, true) {
-            return;
-        }
-        let SiblingUses { file, scope, .. } = self.sibling_uses[context];
-        for &line in &state.functions {
-            let owner = function(line);
-            self.pending
-                .push(PendingUses::File(file, owner, Some(scope)));
-            self.pending.push(PendingUses::Sibling(context, owner));
-        }
-        self.visit_context_owner(context, owner);
     }
 
     fn visit_context_owner(&mut self, context: usize, owner: Owner) {
@@ -2035,8 +1984,10 @@ impl<'a> Graph<'a> {
                     let sibling = &self.sibling_uses[context];
                     for &loaded in sibling.loads.get(&owner).into_iter().flatten() {
                         self.activate_context(loaded);
-                        if self.project.facts[self.sibling_uses[loaded].file].is_script {
-                            self.activate_guard(loaded, Owner::Imported, Owner::ImportedFunction);
+                        if self.project.facts[self.sibling_uses[loaded].file].is_script
+                            && !std::mem::replace(&mut self.contexts[loaded].imported, true)
+                        {
+                            self.visit_context_owner(loaded, Owner::Imported);
                         }
                     }
                     (Some(sibling.scope), sibling.uses.get(&owner))
@@ -2077,41 +2028,18 @@ impl<'a> Graph<'a> {
         }
         let implementations = self.implementations.get(&id).into_iter().flatten();
         reached.extend(implementations.map(|&(_, method)| method));
-        let line = definition.line;
-        let common = Owner::Function(line);
-        let entry = Owner::ScriptFunction(line);
-        let imported = Owner::ImportedFunction(line);
-        let is_script = self.project.facts[*file].is_script;
-        for owner in [
-            Some(common),
-            is_script.then_some(entry),
-            is_script.then_some(imported),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            if let Some(uses) = self.uses.get(&(*file, owner)) {
-                self.look_up(uses, None, None, &mut reached);
-            }
+        let owner = Owner::Function(definition.line);
+        if let Some(uses) = self.uses.get(&(*file, owner)) {
+            self.look_up(uses, None, None, &mut reached);
         }
         for &context in self.contexts_by_file.get(file).into_iter().flatten() {
-            let state = &self.contexts[context];
-            if state.active {
+            if self.contexts[context].active {
                 let sibling = &self.sibling_uses[context];
-                for owner in [
-                    Some(common),
-                    state.entry.then_some(entry),
-                    state.imported.then_some(imported),
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    if let Some(uses) = self.uses.get(&(*file, owner)) {
-                        self.look_up_scoped_members(uses, sibling.scope, &mut reached);
-                    }
-                    if let Some(uses) = sibling.uses.get(&owner) {
-                        self.look_up(uses, Some(sibling.scope), None, &mut reached);
-                    }
+                if let Some(uses) = self.uses.get(&(*file, owner)) {
+                    self.look_up_scoped_members(uses, sibling.scope, &mut reached);
+                }
+                if let Some(uses) = sibling.uses.get(&owner) {
+                    self.look_up(uses, Some(sibling.scope), None, &mut reached);
                 }
             }
         }
@@ -2238,37 +2166,16 @@ impl<'a> Graph<'a> {
             self.used[id] = true;
             let definition = &self.project.definitions[id];
             if definition.kind.is_function() {
-                let line = definition.line;
-                let owner = Owner::Function(line);
+                let owner = Owner::Function(definition.line);
                 self.pending.push(PendingUses::File(file, owner, scope));
-                let is_script = self.project.facts[file].is_script;
-                if is_script && scope.is_none() {
-                    self.pending
-                        .push(PendingUses::File(file, Owner::ImportedFunction(line), None));
-                    if !self.scoped_script_files.contains(&file) {
-                        self.pending.push(PendingUses::File(
-                            file,
-                            Owner::ScriptFunction(line),
-                            None,
-                        ));
-                    }
-                }
                 if let Some(scope) = scope
                     && let Some(&context) = self.contexts_by_scope.get(&(file, scope))
                 {
                     let state = &mut self.contexts[context];
-                    let (entry, imported) = (state.entry, state.imported);
-                    if !state.active || is_script {
-                        state.functions.push(line);
-                    }
                     if state.active {
                         self.pending.push(PendingUses::Sibling(context, owner));
-                    }
-                    if entry {
-                        self.visit_context_owner(context, Owner::ScriptFunction(line));
-                    }
-                    if imported {
-                        self.visit_context_owner(context, Owner::ImportedFunction(line));
+                    } else {
+                        state.waiting.push(definition.line);
                     }
                 }
             }
