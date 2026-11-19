@@ -1,11 +1,13 @@
 //! The Python files of a project.
 
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use ignore::Match;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
 use crate::config::Config;
+use crate::models::{Finding, Rule};
 use crate::modules::resolve;
 
 /// The patterns that are excluded by default, before the `exclude` ones. The same as ty's defaults.
@@ -35,6 +37,25 @@ const DEFAULT_EXCLUDE: [&str; 20] = [
 /// The patterns of a `.gitignore` file, with the absolute directory that they are relative to.
 type IgnoreFile = (PathBuf, Gitignore);
 
+/// The files selected for the check and the I/O errors encountered while finding them.
+#[derive(Default)]
+pub(crate) struct Discovery {
+    pub files: Vec<PathBuf>,
+    pub errors: Vec<Finding>,
+}
+
+impl Discovery {
+    fn record_error(&mut self, path: &Path, error: &io::Error) {
+        self.errors.push(Finding::new(
+            path.to_path_buf(),
+            1,
+            1,
+            Rule::IoError,
+            error.to_string(),
+        ));
+    }
+}
+
 /// Find the Python files of a project.
 ///
 /// A file in `paths` is taken as is, a directory is searched for Python files. The `exclude` patterns
@@ -42,27 +63,31 @@ type IgnoreFile = (PathBuf, Gitignore);
 /// the default ones, in the syntax of `.gitignore`. They are anchored at the root of the project. With
 /// `force_exclude`, a path that is given directly is left out too if it is excluded or ignored.
 ///
-/// Returns the Python files, sorted.
-pub(crate) fn discover(paths: &[PathBuf], options: &Config) -> Vec<PathBuf> {
+/// Returns the Python files and discovery errors, sorted by path.
+pub(crate) fn discover(paths: &[PathBuf], options: &Config) -> Discovery {
     let excluded = Exclude::new(&options.exclude, &options.root);
     let gitignore = options.respect_gitignore;
-    let mut files = Vec::new();
+    let mut discovery = Discovery::default();
     for path in paths {
         let path = clean(path);
         if options.force_exclude && is_given_excluded(&path, &excluded, gitignore) {
             continue;
         }
         if path.is_dir() {
-            walk(&path, &excluded, gitignore, &mut files);
+            walk(&path, &excluded, gitignore, &mut discovery);
         } else {
             // A file that is given directly is checked unless `force_exclude` is set, as with ruff and
             // ty.
-            files.push(path);
+            discovery.files.push(path);
         }
     }
-    files.sort();
-    files.dedup();
-    files
+    discovery.files.sort();
+    discovery.files.dedup();
+    discovery
+        .errors
+        .sort_by(|left, right| (&left.path, &left.name).cmp(&(&right.path, &right.name)));
+    discovery.errors.dedup();
+    discovery
 }
 
 /// Check whether a path that is given directly is excluded or, if `gitignore` is set, ignored by git,
@@ -236,14 +261,14 @@ fn without_root(path: &Path) -> PathBuf {
 /// Add the Python files under a directory. Skips the excluded files and directories, and the ones
 /// that git ignores. The directory itself is always walked, even if it is excluded or ignored, as with
 /// ruff and ty: only a pattern that matches what is under it counts.
-fn walk(directory: &Path, excluded: &Exclude, gitignore: bool, files: &mut Vec<PathBuf>) {
+fn walk(directory: &Path, excluded: &Exclude, gitignore: bool, discovery: &mut Discovery) {
     let inherited = if gitignore {
         ignore_files_above(directory)
     } else {
         Vec::new()
     };
     let given = resolve(directory);
-    walk_directory(directory, excluded, gitignore, inherited, &given, files);
+    walk_directory(directory, excluded, gitignore, inherited, &given, discovery);
 }
 
 /// Add the Python files under a directory, as `walk` does, with the `.gitignore` files that apply
@@ -254,24 +279,39 @@ fn walk_directory(
     gitignore: bool,
     mut ignore_files: Vec<IgnoreFile>,
     given: &Path,
-    files: &mut Vec<PathBuf>,
+    discovery: &mut Discovery,
 ) {
     if gitignore {
         ignore_files.extend(read_ignore_file(directory));
     }
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return;
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) => {
+            discovery.record_error(directory, &error);
+            return;
+        }
     };
     let mut directories = Vec::new();
-    for entry in entries.filter_map(Result::ok) {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                discovery.record_error(directory, &error);
+                continue;
+            }
+        };
         // The files of the current directory are named without a leading `./`, as Python names them.
         let path = if directory == Path::new(".") {
             PathBuf::from(entry.file_name())
         } else {
             directory.join(entry.file_name())
         };
-        let Ok(kind) = entry.file_type() else {
-            continue;
+        let kind = match entry.file_type() {
+            Ok(kind) => kind,
+            Err(error) => {
+                discovery.record_error(&path, &error);
+                continue;
+            }
         };
         // A link to a directory is not walked into, as with Python's `os.walk`.
         let is_directory = kind.is_dir() || (kind.is_symlink() && path.is_dir());
@@ -286,7 +326,7 @@ fn walk_directory(
             && !excluded.excludes(&path, false, given)
             && !is_ignored(&path, &ignore_files, false, given)
         {
-            files.push(path);
+            discovery.files.push(path);
         }
     }
     for child in directories {
@@ -296,7 +336,7 @@ fn walk_directory(
             gitignore,
             ignore_files.clone(),
             given,
-            files,
+            discovery,
         );
     }
 }
