@@ -27,6 +27,15 @@ pub(crate) struct Binding {
     pub name: Option<String>,
 }
 
+/// A method and the class body that defines it, by their indexes in the file.
+#[derive(Debug)]
+pub(crate) struct Method {
+    pub definition: usize,
+    pub class: usize,
+    /// Imports read by its decorators, with the rest of each decorator's dotted name.
+    pub decorator_imports: Vec<(Binding, String)>,
+}
+
 /// The code that a reference or a definition is in: the line of the name of the function that it is
 /// in, or None for code that runs when the module is imported.
 pub(crate) type Owner = Option<u32>;
@@ -110,6 +119,8 @@ pub(crate) struct References {
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
     pub bindings: FxHashMap<String, Binding>,
+    /// The methods of the file and their containing classes.
+    pub methods: Vec<Method>,
     /// The functions and classes that are local variables of a function, by their index in the
     /// definitions of the module. A read of their name elsewhere is not a reference to them.
     pub local_definitions: FxHashSet<usize>,
@@ -191,6 +202,12 @@ struct Scope {
     nonlocal_names: FxHashSet<String>,
     /// The names that the scope imports, each with what it stands for.
     imports: FxHashMap<String, Binding>,
+    /// Changes to the first import of a name, for decorators evaluated in source order.
+    rebound_imports: FxHashMap<String, Option<Binding>>,
+    /// The parameter names of a function, which can shadow imports used by decorators.
+    parameters: Vec<String>,
+    /// The scope that supplies names missing from this one.
+    lexical_parent: Option<usize>,
     /// In a function, the functions and classes that it defines, by their name, each with its index
     /// in the definitions of the module.
     functions_and_classes: FxHashMap<String, Vec<usize>>,
@@ -209,6 +226,8 @@ struct Scope {
     instance: Option<String>,
     /// In a class or a method, the name of the class in the module.
     class_name: Option<String>,
+    /// In a class body, the index of its definition in the file.
+    class_definition: Option<usize>,
     /// In a class body, the attributes, methods and classes that it defines so far, by their name,
     /// each with its index in the definitions of the module.
     members: FxHashMap<String, Vec<usize>>,
@@ -230,6 +249,9 @@ impl Scope {
             global_names: FxHashSet::default(),
             nonlocal_names: FxHashSet::default(),
             imports: FxHashMap::default(),
+            rebound_imports: FxHashMap::default(),
+            parameters: Vec::new(),
+            lexical_parent: None,
             functions_and_classes: FxHashMap::default(),
             reads: FxHashSet::default(),
             enclosing: None,
@@ -237,6 +259,7 @@ impl Scope {
             defined: FxHashSet::default(),
             instance: None,
             class_name: None,
+            class_definition: None,
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
             outer: None,
@@ -486,7 +509,8 @@ enum FunctionBody<'a> {
 }
 
 impl<'a> Walker<'_, '_> {
-    fn push_scope(&mut self, scope: Scope) -> usize {
+    fn push_scope(&mut self, mut scope: Scope) -> usize {
+        scope.lexical_parent = Some(self.reads_target(self.scope));
         self.scopes.push(scope);
         self.scopes.len() - 1
     }
@@ -723,7 +747,8 @@ impl<'a> Walker<'_, '_> {
 
         // The body runs only when the function is called. A lambda has no name, and is part of the code
         // that it is in.
-        let (body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
+        let (mut body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
+        body_scope.parameters = names.iter().map(|&name| name.to_string()).collect();
         let (scope, owner) = (self.scope, self.owner);
         self.scope = self.push_scope(body_scope);
         self.binder = self.scope;
@@ -798,6 +823,7 @@ impl<'a> Walker<'_, '_> {
         class_scope.class_name = Some(definition.qualified_name());
         class_scope.outer = Some(self.reads_target(self.scope));
         let index = self.definitions.len();
+        class_scope.class_definition = Some(index);
         self.definitions.push(definition);
 
         let (scope, binder) = (self.scope, self.binder);
@@ -967,14 +993,53 @@ impl<'a> Walker<'_, '_> {
             scope.class_name.clone_from(&enclosing.class_name);
             class.clone_from(&enclosing.class_name);
         }
+        let decorators = decorator_names(&function.decorator_list);
+        if let Some(class) = enclosing.class_definition {
+            self.references.methods.push(Method {
+                definition: self.definitions.len(),
+                class,
+                decorator_imports: decorators
+                    .iter()
+                    .filter_map(|decorator| {
+                        let (root, rest) = decorator.split_once('.').unwrap_or((decorator, ""));
+                        self.decorator_import(root)
+                            .map(|binding| (binding.clone(), rest.to_string()))
+                    })
+                    .collect(),
+            });
+        }
         let definition = Definition {
-            decorators: decorator_names(&function.decorator_list),
+            decorators,
             class,
             ..self.definition(kind, &function.name, function.name.start())
         };
         let line = definition.line;
         self.definitions.push(definition);
         (scope, line)
+    }
+
+    /// Find the import visible where a method's decorator is evaluated.
+    fn decorator_import(&self, name: &str) -> Option<&Binding> {
+        let mut index = self.scope;
+        loop {
+            let scope = &self.scopes[index];
+            if let Some(binding) = scope.rebound_imports.get(name) {
+                return binding.as_ref();
+            }
+            if let Some(binding) = scope.imports.get(name) {
+                return Some(binding);
+            }
+            index = if scope.global_names.contains(name) && index != 0 {
+                0
+            } else if scope.nonlocal_names.contains(name)
+                || !scope.bound.contains(name)
+                    && !scope.parameters.iter().any(|value| value == name)
+            {
+                scope.lexical_parent?
+            } else {
+                return None;
+            };
+        }
     }
 
     /// Add the variables and attributes that an assignment target defines.
@@ -1117,6 +1182,11 @@ impl<'a> Walker<'_, '_> {
     fn bind(&mut self, name: &str) {
         let mut scope = Some(self.binder);
         while let Some(index) = scope {
+            if self.scopes[index].imports.contains_key(name) {
+                self.scopes[index]
+                    .rebound_imports
+                    .insert(name.to_string(), None);
+            }
             self.scopes[index].bound.insert(name.to_string());
             scope = self.scopes[index].enclosing;
         }
@@ -1129,7 +1199,12 @@ impl<'a> Walker<'_, '_> {
         let binder = self.binder;
         let scope = &mut self.scopes[binder];
         let definitions = match scope.kind {
-            ScopeKind::Module => return,
+            ScopeKind::Module => {
+                if scope.imports.contains_key(name) {
+                    scope.rebound_imports.insert(name.to_string(), None);
+                }
+                return;
+            }
             ScopeKind::Class => &mut scope.members,
             ScopeKind::Function => &mut scope.functions_and_classes,
         };
@@ -1145,7 +1220,11 @@ impl<'a> Walker<'_, '_> {
         for (name, binding) in statement {
             self.bind(&name);
             let binder = self.binder;
-            self.scopes[binder].imports.entry(name).or_insert(binding);
+            if let Some(first) = self.scopes[binder].rebound_imports.get_mut(&name) {
+                *first = Some(binding);
+            } else {
+                self.scopes[binder].imports.insert(name, binding);
+            }
         }
     }
 

@@ -144,6 +144,12 @@ impl ClassHierarchy {
         })
     }
 
+    /// Follow a name whose import was resolved in the scope where it was read.
+    pub(crate) fn resolve_binding(&self, module: usize, binding: &Binding, rest: &str) -> Names {
+        imported(&self.module(module), binding)
+            .map_or_else(Names::default, |name| self.follow_name(&join(&name, rest)))
+    }
+
     /// Get the dotted names that a dotted name stands for: the name itself, the origin of an imported
     /// name, and the base classes of a class, directly or not.
     pub(crate) fn follow_name(&self, name: &str) -> Names {

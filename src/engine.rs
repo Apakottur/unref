@@ -193,7 +193,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     );
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
 
-    let abstract_methods = AbstractMethods::new(&project, &classes);
+    let abstract_methods = AbstractMethods::new(&project, &hierarchy);
     let mut graph = Graph::new(&project, &uses, &fields, enums, abstract_methods);
 
     // An ignore comment is needed for a definition that is unused without it. Such a definition is
@@ -386,8 +386,6 @@ struct Classes<'a> {
     hierarchy: &'a ClassHierarchy,
     /// Each class by its file and its name in the module.
     ids: FxHashMap<(usize, String), ClassId>,
-    /// The definition of each class, in class id order.
-    definitions: Vec<DefinitionId>,
     /// The classes by their dotted names, such as `package.module.Class`.
     by_dotted: FxHashMap<String, Vec<ClassId>>,
     /// The names of the classes, without their modules, so that a name that cannot be a class is not
@@ -416,15 +414,9 @@ impl<'a> Classes<'a> {
     ) -> Self {
         let mut keys: Vec<(usize, String)> = Vec::new();
         let mut ids = FxHashMap::default();
-        let mut definitions = Vec::new();
         let mut by_dotted: FxHashMap<String, Vec<ClassId>> = FxHashMap::default();
         let mut names = FxHashSet::default();
-        for (index, (file, definition)) in project
-            .definition_files
-            .iter()
-            .zip(&project.definitions)
-            .enumerate()
-        {
+        for (file, definition) in project.definition_files.iter().zip(&project.definitions) {
             if definition.kind == Kind::Class {
                 let key = (*file, definition.qualified_name());
                 if ids.contains_key(&key) {
@@ -436,7 +428,6 @@ impl<'a> Classes<'a> {
                 by_dotted.entry(dotted).or_default().push(id);
                 names.insert(definition.name.clone());
                 keys.push(key);
-                definitions.push(index);
             }
         }
         let mut ancestors = Vec::new();
@@ -512,7 +503,6 @@ impl<'a> Classes<'a> {
         Self {
             hierarchy,
             ids,
-            definitions,
             by_dotted,
             names,
             ancestors,
@@ -616,67 +606,83 @@ struct AbstractMethods {
 }
 
 impl AbstractMethods {
-    fn new(project: &Project, classes: &Classes) -> Self {
+    fn new(project: &Project, hierarchy: &ClassHierarchy) -> Self {
         let mut methods = Self::default();
-        for (contract, definition) in project.definitions.iter().enumerate() {
-            if definition.kind != Kind::Method || definition.decorators.is_empty() {
-                continue;
-            }
-            let file = project.definition_files[contract];
-            let Some(class) = definition
-                .class
-                .as_ref()
-                .and_then(|name| classes.ids.get(&(file, name.clone())))
-            else {
-                continue;
-            };
-            if classes.descendants[*class].is_empty()
-                || !definition.decorators.iter().any(|decorator| {
-                    classes
-                        .hierarchy
-                        .resolve(file, decorator)
+        let mut contracts: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
+        for (file, facts) in project.facts.iter().enumerate() {
+            let first = project.first_definition[file];
+            for method in &facts.references.methods {
+                if method.decorator_imports.iter().any(|(binding, rest)| {
+                    hierarchy
+                        .resolve_binding(file, binding, rest)
                         .contains("abc.abstractmethod")
-                })
-            {
-                continue;
-            }
-            for &descendant in &classes.descendants[*class] {
-                let class_definition = classes.definitions[descendant];
-                for &method in classes
-                    .by_member
-                    .get(&(descendant, definition.name.clone()))
-                    .into_iter()
-                    .flatten()
-                {
-                    if project.definitions[method].kind != Kind::Method {
-                        continue;
-                    }
-                    methods
-                        .contracts_by_method
-                        .entry(method)
+                }) {
+                    let class = &project.definitions[first + method.class];
+                    let dotted = join(&project.names[file].name, &class.qualified_name());
+                    contracts
+                        .entry(dotted)
                         .or_default()
-                        .push(contract);
-                    methods
-                        .overrides_by_contract
-                        .entry(contract)
-                        .or_default()
-                        .push((class_definition, method));
-                    methods
-                        .overrides_by_class
-                        .entry(class_definition)
-                        .or_default()
-                        .push((contract, method));
+                        .push(first + method.definition);
                 }
             }
-            if methods.overrides_by_contract.contains_key(&contract) {
-                methods
-                    .contracts_by_method
-                    .entry(contract)
-                    .or_default()
-                    .push(contract);
+        }
+        if contracts.is_empty() {
+            return methods;
+        }
+
+        for (file, facts) in project.facts.iter().enumerate() {
+            let first = project.first_definition[file];
+            let mut inherited: FxHashMap<DefinitionId, FxHashSet<DefinitionId>> =
+                FxHashMap::default();
+            for method in &facts.references.methods {
+                let class = first + method.class;
+                let definition = first + method.definition;
+                let inherited = inherited.entry(class).or_insert_with(|| {
+                    // Use this definition's bases. Two factories can each define a class with the
+                    // same name and give it different base classes.
+                    let class = &project.definitions[class];
+                    let own_name = join(&project.names[file].name, &class.qualified_name());
+                    let mut found = FxHashSet::default();
+                    for base in &class.bases {
+                        for ancestor in hierarchy.resolve(file, base).iter() {
+                            if *ancestor != own_name {
+                                found
+                                    .extend(contracts.get(ancestor).into_iter().flatten().copied());
+                            }
+                        }
+                    }
+                    found
+                });
+                for &contract in inherited.iter() {
+                    if project.definitions[contract].name == project.definitions[definition].name {
+                        methods.add_override(contract, class, definition);
+                    }
+                }
             }
         }
         methods
+    }
+
+    fn add_override(&mut self, contract: DefinitionId, class: DefinitionId, method: DefinitionId) {
+        let overrides = self
+            .overrides_by_contract
+            .entry(contract)
+            .or_insert_with(|| {
+                self.contracts_by_method
+                    .entry(contract)
+                    .or_default()
+                    .push(contract);
+                Vec::new()
+            });
+        overrides.push((class, method));
+        self.contracts_by_method
+            .entry(method)
+            .or_default()
+            .push(contract);
+        self.overrides_by_class
+            .entry(class)
+            .or_default()
+            .push((contract, method));
     }
 
     /// Queue overrides whose class and contract are now both used.
