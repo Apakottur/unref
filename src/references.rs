@@ -126,7 +126,7 @@ const STRING_CALLS: [&str; 2] = ["include", "setdefault"];
 /// What a Python module refers to.
 ///
 /// Each reference is made from an owner: the function that it is in, or the module itself.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct References {
     /// The reads of the names of the module itself, without the local variables and parameters. A name
     /// that is listed in `__all__` is read as a plain name. A plain read of a name that the module
@@ -150,8 +150,8 @@ pub(crate) struct References {
     pub whole_reads: FxHashSet<WholeRead>,
     /// The names that are imported from another module. A star import has the name `*`.
     pub imports: FxHashSet<Import>,
-    /// The full paths of dotted `import` statements, even when only the first component is bound.
-    pub dotted_imports: Vec<String>,
+    /// The full paths and owners of dotted `import` statements.
+    pub dotted_imports: Vec<(Owner, String)>,
     /// Whether the module defines `__all__`.
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
@@ -978,7 +978,7 @@ impl<'a> Walker<'_, '_> {
                 .names
                 .iter()
                 .filter(|alias| alias.name.as_str().contains('.'))
-                .map(|alias| alias.name.to_string()),
+                .map(|alias| (self.owner, alias.name.to_string())),
         );
         let bindings = import.names.iter().map(|alias| match &alias.asname {
             // `import package.module` binds `package`.

@@ -93,6 +93,36 @@ def test_default_path(tmp_path: Path) -> None:
             "",
             id="relative-reexport",
         ),
+        pytest.param(
+            {
+                "pkg/run.py": 'from sub import entry\nif __name__ == "__main__": print(entry())\n',
+                "pkg/sub/__init__.py": (
+                    'def __getattr__(name):\n    if name == "entry":\n'
+                    "        from .impl import entry\n        return entry\n    raise AttributeError(name)\n"
+                ),
+                "pkg/sub/impl.py": "def entry(): return 7\n",
+                "pkg/sub/entry.py": "from tasks import only_if_loaded\nprint(only_if_loaded())\n",
+                "pkg/tasks.py": "def only_if_loaded(): return -1\n",
+            },
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'only_if_loaded'\n",
+            id="lazy-attribute-shadows-submodule",
+        ),
+        pytest.param(
+            {
+                "pkg/run.py": (
+                    "def never():\n    import sub.dormant\n\n"
+                    "def run():\n    from sub.worker import start\n    start()\n\n"
+                    'if __name__ == "__main__": run()\n'
+                ),
+                "pkg/sub/dormant.py": "from tasks import only_if_loaded\nprint(only_if_loaded())\n",
+                "pkg/sub/worker.py": "def start():\n    import sub.active\n",
+                "pkg/sub/active.py": "from tasks import used\nprint(used())\n",
+                "pkg/tasks.py": "def only_if_loaded(): return -1\ndef used(): return 7\n",
+            },
+            f"{Path('pkg/run.py')}:1:5: unused-function 'never'\n"
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'only_if_loaded'\n",
+            id="only-live-functions-load-siblings",
+        ),
     ],
 )
 def test_script_sibling_contexts(tmp_path: Path, files: dict[str, str], unused: str) -> None:
