@@ -340,12 +340,20 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 Some(&assign.annotation),
                 true,
             ),
-            Stmt::AugAssign(assign) => self.visit_assign(
-                std::slice::from_ref(&*assign.target),
-                Some(&assign.value),
-                None,
-                false,
-            ),
+            Stmt::AugAssign(assign) => match &*assign.target {
+                Expr::Attribute(attribute) => {
+                    // Augmented assignment reads the attribute before evaluating the right-hand side.
+                    let (base, attributes) = attribute_chain(attribute);
+                    self.visit_attributes(base, attributes);
+                    self.visit_expr(&assign.value);
+                }
+                target => self.visit_assign(
+                    std::slice::from_ref(target),
+                    Some(&assign.value),
+                    None,
+                    false,
+                ),
+            },
             Stmt::For(loop_) => {
                 // A loop over a mapping reads its keys.
                 let values = self.value_calls(&loop_.iter);
