@@ -48,6 +48,20 @@ impl ModuleName {
     }
 }
 
+/// Get an absolute path for module naming, keeping the filename Python imports.
+/// Resolve the directory so it can be compared with the resolved project roots.
+pub(crate) fn import_path(path: &Path) -> PathBuf {
+    let (Some(parent), Some(filename)) = (path.parent(), path.file_name()) else {
+        return resolve(path);
+    };
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    resolve(parent).join(filename)
+}
+
 /// Get the name that a Python file is imported by.
 ///
 /// The name is made of the file and of the directories above it that are packages. A directory is a
@@ -55,14 +69,14 @@ impl ModuleName {
 /// a package, both under one of the given directories. The first directory that is not a package is
 /// taken to be on the import path.
 ///
-/// `roots` are the directories given to the check, resolved. A namespace package is only looked for
-/// under them, so that a package outside the project does not pull directories in.
+/// `path` is the import path of the file. `roots` are the directories given to the check, resolved.
+/// A namespace package is only looked for under them, so that a package outside the project does not
+/// pull directories in.
 pub(crate) fn module_name(path: &Path, roots: &[PathBuf]) -> ModuleName {
-    let path = resolve(path);
     let is_package = path.file_name().is_some_and(|name| name == INIT);
     let mut parts: Vec<String> = Vec::new();
     if !is_package {
-        parts.push(stem(&path));
+        parts.push(stem(path));
     }
 
     let mut directory = path.parent();
@@ -98,10 +112,10 @@ fn is_namespace_package(directory: &Path, roots: &[PathBuf]) -> bool {
 }
 
 /// Get the directory on the import path that a Python file is imported from: the directory that holds
-/// the first package of the name, or the directory of the file if it is not in a package.
+/// the first package of the name, or the directory of the file if it is not in a package. `path` is
+/// the import path of the file.
 pub(crate) fn import_root(path: &Path, name: &ModuleName) -> PathBuf {
     let depth = name.name.matches('.').count() + usize::from(name.is_package);
-    let path = resolve(path);
     path.ancestors()
         .nth(depth + 1)
         .unwrap_or(Path::new("/"))

@@ -18,7 +18,7 @@ use crate::files::{FileFacts, analyze_files};
 use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::ignores::{apply_ignore_comments, ignored_codes};
 use crate::models::{Finding, Framework, Override, fnmatch};
-use crate::modules::{ModuleName, import_root, module_name, resolve};
+use crate::modules::{ModuleName, import_path, import_root, module_name, resolve};
 use crate::references::{Binding, Owner, Receiver};
 use crate::symbols::ModuleSymbols;
 use crate::transitive::transitive;
@@ -122,7 +122,11 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         .map(|path| resolve(path))
         .filter(|root| root.is_dir())
         .collect();
-    let names: Vec<ModuleName> = files.iter().map(|path| module_name(path, &roots)).collect();
+    let import_paths: Vec<PathBuf> = files.iter().map(|path| import_path(path)).collect();
+    let names: Vec<ModuleName> = import_paths
+        .iter()
+        .map(|path| module_name(path, &roots))
+        .collect();
     let mut files_by_name: FxHashMap<String, Vec<usize>> = FxHashMap::default();
     for (index, name) in names.iter().enumerate() {
         files_by_name
@@ -130,7 +134,11 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             .or_default()
             .push(index);
     }
-    let mut external = ExternalModules::new(search_path(&files, &names, options.python.as_deref()));
+    let mut external = ExternalModules::new(search_path(
+        &import_paths,
+        &names,
+        options.python.as_deref(),
+    ));
     import_siblings(&mut facts, &names, &files_by_name, &mut external);
 
     let mut definitions = Vec::new();
@@ -208,9 +216,12 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
 
     // An ignore comment is needed for a definition that is unused without it. Such a definition is
     // then used, and so is what it uses.
-    let kept_used = graph.use_definitions(kept.iter().copied());
+    let aliases = project.definition_aliases();
+    let mut kept_used = graph.use_definitions(kept.iter().copied());
+    share_alias_usage(&mut kept_used, &aliases);
     let needed: Vec<DefinitionId> = ignored.into_iter().filter(|id| !kept_used[*id]).collect();
-    let all_used = graph.use_definitions(needed.iter().copied());
+    let mut all_used = graph.use_definitions(needed.iter().copied());
+    share_alias_usage(&mut all_used, &aliases);
     let unused: Vec<DefinitionId> = (0..project.definitions.len())
         .filter(|id| !all_used[*id])
         .collect();
@@ -254,6 +265,30 @@ impl Project {
     /// The definitions of a file.
     fn file_definitions(&self, file: usize) -> &[Definition] {
         &self.definitions[self.ids_of_file(file)]
+    }
+
+    /// Pair each alias definition with its counterpart in the first path to the same source.
+    fn definition_aliases(&self) -> Vec<(DefinitionId, DefinitionId)> {
+        let mut first_by_source = FxHashMap::default();
+        let mut aliases = Vec::new();
+        for (file, path) in self.files.iter().enumerate() {
+            let Ok(source) = path.canonicalize() else {
+                continue;
+            };
+            let first = *first_by_source.entry(source).or_insert(file);
+            if first != file {
+                aliases.extend(self.ids_of_file(first).zip(self.ids_of_file(file)).filter(
+                    |&(first, alias)| {
+                        let first = &self.definitions[first];
+                        let alias = &self.definitions[alias];
+                        // The copies can differ if the file was edited while the check was reading it.
+                        (first.line, first.column, first.kind, &first.name)
+                            == (alias.line, alias.column, alias.kind, &alias.name)
+                    },
+                ));
+            }
+        }
+        aliases
     }
 
     /// Every definition, with its id and its file.
@@ -854,10 +889,10 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
 /// A module from outside the project is looked for where the modules of the project are imported from
 /// first, as an excluded module is, then in the directories of `PYTHONPATH`, in the site-packages of
 /// the environment of the project, if there is one, and then in the standard library.
-fn search_path(files: &[Arc<Path>], names: &[ModuleName], python: Option<&Path>) -> Vec<PathBuf> {
+fn search_path(paths: &[PathBuf], names: &[ModuleName], python: Option<&Path>) -> Vec<PathBuf> {
     let mut search_path: Vec<PathBuf> = Vec::new();
     let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
-    let roots = files
+    let roots = paths
         .iter()
         .zip(names)
         .map(|(path, name)| import_root(path, name));
@@ -1190,6 +1225,17 @@ fn transitive_definitions(
         .filter(|(_, reached)| *reached)
         .map(|(index, _)| unused[index])
         .collect()
+}
+
+/// A source definition is used if any of its paths is used. Share that status for reporting;
+/// the graph follows each path's imports in its own module context.
+fn share_alias_usage(used: &mut [bool], aliases: &[(DefinitionId, DefinitionId)]) {
+    for &(first, alias) in aliases {
+        used[first] |= used[alias];
+    }
+    for &(first, alias) in aliases {
+        used[alias] = used[first];
+    }
 }
 
 /// Make the findings of a project.

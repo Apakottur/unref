@@ -46,6 +46,41 @@ def test_file_path() -> None:
     assert result.stdout == f"{case}/module.py:1:5: unused-function 'function'\n"
 
 
+@pytest.mark.parametrize("paths", [[], ["app.py", "api.py"]])
+def test_file_symlink_import(tmp_path: Path, paths: list[str]) -> None:
+    (tmp_path / "impl.py").write_text("def run(): return 7\n")
+    (tmp_path / "app.py").write_text("from api import run\nprint(run())\n")
+    try:
+        (tmp_path / "api.py").symlink_to("impl.py")
+    except OSError as error:
+        pytest.skip(f"Could not create a symlink: {error}")
+
+    result = run(paths, cwd=tmp_path)
+
+    assert result.exit_code == 0
+    assert result.output == ""
+
+
+def test_file_symlink_uses_its_own_package(tmp_path: Path) -> None:
+    for name in ("original", "public"):
+        package = tmp_path / name
+        package.mkdir()
+        (package / "__init__.py").touch()
+        (package / "helper.py").write_text("def helper(): return 7\n")
+    (tmp_path / "original" / "impl.py").write_text("def run():\n    from .helper import helper\n    return helper()\n")
+    (tmp_path / "app.py").write_text("from public.api import run\nprint(run())\n")
+    try:
+        (tmp_path / "public" / "api.py").symlink_to("../original/impl.py")
+    except OSError as error:
+        pytest.skip(f"Could not create a symlink: {error}")
+
+    result = run([], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == f"{Path('original/helper.py')}:1:5: unused-function 'helper'\n"
+    assert result.stderr == ""
+
+
 def test_default_path(tmp_path: Path) -> None:
     # Without arguments and without a `pyproject.toml`, the current directory is checked.
     project = tmp_path / "project"
