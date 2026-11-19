@@ -881,10 +881,9 @@ fn search_path(files: &[Arc<Path>], names: &[ModuleName], python: Option<&Path>)
     search_path
 }
 
-/// Make the absolute imports of the scripts in a package that only a module beside them can stand
-/// for relative imports of it. Python runs a script with its own directory first on the import path,
-/// so that `from helpers import name` in a script imports `helpers.py` beside it, and so do the
-/// modules beside it that it imports in turn.
+/// Qualify absolute imports that resolve beside a script. Python runs a script with its directory
+/// first on the import path, and that directory is still on the path when a sibling package or one
+/// of its submodules imports another sibling.
 ///
 /// A module of the project or of the environment with the name comes first, as Python finds it when
 /// the module is imported rather than run.
@@ -894,6 +893,15 @@ fn import_siblings(
     files_by_name: &FxHashMap<String, Vec<usize>>,
     external: &mut ExternalModules,
 ) {
+    let mut pending: Vec<(usize, &str)> = names
+        .iter()
+        .enumerate()
+        .filter(|(file, name)| facts[*file].is_script && !name.is_package)
+        .filter_map(|(file, name)| Some((file, name.name.rsplit_once('.')?.0)))
+        .collect();
+    if pending.is_empty() {
+        return;
+    }
     // The names of the modules and packages of the project, with every package above a module.
     let known: FxHashSet<&str> = files_by_name
         .keys()
@@ -903,70 +911,79 @@ fn import_siblings(
                 .chain([name.as_str()])
         })
         .collect();
-    let package_of = |file: usize| {
-        let name = &names[file];
-        (!name.is_package)
-            .then(|| name.name.rsplit_once('.').map(|(package, _)| package))
-            .flatten()
-    };
-    let mut pending: Vec<usize> = (0..facts.len())
-        .filter(|&file| facts[file].is_script && package_of(file).is_some())
-        .collect();
-    let mut seen: FxHashSet<usize> = pending.iter().copied().collect();
+    let mut seen: FxHashSet<usize> = pending.iter().map(|(file, _)| *file).collect();
     let mut is_elsewhere: FxHashMap<String, bool> = FxHashMap::default();
-    while let Some(file) = pending.pop() {
-        let Some(package) = package_of(file) else {
-            continue;
-        };
-        let mut siblings: Vec<String> = Vec::new();
-        import_relative(&mut facts[file], |module, level| {
-            let Some(top) = module.and_then(|module| module.split('.').next()) else {
-                return false;
-            };
+    while let Some((file, package)) = pending.pop() {
+        let mut siblings: FxHashSet<String> = FxHashSet::default();
+        let mut qualify = |module: &str, imported: Option<&str>| {
+            let top = module.split('.').next()?;
             let sibling = format!("{package}.{top}");
-            let is_sibling = level == 0
-                && !known.contains(top)
+            let is_sibling = !known.contains(top)
                 && known.contains(sibling.as_str())
                 && !*is_elsewhere
                     .entry(top.to_string())
                     .or_insert_with(|| external.exists(top));
-            if is_sibling {
-                siblings.push(sibling);
-            }
-            is_sibling
-        });
+            is_sibling.then(|| {
+                let qualified = format!("{package}.{module}");
+                // `from sub import helper` can load a module of the package as well.
+                let loaded = imported
+                    .filter(|name| *name != "*")
+                    .map_or_else(|| qualified.clone(), |name| join(&qualified, name));
+                siblings.insert(loaded);
+                qualified
+            })
+        };
+        for module in &facts[file].references.dotted_imports {
+            qualify(module, None);
+        }
+        qualify_sibling_imports(&mut facts[file], qualify);
+
         for sibling in siblings {
-            for &imported in files_by_name.get(&sibling).into_iter().flatten() {
-                if package_of(imported).is_some() && seen.insert(imported) {
-                    pending.push(imported);
+            // A dotted import loads the package initializers along its path. The script's own
+            // package is outside the import as it was written, so start below it.
+            let start = package.len() + 1;
+            let ends = sibling[start..]
+                .match_indices('.')
+                .map(|(end, _)| start + end)
+                .chain([sibling.len()]);
+            for end in ends {
+                for &imported in files_by_name.get(&sibling[..end]).into_iter().flatten() {
+                    if seen.insert(imported) {
+                        pending.push((imported, package));
+                    }
                 }
             }
         }
     }
 }
 
-/// Make the imports of a file that `is_sibling` tells, by their module and their number of leading
-/// dots, relative imports from its package.
-fn import_relative(
+/// Apply the qualified names of absolute sibling imports wherever their bindings are stored.
+fn qualify_sibling_imports(
     file_facts: &mut FileFacts,
-    mut is_sibling: impl FnMut(Option<&str>, u32) -> bool,
+    mut qualify: impl FnMut(&str, Option<&str>) -> Option<String>,
 ) {
+    let mut qualify_module = |module: &mut Option<String>, level, imported: Option<&str>| {
+        if level == 0
+            && let Some(qualified) = module
+                .as_deref()
+                .and_then(|module| qualify(module, imported))
+        {
+            *module = Some(qualified);
+        }
+    };
     let references = &mut file_facts.references;
     references.imports = std::mem::take(&mut references.imports)
         .into_iter()
         .map(|mut import| {
-            if is_sibling(import.module.as_deref(), import.level) {
-                import.level = 1;
-            }
+            qualify_module(&mut import.module, import.level, Some(&import.name));
             import
         })
         .collect();
     references.imported_reads = std::mem::take(&mut references.imported_reads)
         .into_iter()
         .map(|mut read| {
-            if is_sibling(read.binding.module.as_deref(), read.binding.level) {
-                read.binding.level = 1;
-            }
+            let binding = &mut read.binding;
+            qualify_module(&mut binding.module, binding.level, binding.name.as_deref());
             read
         })
         .collect();
@@ -975,9 +992,7 @@ fn import_relative(
         .values_mut()
         .chain(file_facts.lazy.values_mut().flatten())
     {
-        if is_sibling(binding.module.as_deref(), binding.level) {
-            binding.level = 1;
-        }
+        qualify_module(&mut binding.module, binding.level, binding.name.as_deref());
     }
 }
 
