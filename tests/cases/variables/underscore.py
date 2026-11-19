@@ -2,7 +2,7 @@ from dataclasses import KW_ONLY, dataclass
 from functools import singledispatch
 
 # `_` is the name for a value that is not used, however it is bound.
-_ = print("side effect")
+_ = len("unannotated")
 _: int = len("annotated")
 first, _ = 1, 2  # expect: 1 [unused-variable]
 *_, last = 1, 2, 3  # expect: 5 [unused-variable]

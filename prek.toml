@@ -107,6 +107,13 @@ args = ["--config", "./linters/ruff.toml"]
 id = "ruff-format"
 args = ["--config", "./linters/ruff.toml"]
 
+# The test cases, which the configuration above excludes, with their own.
+[[repos.hooks]]
+id = "ruff-check"
+name = "ruff check (test cases)"
+files = '^tests/cases/'
+args = ["--config", "./linters/ruff_cases.toml"]
+
 ########
 # RUST #
 ########

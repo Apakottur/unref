@@ -72,6 +72,9 @@ first, second
 Passing a value to a function from outside the project, such as `print`, can count as reading all of
 it, so use one only to test that.
 
+prek checks the cases with Ruff and `linters/ruff_cases.toml`, which reports `print` and
+unnecessary `pass`.
+
 ### Type checks
 
 Run the type checks of the tests and scripts with `mypy` and `ty` (both run in CI):

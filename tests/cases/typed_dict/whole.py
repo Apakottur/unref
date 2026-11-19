@@ -99,7 +99,7 @@ def read(client: Client) -> None:
     logging.info("%s", Logged(logged=1))
     printed = Printed(printed=1)
     # `print` is from outside the project.
-    print(printed)
+    print(printed)  # noqa: T201
     take(Passed(passed=1))
     helpers.send(Passed(imported=1))
     client.send(Passed(sent=1))
