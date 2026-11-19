@@ -1,5 +1,6 @@
 # An implementation of a used abstract method is used when its class is, as it is what makes the class
-# implement the abstract method.
+# implement the abstract method. An abstract method that only unused code reaches makes its
+# implementations transitive.
 import abc
 from abc import ABC, abstractmethod
 
@@ -26,7 +27,7 @@ class Disk(Storage):
 
     def close(self) -> None: ...
 
-    def flush(self) -> None: ...  # expect: 9 [unused-method]
+    def flush(self) -> None: ...  # expect: 9 [unused-method] transitive
 
     def describe(self) -> str:
         return "disk"
@@ -39,7 +40,7 @@ class Null(Storage):
 
     def close(self) -> None: ...
 
-    def flush(self) -> None: ...  # expect: 9 [unused-method]
+    def flush(self) -> None: ...  # expect: 9 [unused-method] transitive
 
     def describe(self) -> str:  # expect: 9 [unused-method]
         return "null"
@@ -54,6 +55,20 @@ class Unused(Storage):  # expect: 7 [unused-class]
     def save(data: bytes) -> None: ...  # expect: 9 [unused-method] transitive
 
 
+class Task(ABC):
+    @abstractmethod
+    def run(self) -> None: ...  # expect: 9 [unused-method] transitive
+
+
+class PrintTask(Task):
+    def run(self) -> None:  # expect: 9 [unused-method] transitive
+        print("run")
+
+
+def run_task(task: Task) -> None:  # expect: 5 [unused-function]
+    Task.run(task)
+
+
 Disk.save(b"data")
 Storage.close(Disk())
-print(Disk().describe(), Null, BufferedNull)
+print(Disk().describe(), Null, BufferedNull, PrintTask)

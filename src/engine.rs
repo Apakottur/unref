@@ -1395,6 +1395,9 @@ impl<'a> Graph<'a> {
 
     /// Find the definitions that the code of a function uses directly, as if it were used. A definition
     /// that is not a function reaches nothing.
+    ///
+    /// An abstract method also reaches its implementations, whether their class is used or not: an
+    /// implementation in an unused class is reached through its class anyway.
     fn reached(&self, id: DefinitionId) -> FxHashSet<DefinitionId> {
         let (file, definition) = (
             &self.project.definition_files[id],
@@ -1404,6 +1407,8 @@ impl<'a> Graph<'a> {
         if !definition.kind.is_function() {
             return reached;
         }
+        let implementations = self.implementations.get(&id).into_iter().flatten();
+        reached.extend(implementations.map(|&(_, method)| method));
         let Some(uses) = self.uses.get(&(*file, Some(definition.line))) else {
             return reached;
         };
