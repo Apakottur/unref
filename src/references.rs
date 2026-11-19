@@ -15,6 +15,8 @@ use ruff_python_ast::{
 use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use ruff_python_stdlib::builtins::is_python_builtin;
+
 use crate::definitions::{Definition, Kind, Unwrap, annotation_name, decorator_names, dotted_name};
 use crate::positions::SourcePositions;
 
@@ -339,7 +341,8 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             ),
             Stmt::For(loop_) => {
                 // A loop over a mapping reads its keys.
-                self.add_whole_read(&loop_.iter, None);
+                let values = self.value_calls(&loop_.iter);
+                self.add_whole_read(values, None);
                 walk_stmt(self, stmt);
             }
             Stmt::TypeAlias(alias) => {
@@ -411,7 +414,8 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             Expr::Dict(dict) => {
                 // `{**value}` reads every key of the value.
                 for item in dict.iter().filter(|item| item.key.is_none()) {
-                    self.add_whole_read(&item.value, None);
+                    let values = self.value_calls(&item.value);
+                    self.add_whole_read(values, None);
                 }
                 walk_expr(self, expr);
             }
@@ -654,7 +658,8 @@ impl<'a> Walker<'_, '_> {
         };
         // A comprehension over a mapping reads its keys.
         for generator in generators {
-            self.add_whole_read(&generator.iter, None);
+            let values = self.value_calls(&generator.iter);
+            self.add_whole_read(values, None);
         }
         self.visit_expr(&first.iter);
         let (scope, binder) = (self.scope, self.binder);
@@ -1172,31 +1177,60 @@ impl<'a> Walker<'_, '_> {
             && WHOLE_METHODS.contains(&func.attr.as_str())
             && call.arguments.is_empty()
         {
-            self.add_whole_read(&func.value, None);
+            let values = self.value_calls(&func.value);
+            self.add_whole_read(values, None);
         }
-        let reader = dotted_name(&call.func, Unwrap::Call);
         for keyword in &call.arguments.keywords {
-            match (&keyword.arg, &reader) {
-                (None, _) => self.add_whole_read(&keyword.value, None),
-                (Some(_), Some(reader)) => self.add_whole_read(&keyword.value, Some(reader)),
-                (Some(_), None) => {}
+            if keyword.arg.is_none() {
+                let values = self.value_calls(&keyword.value);
+                self.add_whole_read(values, None);
             }
         }
-        for argument in &call.arguments.args {
-            if let Some(reader) = &reader {
-                self.add_whole_read(argument, Some(reader));
+        if !self.may_be_external(&call.func) {
+            return;
+        }
+        // The name of the function is found only for a call that passes such a value, as few do.
+        let mut reader: Option<Option<String>> = None;
+        let passed = call.arguments.args.iter().chain(
+            call.arguments
+                .keywords
+                .iter()
+                .filter(|keyword| keyword.arg.is_some())
+                .map(|keyword| &keyword.value),
+        );
+        for argument in passed {
+            let values = self.value_calls(argument);
+            if values.is_empty() {
+                continue;
+            }
+            if let Some(reader) =
+                reader.get_or_insert_with(|| dotted_name(&call.func, Unwrap::Call))
+            {
+                self.add_whole_read(values, Some(reader));
             }
         }
     }
 
-    /// Add a read of a value as a whole, if it is the result of a call, or a local variable that is
-    /// assigned one.
-    fn add_whole_read(&mut self, value: &Expr, reader: Option<&str>) {
-        let values = match value {
-            Expr::Call(call) => dotted_name(&call.func, Unwrap::Call).into_iter().collect(),
-            Expr::Name(name) => self.variable_calls(name.id.as_str()),
-            _ => return,
+    /// Check whether a function, as it is called, can be from outside the project: a builtin, or a name
+    /// that the scope or the module imports, or an attribute of one.
+    fn may_be_external(&self, func: &Expr) -> bool {
+        let mut root = func;
+        while let Expr::Attribute(attribute) = root {
+            root = &attribute.value;
+        }
+        let Expr::Name(name) = root else {
+            return false;
         };
+        let name = name.id.as_str();
+        // The builtins of any version of Python.
+        is_python_builtin(name, u8::MAX, false)
+            || [self.scope, 0]
+                .iter()
+                .any(|&scope| self.scopes[scope].imports.contains_key(name))
+    }
+
+    /// Add a read of a value as a whole, given by the dotted names of what it is the result of calling.
+    fn add_whole_read(&mut self, values: Vec<String>, reader: Option<&str>) {
         let owner = self.owner;
         self.references
             .whole_reads
@@ -1205,6 +1239,16 @@ impl<'a> Walker<'_, '_> {
                 value,
                 reader: reader.map(str::to_string),
             }));
+    }
+
+    /// Get the dotted names of what a value is the result of calling, as they are written, if it is a
+    /// call, or a local variable that is assigned one.
+    fn value_calls(&self, value: &Expr) -> Vec<String> {
+        match value {
+            Expr::Call(call) => dotted_name(&call.func, Unwrap::Call).into_iter().collect(),
+            Expr::Name(name) => self.variable_calls(name.id.as_str()),
+            _ => Vec::new(),
+        }
     }
 
     /// Get the dotted names of what a local variable is assigned the result of calling, as they are

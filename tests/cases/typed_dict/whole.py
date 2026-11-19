@@ -4,6 +4,7 @@ from json import dumps
 from typing import TypedDict
 
 import helpers
+from helpers import Aliased as Renamed
 
 
 # A TypedDict that is read as a whole has all its fields used, and those of the TypedDicts it inherits
@@ -102,6 +103,7 @@ def read(client: Client) -> None:
     helpers.send(Passed(imported=1))
     client.send(Passed(sent=1))
     print(dict(UNKNOWN))
+    print(dict(Renamed(aliased=1)))
 
 
 def unused() -> None:  # expect: 5 [unused-function]

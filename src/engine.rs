@@ -271,6 +271,11 @@ fn find_uses(
     typed_dicts: &FxHashMap<String, Vec<DefinitionId>>,
 ) -> FxHashMap<(usize, Owner), Uses> {
     let mut uses: FxHashMap<(usize, Owner), Uses> = FxHashMap::default();
+    // The names of the TypedDicts, so that a value that cannot be one is not resolved.
+    let typed_dict_names: FxHashSet<&str> = typed_dicts
+        .keys()
+        .map(|dotted| dotted.rsplit('.').next().unwrap_or(dotted))
+        .collect();
     for (file, file_facts) in project.facts.iter().enumerate() {
         let references = &file_facts.references;
         let module = &project.names[file].name;
@@ -374,6 +379,18 @@ fn find_uses(
                 .insert(name.clone());
         }
         for read in &references.whole_reads {
+            // A TypedDict is called by its name, or by a name that it is imported as.
+            let (root, _) = read.value.split_once('.').unwrap_or((&read.value, ""));
+            let last = read.value.rsplit('.').next().unwrap_or(&read.value);
+            let imported = references
+                .bindings
+                .get(root)
+                .and_then(|binding| binding.name.as_deref());
+            if !typed_dict_names.contains(last)
+                && !imported.is_some_and(|name| typed_dict_names.contains(name))
+            {
+                continue;
+            }
             let fields: Vec<DefinitionId> = classes
                 .hierarchy
                 .resolve(file, &read.value)
