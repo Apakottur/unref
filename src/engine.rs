@@ -912,28 +912,92 @@ fn import_siblings(
     let mut pending: Vec<usize> = (0..facts.len())
         .filter(|&file| facts[file].is_script && package_of(file).is_some())
         .collect();
-    let mut seen: FxHashSet<usize> = pending.iter().copied().collect();
+    if pending.is_empty() {
+        return;
+    }
     let mut is_elsewhere: FxHashMap<String, bool> = FxHashMap::default();
+    let mut qualify = |module: Option<&str>, level, package: &str| {
+        let module = module.filter(|_| level == 0)?;
+        let top = module.split('.').next()?;
+        let sibling = format!("{package}.{top}");
+        (!known.contains(top)
+            && known.contains(sibling.as_str())
+            && !*is_elsewhere
+                .entry(top.to_string())
+                .or_insert_with(|| external.exists(top)))
+        .then(|| (format!("{package}.{module}"), sibling))
+    };
+
+    // Read module-level imports before the sibling walk changes the original bindings.
+    let script_entries = pending.clone();
+    let script_packages: FxHashSet<&str> = script_entries
+        .iter()
+        .filter_map(|&file| package_of(file))
+        .collect();
+    let mut project_imports = Vec::with_capacity(facts.len());
+    let mut possible_imports = Vec::with_capacity(facts.len());
+    let mut sibling_imports = Vec::with_capacity(facts.len());
+    for (file, facts) in facts.iter().enumerate() {
+        let references = &facts.references;
+        let modules = references
+            .module_imports
+            .iter()
+            .map(|(owner, module)| (*owner, module.as_str()))
+            .chain(
+                references
+                    .imports
+                    .iter()
+                    .filter(|import| import.level == 0)
+                    .filter_map(|import| Some((import.owner, import.module.as_deref()?))),
+            );
+        let package = package_of(file).filter(|package| script_packages.contains(package));
+        let mut project = FxHashSet::default();
+        let mut possible = FxHashSet::default();
+        let mut siblings = FxHashSet::default();
+        for (owner, module) in modules {
+            if known.contains(module) {
+                let prefixes = module
+                    .match_indices('.')
+                    .map(|(end, _)| &module[..end])
+                    .chain([module]);
+                for prefix in prefixes {
+                    let files = files_by_name.get(prefix).into_iter().flatten().copied();
+                    if owner.is_none() {
+                        project.extend(files.clone());
+                    }
+                    possible.extend(files);
+                }
+            } else if owner.is_none()
+                && let Some(package) = package
+                && let Some((_, sibling)) = qualify(Some(module), 0, package)
+            {
+                siblings.extend(
+                    files_by_name
+                        .get(&sibling)
+                        .into_iter()
+                        .flatten()
+                        .copied()
+                        .filter(|&file| package_of(file) == Some(package)),
+                );
+            }
+        }
+        project_imports.push(project);
+        possible_imports.push(possible);
+        sibling_imports.push(siblings);
+    }
+
+    let mut seen: FxHashSet<usize> = pending.iter().copied().collect();
+    // Preserve the directories assigned by the existing sibling import walk.
     while let Some(file) = pending.pop() {
         let Some(package) = package_of(file) else {
             continue;
         };
-        let mut siblings: Vec<String> = Vec::new();
-        import_relative(&mut facts[file], |module, level| {
-            let Some(top) = module.and_then(|module| module.split('.').next()) else {
-                return false;
-            };
-            let sibling = format!("{package}.{top}");
-            let is_sibling = level == 0
-                && !known.contains(top)
-                && known.contains(sibling.as_str())
-                && !*is_elsewhere
-                    .entry(top.to_string())
-                    .or_insert_with(|| external.exists(top));
-            if is_sibling {
+        let mut siblings = Vec::new();
+        qualify_siblings(&mut facts[file], |module, level| {
+            qualify(module, level, package).map(|(qualified, sibling)| {
                 siblings.push(sibling);
-            }
-            is_sibling
+                qualified
+            })
         });
         for sibling in siblings {
             for &imported in files_by_name.get(&sibling).into_iter().flatten() {
@@ -943,20 +1007,97 @@ fn import_siblings(
             }
         }
     }
+
+    // Only a module-level import can seed the new walk. The existing sibling walk also finds
+    // dormant function-local imports, whose bindings remain as before.
+    let mut directories = vec![ScriptDirectory::Unreached; facts.len()];
+    let mut pending = script_entries;
+    let mut project_roots = Vec::new();
+    while let Some(file) = pending.pop() {
+        if directories[file] == ScriptDirectory::Unreached
+            && let Some(package) = package_of(file)
+        {
+            directories[file] = ScriptDirectory::Unique(package);
+            project_roots.push(file);
+            pending.extend(&sibling_imports[file]);
+        }
+    }
+
+    // Function-local imports can make a directory ambiguous without proving a module is loaded.
+    let mut possible_directories = directories.clone();
+    spread_script_directories(&mut directories, &project_imports, project_roots.clone());
+    spread_script_directories(&mut possible_directories, &possible_imports, project_roots);
+    // An ordinary module can also import a context-dependent file.
+    let mut ordinary_imports = Vec::new();
+    for (file, imports) in possible_imports.iter().enumerate() {
+        if possible_directories[file] == ScriptDirectory::Unreached {
+            for &imported in imports {
+                if matches!(possible_directories[imported], ScriptDirectory::Unique(_)) {
+                    possible_directories[imported] = ScriptDirectory::Shared;
+                    ordinary_imports.push(imported);
+                }
+            }
+        }
+    }
+    spread_script_directories(
+        &mut possible_directories,
+        &possible_imports,
+        ordinary_imports,
+    );
+
+    for (file, directory) in directories.into_iter().enumerate() {
+        if let ScriptDirectory::Unique(package) = directory
+            && directory == possible_directories[file]
+            && !seen.contains(&file)
+        {
+            qualify_siblings(&mut facts[file], |module, level| {
+                qualify(module, level, package).map(|(qualified, _)| qualified)
+            });
+        }
+    }
 }
 
-/// Make the imports of a file that `is_sibling` tells, by their module and their number of leading
-/// dots, relative imports from its package.
-fn import_relative(
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScriptDirectory<'a> {
+    Unreached,
+    Unique(&'a str),
+    Shared,
+}
+
+/// Propagate an import directory at most once before a conflict makes it shared.
+fn spread_script_directories(
+    directories: &mut [ScriptDirectory<'_>],
+    project_imports: &[FxHashSet<usize>],
+    mut pending: Vec<usize>,
+) {
+    while let Some(file) = pending.pop() {
+        let directory = directories[file];
+        for &imported in &project_imports[file] {
+            let previous = directories[imported];
+            if previous == directory || previous == ScriptDirectory::Shared {
+                continue;
+            }
+            directories[imported] = if previous == ScriptDirectory::Unreached {
+                directory
+            } else {
+                ScriptDirectory::Shared
+            };
+            pending.push(imported);
+        }
+    }
+}
+
+/// Replace a bare sibling import with the project module at the script's import directory.
+fn qualify_siblings(
     file_facts: &mut FileFacts,
-    mut is_sibling: impl FnMut(Option<&str>, u32) -> bool,
+    mut qualified: impl FnMut(Option<&str>, u32) -> Option<String>,
 ) {
     let references = &mut file_facts.references;
     references.imports = std::mem::take(&mut references.imports)
         .into_iter()
         .map(|mut import| {
-            if is_sibling(import.module.as_deref(), import.level) {
-                import.level = 1;
+            if let Some(module) = qualified(import.module.as_deref(), import.level) {
+                import.module = Some(module);
             }
             import
         })
@@ -964,8 +1105,8 @@ fn import_relative(
     references.imported_reads = std::mem::take(&mut references.imported_reads)
         .into_iter()
         .map(|mut read| {
-            if is_sibling(read.binding.module.as_deref(), read.binding.level) {
-                read.binding.level = 1;
+            if let Some(module) = qualified(read.binding.module.as_deref(), read.binding.level) {
+                read.binding.module = Some(module);
             }
             read
         })
@@ -975,8 +1116,8 @@ fn import_relative(
         .values_mut()
         .chain(file_facts.lazy.values_mut().flatten())
     {
-        if is_sibling(binding.module.as_deref(), binding.level) {
-            binding.level = 1;
+        if let Some(module) = qualified(binding.module.as_deref(), binding.level) {
+            binding.module = Some(module);
         }
     }
 }

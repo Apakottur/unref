@@ -59,6 +59,79 @@ def test_default_path(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("script_import", "worker"),
+    [
+        (
+            "from pkg.lib.worker import execute\n",
+            "def execute():\n    from tasks import value\n    return value()\n",
+        ),
+        (
+            "import pkg.lib.worker\n",
+            "from tasks import value\nprint(value())\ndef execute(): pass\n",
+        ),
+    ],
+)
+def test_fully_qualified_import_keeps_script_directory(tmp_path: Path, script_import: str, worker: str) -> None:
+    (tmp_path / "pkg/lib").mkdir(parents=True)
+    (tmp_path / "pkg/__init__.py").touch()
+    (tmp_path / "pkg/lib/__init__.py").touch()
+    entry = "execute()" if script_import.startswith("from") else "pass"
+    files = {
+        "pkg/run.py": f'{script_import}if __name__ == "__main__": {entry}\n',
+        "pkg/lib/worker.py": worker,
+        "pkg/lib/tasks.py": "def value(): return -1\n",
+        "pkg/tasks.py": "def value(): return 7\n",
+    }
+    for name, contents in files.items():
+        (tmp_path / name).write_text(contents)
+
+    result = run(["."], cwd=tmp_path, env={"PYTHONPATH": str(tmp_path)})
+
+    expected = f"{Path('pkg/lib/tasks.py')}:1:5: unused-function 'value'\n"
+    if script_import.startswith("import"):
+        expected += f"{Path('pkg/lib/worker.py')}:3:5: unused-function 'execute'\n"
+    assert result.exit_code == 1
+    assert result.stdout == expected
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize("case", ["dormant", "competing-module", "competing-function"])
+def test_qualified_import_does_not_assume_a_script_directory(tmp_path: Path, case: str) -> None:
+    (tmp_path / "pkg/lib").mkdir(parents=True)
+    (tmp_path / "pkg/__init__.py").touch()
+    (tmp_path / "pkg/lib/__init__.py").touch()
+    files = {
+        "pkg/lib/tasks.py": "def value(): return -1\n",
+        "pkg/tasks.py": "def value(): return 7\n",
+    }
+    if case == "dormant":
+        files["pkg/run.py"] = 'def never():\n    import pkg.lib.worker\nif __name__ == "__main__": pass\n'
+        files["pkg/lib/worker.py"] = "from tasks import value\nprint(value())\n"
+    elif case == "competing-module":
+        files["pkg/run.py"] = 'from pkg.lib.worker import execute\nif __name__ == "__main__": print(execute())\n'
+        files["pkg/lib/run.py"] = 'import pkg.lib.worker\nif __name__ == "__main__": print(9)\n'
+        files["pkg/lib/worker.py"] = "def execute():\n    from tasks import value\n    return value()\n"
+    else:
+        files["pkg/run.py"] = 'import pkg.lib.worker\nif __name__ == "__main__": print(9)\n'
+        files["pkg/lib/run.py"] = (
+            'def main():\n    from pkg.lib.worker import execute\n    print(execute())\nif __name__ == "__main__": main()\n'
+        )
+        files["pkg/lib/worker.py"] = "def execute():\n    from tasks import value\n    return value()\n"
+    for name, contents in files.items():
+        (tmp_path / name).write_text(contents)
+
+    result = run(["."], cwd=tmp_path, env={"PYTHONPATH": str(tmp_path)})
+
+    expected = f"{Path('pkg/lib/tasks.py')}:1:5: unused-function 'value'\n"
+    if case == "dormant":
+        expected += f"{Path('pkg/run.py')}:1:5: unused-function 'never'\n"
+    expected += f"{Path('pkg/tasks.py')}:1:5: unused-function 'value'\n"
+    assert result.exit_code == 1
+    assert result.stdout == expected
+    assert result.stderr == ""
+
+
 def test_gitignored_given_directory() -> None:
     # A directory that git ignores is still checked when it is given directly, as with ruff and ty.
     result = run(["main.py", "generated"], cwd=CASES_DIR / "gitignore")

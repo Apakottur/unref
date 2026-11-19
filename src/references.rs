@@ -132,6 +132,8 @@ pub(crate) struct References {
     pub whole_reads: FxHashSet<WholeRead>,
     /// The names that are imported from another module. A star import has the name `*`.
     pub imports: FxHashSet<Import>,
+    /// Full names of modules imported with an `import` statement, with the owner.
+    pub module_imports: FxHashSet<(Owner, Name)>,
     /// Whether the module defines `__all__`.
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
@@ -953,6 +955,12 @@ impl<'a> Walker<'_, '_> {
 
     /// Bind the names that an `import` statement imports.
     fn visit_import(&mut self, import: &ast::StmtImport) {
+        self.references.module_imports.extend(
+            import
+                .names
+                .iter()
+                .map(|alias| (self.owner, alias.name.id.clone())),
+        );
         let bindings = import.names.iter().map(|alias| match &alias.asname {
             // `import package.module` binds `package`.
             None => {
