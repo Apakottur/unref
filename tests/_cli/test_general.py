@@ -1,3 +1,4 @@
+import os
 import shutil
 import warnings
 from pathlib import Path
@@ -96,6 +97,7 @@ def test_fully_qualified_import_keeps_script_directory(tmp_path: Path, script_im
     assert result.stderr == ""
 
 
+@pytest.mark.parametrize("absolute_initializer", [False, True], ids=["directory", "mixed-inputs"])
 @pytest.mark.parametrize(
     ("files", "expected"),
     [
@@ -120,7 +122,7 @@ def test_fully_qualified_import_keeps_script_directory(tmp_path: Path, script_im
     ],
 )
 def test_qualified_script_imports_load_the_resolved_module(
-    tmp_path: Path, files: dict[str, str], expected: str
+    tmp_path: Path, files: dict[str, str], expected: str, *, absolute_initializer: bool
 ) -> None:
     (tmp_path / "pkg/lib").mkdir(parents=True)
     (tmp_path / "pkg/__init__.py").touch()
@@ -131,7 +133,12 @@ def test_qualified_script_imports_load_the_resolved_module(
     for name, contents in files.items():
         (tmp_path / name).write_text(contents)
 
-    result = run(["."], cwd=tmp_path, env={"PYTHONPATH": str(tmp_path)})
+    paths = (
+        [str(tmp_path / "pkg/lib/__init__.py"), "pkg/__init__.py", "pkg/run.py", *files]
+        if absolute_initializer
+        else ["."]
+    )
+    result = run(paths, cwd=tmp_path, env={"PYTHONPATH": str(tmp_path)})
 
     assert result.stdout == expected
     assert result.exit_code == int(bool(expected))
@@ -204,6 +211,46 @@ def test_competing_import_forms_do_not_assign_script_directory(tmp_path: Path, b
         f"{Path('pkg/lib/tasks.py')}:1:5: unused-function 'value'\n"
         f"{Path('pkg/tasks.py')}:1:5: unused-function 'value'\n"
     )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory permissions")
+@pytest.mark.parametrize(
+    ("args", "exit_code"),
+    [
+        (["."], 1),
+        (["private"], 1),
+        ([".", "private"], 1),
+        (["--exit-zero", "."], 0),
+        (["--show-files", "."], 1),
+        (["--show-files", "--exit-zero", "."], 0),
+    ],
+)
+def test_unreadable_directory(tmp_path: Path, args: list[str], exit_code: int) -> None:
+    private = tmp_path / "private"
+    private.mkdir()
+    (private / "hidden.py").write_text("def hidden(): pass\n")
+    (tmp_path / "visible.py").write_text("def visible(): pass\n")
+    private.chmod(0)
+    try:
+        try:
+            next(private.iterdir(), None)
+        except PermissionError as error:
+            diagnostic = f"private:1:1: io-error '{error.strerror} (os error {error.errno})'\n"
+        else:
+            pytest.skip("the current process can enumerate the directory")
+
+        result = run(args, cwd=tmp_path)
+    finally:
+        private.chmod(0o700)
+
+    assert result.exit_code == exit_code
+    if "--show-files" in args:
+        assert result.stdout == "visible.py\n"
+        assert result.stderr == diagnostic
+    else:
+        visible_finding = "visible.py:1:5: unused-function 'visible'\n" if "." in args else ""
+        assert result.stdout == diagnostic + visible_finding
+        assert result.stderr == ""
 
 
 def test_gitignored_given_directory() -> None:
