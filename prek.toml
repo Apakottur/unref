@@ -50,6 +50,13 @@ rev = "v1.7.12"
 [[repos.hooks]]
 id = "actionlint"
 
+[[repos]]
+repo = "https://github.com/zizmorcore/zizmor-pre-commit"
+rev = "v1.32.0"
+
+[[repos.hooks]]
+id = "zizmor"
+
 ########
 # TOML #
 ########
