@@ -65,20 +65,32 @@ impl Discovery {
 ///
 /// Returns the Python files and discovery errors, sorted by path.
 pub(crate) fn discover(paths: &[PathBuf], options: &Config) -> Discovery {
+    discover_files(paths, options, false)
+}
+
+/// Find the files to list and diagnose explicit inputs that cannot be resolved.
+pub(crate) fn discover_for_listing(paths: &[PathBuf], options: &Config) -> Discovery {
+    discover_files(paths, options, true)
+}
+
+fn discover_files(paths: &[PathBuf], options: &Config, validate_explicit: bool) -> Discovery {
     let excluded = Exclude::new(&options.exclude, &options.root);
     let gitignore = options.respect_gitignore;
     let mut discovery = Discovery::default();
-    for path in paths {
-        let path = clean(path);
-        if options.force_exclude && is_given_excluded(&path, &excluded, gitignore) {
+    for input in paths {
+        // Cleaning removes suffixes such as `/.` that require a directory during lookup.
+        let metadata = input.metadata();
+        let path = clean(input);
+        let is_directory = metadata.as_ref().is_ok_and(std::fs::Metadata::is_dir);
+        if options.force_exclude && is_given_excluded(&path, is_directory, &excluded, gitignore) {
             continue;
         }
-        if path.is_dir() {
-            walk(&path, &excluded, gitignore, &mut discovery);
-        } else {
+        match metadata {
+            Ok(_) if is_directory => walk(&path, &excluded, gitignore, &mut discovery),
+            Err(error) if validate_explicit => discovery.record_error(input, &error),
             // A file that is given directly is checked unless `force_exclude` is set, as with ruff and
-            // ty.
-            discovery.files.push(path);
+            // ty. A normal check reports failures when it tries to read the file.
+            _ => discovery.files.push(path),
         }
     }
     discovery.files.sort();
@@ -92,9 +104,14 @@ pub(crate) fn discover(paths: &[PathBuf], options: &Config) -> Discovery {
 
 /// Check whether a path that is given directly is excluded or, if `gitignore` is set, ignored by git,
 /// either itself or through one of the directories above it.
-fn is_given_excluded(path: &Path, excluded: &Exclude, gitignore: bool) -> bool {
+fn is_given_excluded(
+    path: &Path,
+    given_is_directory: bool,
+    excluded: &Exclude,
+    gitignore: bool,
+) -> bool {
     let absolute = resolve(path);
-    let is_directory = |candidate: &Path| candidate != absolute || path.is_dir();
+    let is_directory = |candidate: &Path| candidate != absolute || given_is_directory;
 
     // Only the directories under the root of the project count, so that a project in a directory named
     // as a default pattern, such as `dist`, is still checked. A path outside of the root counts alone.
