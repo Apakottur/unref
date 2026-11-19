@@ -115,3 +115,13 @@ class LocalReplacement:
 
     def parameter_action(self):
         return 25
+
+
+class RemoteSource:
+    def remote_action(self):
+        return 26
+
+
+class RemoteReplacement:
+    def remote_action(self):
+        return 27

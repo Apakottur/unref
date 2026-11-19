@@ -7,6 +7,7 @@ from .provider import DefaultReplacement, DefaultSource as DefaultValue
 from .provider import GlobalImportSource as GlobalImport, GlobalReplacement
 from .provider import LocalSource as LocalValue
 from .provider import ModuleSource as ModuleValue
+from .provider import RemoteSource as RemoteValue
 from .provider import WalrusReplacement, WalrusSource as Walrus
 
 Adjusted = ShadowReplacement

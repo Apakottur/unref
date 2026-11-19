@@ -485,6 +485,8 @@ struct Classes<'a> {
     names: FxHashSet<String>,
     /// Classes and ancestors reached by a renamed import, keyed by the dotted receiver name.
     renamed_imports: RefCell<FxHashMap<String, Vec<ClassId>>>,
+    /// Imported names that can be overwritten through another module's attribute access.
+    written_imports: FxHashSet<(usize, Name)>,
     /// The base classes of each class in the project, directly or not.
     ancestors: Vec<Vec<ClassId>>,
     /// The classes of the project that inherit from each class, directly or not.
@@ -617,6 +619,7 @@ impl<'a> Classes<'a> {
             by_dotted,
             names,
             renamed_imports: RefCell::default(),
+            written_imports: written_imports(project),
             ancestors,
             lineages: std::iter::repeat_with(Default::default)
                 .take(descendants.len())
@@ -725,7 +728,8 @@ impl<'a> Classes<'a> {
             // A conflicting definition or star import can replace any binding along the chain.
             if references.bindings.contains_key(first.as_str())
                 && (references.ambiguous_imports.contains(first.as_str())
-                    || references.has_module_star_import)
+                    || references.has_module_star_import
+                    || self.written_imports.contains(&(file, first.clone())))
             {
                 return Vec::new();
             }
@@ -902,6 +906,15 @@ fn resolve_import(
 ///
 /// Returns each object with its module, and its name in the module followed by the attributes.
 fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize, Vec<Name>)> {
+    follow_imports(resolved, project, true)
+}
+
+/// An attribute write can follow re-exports of the receiver and stops at the attribute it replaces.
+fn follow_imports(
+    resolved: &Resolved,
+    project: &Project,
+    follow_final_binding: bool,
+) -> FxHashSet<(usize, Vec<Name>)> {
     let mut found = FxHashSet::default();
     // Each binding that is followed is followed once, which ends a cycle of modules that import the
     // names of each other.
@@ -917,6 +930,9 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
                     .iter()
                     .map(|&module| (module, parts[*start..].to_vec())),
             );
+        }
+        if !follow_final_binding && *index + 1 == parts.len() {
+            continue;
         }
         // A module that imports the name in turn, such as a package that re-exports it. Only the
         // longest module is followed, as `package.module.name` reads `name` from `package.module`.
@@ -936,6 +952,34 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
         }
     }
     found
+}
+
+/// Resolve explicit attribute writes to the module bindings they can replace.
+fn written_imports(project: &Project) -> FxHashSet<(usize, Name)> {
+    let mut written = FxHashSet::default();
+    for (file, facts) in project.facts.iter().enumerate() {
+        for (binding, attributes) in &facts.references.imported_attribute_writes {
+            let Some(resolved) = resolve_import(
+                &project.names[file],
+                binding,
+                attributes,
+                &project.files_by_name,
+            ) else {
+                continue;
+            };
+            for (module, parts) in follow_imports(&resolved, project, false) {
+                if let [name] = parts.as_slice()
+                    && project.facts[module]
+                        .references
+                        .bindings
+                        .contains_key(name.as_str())
+                {
+                    written.insert((module, name.clone()));
+                }
+            }
+        }
+    }
+    written
 }
 
 /// Get the directories that a module from outside the project is looked for in.

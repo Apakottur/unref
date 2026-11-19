@@ -1,5 +1,8 @@
+from types import SimpleNamespace
+
+from renamed_class_pkg import worker
 from renamed_class_pkg.proxy import Delegated
-from renamed_class_pkg.provider import LocalReplacement, ModuleReplacement
+from renamed_class_pkg.provider import LocalReplacement, ModuleReplacement, RemoteReplacement
 from renamed_class_pkg.wild import Starred
 from renamed_class_pkg.worker import (
     API,
@@ -21,6 +24,7 @@ class Other:
 
 
 Other()
+worker.API: type
 print(API().run_exported(), API.default_mode)
 # Conflicting bindings use the ordinary name-based lookup.
 print(Delegated().shadowed_action(), Rebound().rebound_action())
@@ -65,3 +69,16 @@ def consume_parameter(LocalValue, use_default):
 
 
 print(consume_nonlocal(), consume_parameter(LocalReplacement, False))
+
+
+def replace_remote():
+    worker.RemoteValue = RemoteReplacement
+
+
+def mutate_local(worker):
+    worker.API = None
+
+
+replace_remote()
+mutate_local(SimpleNamespace())
+print(worker.RemoteValue().remote_action())

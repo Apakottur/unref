@@ -46,6 +46,8 @@ pub(crate) struct Read {
     pub attributes: Vec<Name>,
     /// Whether it reads the object, which a type hint of a parameter does not.
     pub reads_object: bool,
+    /// The final attribute is written. Such accesses only track possible import alias rebinding.
+    writes_attribute: bool,
     /// The attribute read from the result of calling the chain, such as `name` in `Class().name`.
     pub called: Option<Name>,
 }
@@ -120,6 +122,8 @@ pub(crate) struct References {
     pub reads: FxHashSet<Read>,
     /// The reads of the imported names, as for `reads`.
     pub imported_reads: FxHashSet<ImportedRead>,
+    /// Writes to attributes of imported names, given its binding and the attribute path.
+    pub imported_attribute_writes: FxHashSet<(Binding, Vec<Name>)>,
     /// The names that are read as an attribute of something other than a name, such as a call
     /// (`call().name`) or a local variable, and those that a class pattern matches by keyword.
     pub attributes: FxHashSet<(Owner, Name)>,
@@ -296,6 +300,13 @@ impl Scope {
             outer: None,
         }
     }
+
+    fn has_class_local(&self, name: &str) -> bool {
+        self.kind == ScopeKind::Class
+            && self.bound.contains(name)
+            && !self.global_names.contains(name)
+            && !self.imports.contains_key(name)
+    }
 }
 
 /// Where the reads of a scope that ends go.
@@ -412,6 +423,19 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             }
             Expr::Attribute(attribute) => {
                 if attribute.ctx != ExprContext::Load {
+                    let (base, attributes) = attribute_chain(attribute);
+                    if let Expr::Name(name) = base
+                        && !self.scopes[self.scope].has_class_local(name.id.as_str())
+                    {
+                        self.scopes[self.scope].reads.push(Read {
+                            owner: self.owner,
+                            root: name.id.clone(),
+                            attributes,
+                            reads_object: false,
+                            writes_attribute: true,
+                            called: None,
+                        });
+                    }
                     self.visit_expr(&attribute.value);
                     return;
                 }
@@ -573,11 +597,7 @@ impl<'a> Walker<'_, '_> {
     /// `called` is the attribute read from the result of calling the chain, as in `Class().name`.
     fn add_read(&mut self, root: &Name, attributes: Vec<Name>, called: Option<Name>) {
         let scope = &self.scopes[self.scope];
-        if scope.kind == ScopeKind::Class
-            && scope.bound.contains(root.as_str())
-            && !scope.global_names.contains(root.as_str())
-            && !scope.imports.contains_key(root.as_str())
-        {
+        if scope.has_class_local(root.as_str()) {
             let owner = self.owner;
             let members = scope.members.get(root.as_str()).into_iter().flatten();
             self.references
@@ -591,6 +611,7 @@ impl<'a> Walker<'_, '_> {
             root: root.clone(),
             attributes,
             reads_object: !self.in_signature,
+            writes_attribute: false,
             called,
         };
         let scope = self.scope;
@@ -650,6 +671,7 @@ impl<'a> Walker<'_, '_> {
             root: Name::new(literal.value.to_str()),
             attributes: Vec::new(),
             reads_object: true,
+            writes_attribute: false,
             called: None,
         });
     }
@@ -1098,6 +1120,7 @@ impl<'a> Walker<'_, '_> {
                     root: name.into(),
                     attributes: Vec::new(),
                     reads_object: true,
+                    writes_attribute: false,
                     called: None,
                 });
             }
@@ -1119,7 +1142,14 @@ impl<'a> Walker<'_, '_> {
             }
         }
         for target in targets {
-            self.visit_expr(target);
+            if value.is_none()
+                && let Expr::Attribute(attribute) = target
+            {
+                // A bare annotation evaluates the receiver without writing the attribute.
+                self.visit_expr(&attribute.value);
+            } else {
+                self.visit_expr(target);
+            }
         }
     }
 
@@ -1540,8 +1570,21 @@ impl<'a> Walker<'_, '_> {
             .filter(|instance| !scope.bound.contains(instance))
             .zip(scope.class_name.clone());
         let mut passed = Vec::new();
+        let mut global_writes = Vec::new();
         for read in reads {
             let root = read.root.as_str();
+            if read.writes_attribute {
+                if let Some(binding) = scope.imports.get(root) {
+                    self.references
+                        .imported_attribute_writes
+                        .insert((binding.clone(), read.attributes));
+                } else if inner != 0 && scope.global_names.contains(root) {
+                    global_writes.push(read);
+                } else if inner != 0 && !local_names.contains(root) {
+                    passed.push(read);
+                }
+                continue;
+            }
             if let Some(binding) = scope.imports.get(root) {
                 // A plain read of a name that is not local, at the module or declared `global`, is also
                 // a read of the name of the enclosing scope, without reading the object.
@@ -1551,6 +1594,7 @@ impl<'a> Walker<'_, '_> {
                         root: read.root.clone(),
                         attributes: Vec::new(),
                         reads_object: false,
+                        writes_attribute: false,
                         called: None,
                     });
                 }
@@ -1595,6 +1639,7 @@ impl<'a> Walker<'_, '_> {
                 passed.push(read);
             }
         }
+        self.scopes[0].reads.extend(global_writes);
         match target {
             Target::Scope(scope) => self.scopes[scope].reads.extend(passed),
             // One at a time, as `extend` would make room for the repeated reads too.
