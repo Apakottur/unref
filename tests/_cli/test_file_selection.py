@@ -34,6 +34,24 @@ def test_show_files_given_paths() -> None:
     assert result.stdout == _files("pkg/generated/module.py", "single.py")
 
 
+def test_show_files_missing_path() -> None:
+    # A given path that does not exist is reported, as by a check, rather than listed.
+    result = run(["--show-files", "missing.py", "single.py"], cwd=_EXCLUDE)
+
+    assert result.exit_code == 1
+    assert result.stdout == _files("single.py")
+    assert result.stderr == "missing.py:1:1: io-error 'No such file or directory (os error 2)'\n"
+
+
+def test_show_files_force_excluded_missing_path() -> None:
+    # A path that is excluded is left out before it is looked up.
+    result = run(["--show-files", "--force-exclude", "--exclude", "missing.py", "missing.py"], cwd=_EXCLUDE)
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
 @pytest.mark.parametrize(
     "args",
     [

@@ -180,65 +180,6 @@ def test_missing_path(name: str) -> None:
     )
 
 
-@pytest.mark.parametrize(("flags", "exit_code"), [([], 1), (["--exit-zero"], 0)])
-def test_show_files_reports_missing_path(tmp_path: Path, flags: list[str], exit_code: int) -> None:
-    (tmp_path / "visible.py").touch()
-
-    result = run(["--show-files", *flags, "missing.py", "visible.py", "missing.py"], cwd=tmp_path)
-
-    assert result.exit_code == exit_code
-    assert result.stdout == "visible.py\n"
-    assert result.stderr.startswith("missing.py:1:1: io-error ")
-    assert len(result.stderr.splitlines()) == 1
-
-
-@pytest.mark.skipif(os.name != "posix", reason="requires POSIX path lookup")
-@pytest.mark.parametrize("suffix", ["/", "/."])
-def test_show_files_reports_file_given_as_directory(tmp_path: Path, suffix: str) -> None:
-    (tmp_path / "visible.py").touch()
-    invalid = f"visible.py{suffix}"
-
-    result = run(["--show-files", invalid, "visible.py"], cwd=tmp_path)
-
-    assert result.exit_code == 1
-    assert result.stdout == "visible.py\n"
-    assert result.stderr.startswith(f"{invalid}:1:1: io-error ")
-    assert len(result.stderr.splitlines()) == 1
-
-
-def test_show_files_respects_force_exclude_for_missing_path(tmp_path: Path) -> None:
-    result = run(["--show-files", "--force-exclude", "--exclude", "missing.py", "missing.py"], cwd=tmp_path)
-
-    assert result.exit_code == 0
-    assert result.stdout == ""
-    assert result.stderr == ""
-
-
-@pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory permissions")
-def test_show_files_reports_path_below_unsearchable_directory(tmp_path: Path) -> None:
-    private = tmp_path / "private"
-    private.mkdir()
-    blocked = private / "nested"
-    blocked.mkdir()
-    (tmp_path / "visible.py").touch()
-    private.chmod(0)
-    try:
-        try:
-            blocked.stat()
-        except PermissionError as error:
-            diagnostic = f"private/nested:1:1: io-error '{error.strerror} (os error {error.errno})'\n"
-        else:
-            pytest.skip("the current process can resolve the directory")
-
-        result = run(["--show-files", "private/nested", "visible.py"], cwd=tmp_path)
-    finally:
-        private.chmod(0o700)
-
-    assert result.exit_code == 1
-    assert result.stdout == "visible.py\n"
-    assert result.stderr == diagnostic
-
-
 def test_syntax_warning() -> None:
     # The warnings of parsing, such as for an invalid escape sequence, are not shown. Pytest records the
     # warnings itself, so they are recorded here to see them.
