@@ -5,7 +5,7 @@ use std::sync::{Arc, LazyLock};
 
 use rayon::prelude::*;
 use regex::bytes::Regex;
-use ruff_python_ast::{CmpOp, Expr, ModModule, Stmt};
+use ruff_python_ast::{ModModule, Stmt};
 use ruff_python_parser::Parsed;
 use ruff_text_size::Ranged;
 use rustc_hash::FxHashMap;
@@ -14,7 +14,7 @@ use crate::definitions::Definition;
 use crate::ignores::{IgnoreComment, find_ignore_comments};
 use crate::models::{Finding, Rule};
 use crate::positions::{SourcePositions, to_u32};
-use crate::references::{Binding, References, walk_module};
+use crate::references::{Binding, References, is_main_guard, walk_module};
 
 /// The encoding declaration of a module (PEP 263), on one of its first two lines.
 static CODING: LazyLock<Regex> = LazyLock::new(|| {
@@ -80,25 +80,10 @@ pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
 
 /// Check whether a module checks `if __name__ == "__main__":` at its top level, in either order.
 fn is_script(module: &ModModule) -> bool {
-    module.body.iter().any(|stmt| {
-        let Stmt::If(stmt_if) = stmt else {
-            return false;
-        };
-        let Expr::Compare(compare) = &*stmt_if.test else {
-            return false;
-        };
-        let [CmpOp::Eq] = &*compare.ops else {
-            return false;
-        };
-        let [left, right] = &*compare.operands else {
-            return false;
-        };
-        let is_name = |expr: &Expr| matches!(expr, Expr::Name(name) if name.id == "__name__");
-        let is_main = |expr: &Expr| {
-            matches!(expr, Expr::StringLiteral(literal) if literal.value.to_str() == "__main__")
-        };
-        (is_name(left) && is_main(right)) || (is_main(left) && is_name(right))
-    })
+    module
+        .body
+        .iter()
+        .any(|stmt| matches!(stmt, Stmt::If(branch) if is_main_guard(&branch.test)))
 }
 
 /// Why the source of a module cannot be decoded, with the line and the column where it fails.

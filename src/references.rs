@@ -34,12 +34,19 @@ pub(crate) struct Binding {
 /// in, or None for code that runs when the module is imported.
 pub(crate) type Owner = Option<u32>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum MainGuard {
+    Script,
+    Imported,
+}
+
 /// A read of a name, or of a chain of attributes that starts with one (`package.module.name`).
 ///
 /// The names are kept as the syntax tree holds them, which copies a long name without allocating.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Read {
     pub owner: Owner,
+    main_guard: Option<MainGuard>,
     pub root: Name,
     /// The attributes, in order.
     pub attributes: Vec<Name>,
@@ -187,13 +194,52 @@ pub(crate) fn walk_module(
         scope: 0,
         binder: 0,
         owner: None,
+        main_guard: None,
+        script_imports: FxHashMap::default(),
+        imported_imports: FxHashMap::default(),
         in_signature: false,
     };
-    walker.visit_body(&module.body);
+    for stmt in &module.body {
+        if let Stmt::If(branch) = stmt
+            && is_main_guard(&branch.test)
+        {
+            walker.visit_expr(&branch.test);
+            walker.main_guard = Some(MainGuard::Script);
+            walker.visit_body(&branch.body);
+            walker.main_guard = Some(MainGuard::Imported);
+            for clause in &branch.elif_else_clauses {
+                walker.visit_elif_else_clause(clause);
+            }
+            walker.main_guard = None;
+        } else {
+            walker.visit_stmt(stmt);
+        }
+    }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
+    walker.references.bindings.extend(walker.imported_imports);
+    // Keep script-only bindings for class declarations that use them.
+    for (name, binding) in walker.script_imports {
+        walker.references.bindings.entry(name).or_insert(binding);
+    }
     (walker.definitions, walker.references)
+}
+
+/// Whether a test checks `__name__ == "__main__"`, in either order.
+pub(crate) fn is_main_guard(test: &Expr) -> bool {
+    let Expr::Compare(compare) = test else {
+        return false;
+    };
+    let [CmpOp::Eq] = &*compare.ops else {
+        return false;
+    };
+    let [left, right] = &*compare.operands else {
+        return false;
+    };
+    let is_name = |expr: &Expr| matches!(expr, Expr::Name(name) if name.id == "__name__");
+    let is_main = |expr: &Expr| matches!(expr, Expr::StringLiteral(literal) if literal.value.to_str() == "__main__");
+    (is_name(left) && is_main(right)) || (is_main(left) && is_name(right))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -306,6 +352,10 @@ struct Walker<'p, 'a> {
     binder: usize,
     /// The function that the node is in, or None for code that runs when the module is imported.
     owner: Owner,
+    /// The branch of the module's main guard that contains the node, if any.
+    main_guard: Option<MainGuard>,
+    script_imports: FxHashMap<String, Binding>,
+    imported_imports: FxHashMap<String, Binding>,
     /// Whether the node is in the annotation of a parameter or the return of a function.
     in_signature: bool,
 }
@@ -551,6 +601,7 @@ impl<'a> Walker<'_, '_> {
         }
         let read = Read {
             owner: self.owner,
+            main_guard: self.main_guard,
             root: root.clone(),
             attributes,
             reads_object: !self.in_signature,
@@ -610,6 +661,7 @@ impl<'a> Walker<'_, '_> {
         };
         self.scopes[0].reads.push(Read {
             owner: self.owner,
+            main_guard: self.main_guard,
             root: Name::new(literal.value.to_str()),
             attributes: Vec::new(),
             reads_object: true,
@@ -1047,6 +1099,7 @@ impl<'a> Walker<'_, '_> {
             for name in string_literals(value) {
                 self.references.reads.insert(Read {
                     owner: self.owner,
+                    main_guard: self.main_guard,
                     root: name.into(),
                     attributes: Vec::new(),
                     reads_object: true,
@@ -1321,6 +1374,10 @@ impl<'a> Walker<'_, '_> {
             || [self.scope, 0]
                 .iter()
                 .any(|&scope| self.scopes[scope].imports.contains_key(name))
+            || self.main_guard != Some(MainGuard::Imported)
+                && self.script_imports.contains_key(name)
+            || self.main_guard != Some(MainGuard::Script)
+                && self.imported_imports.contains_key(name)
     }
 
     /// Add a read of a value as a whole, given by the dotted names of what it is the result of calling.
@@ -1399,8 +1456,29 @@ impl<'a> Walker<'_, '_> {
     fn bind_imports(&mut self, statement: FxHashMap<String, Binding>) {
         for (name, binding) in statement {
             self.bind(&name);
-            let binder = self.binder;
-            self.scopes[binder].imports.entry(name).or_insert(binding);
+            let imports = match (self.binder, self.main_guard) {
+                (0, Some(MainGuard::Script)) => &mut self.script_imports,
+                (0, Some(MainGuard::Imported)) => &mut self.imported_imports,
+                (binder, _) => &mut self.scopes[binder].imports,
+            };
+            imports.entry(name).or_insert(binding);
+        }
+    }
+
+    /// For a module read, choose the import bindings from the modes that can reach it.
+    fn read_bindings(&self, inner: usize, read: &Read) -> [Option<&Binding>; 2] {
+        let name = read.root.as_str();
+        let common = self.scopes[inner].imports.get(name);
+        if inner != 0 || (self.script_imports.is_empty() && self.imported_imports.is_empty()) {
+            return [common, None];
+        }
+        let script = self.script_imports.get(name).or(common);
+        let imported = self.imported_imports.get(name).or(common);
+        match read.main_guard {
+            Some(MainGuard::Script) => [script, None],
+            Some(MainGuard::Imported) => [imported, None],
+            None if script == imported => [script, None],
+            None => [script, imported],
         }
     }
 
@@ -1439,21 +1517,36 @@ impl<'a> Walker<'_, '_> {
             .zip(scope.class_name.clone());
         let mut passed = Vec::new();
         for read in reads {
-            if let Some(binding) = self.scopes[inner].imports.get(read.root.as_str()) {
+            let mut bindings = self
+                .read_bindings(inner, &read)
+                .map(Option::<&Binding>::cloned)
+                .into_iter()
+                .flatten();
+            if let Some(binding) = bindings.next() {
                 // A plain read of a name that is not local, at the module or declared `global`, is also
                 // a read of the name of the enclosing scope, without reading the object.
                 if read.attributes.is_empty() && !local_names.contains(read.root.as_str()) {
                     passed.push(Read {
                         owner: read.owner,
+                        main_guard: read.main_guard,
                         root: read.root.clone(),
                         attributes: Vec::new(),
                         reads_object: false,
                         called: None,
                     });
                 }
+                if let Some(binding) = bindings.next() {
+                    self.references.imported_reads.insert(ImportedRead {
+                        owner: read.owner,
+                        binding,
+                        attributes: read.attributes.clone(),
+                        reads_object: read.reads_object,
+                        called: read.called.clone(),
+                    });
+                }
                 self.references.imported_reads.insert(ImportedRead {
                     owner: read.owner,
-                    binding: binding.clone(),
+                    binding,
                     attributes: read.attributes,
                     reads_object: read.reads_object,
                     called: read.called,

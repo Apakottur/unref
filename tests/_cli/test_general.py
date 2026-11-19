@@ -59,6 +59,50 @@ def test_default_path(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "read",
+    [
+        "print(source.value())\n",
+        "def show(): print(source.value())\nshow()\n",
+    ],
+    ids=["module", "function"],
+)
+def test_import_aliases_in_main_guard(tmp_path: Path, read: str) -> None:
+    (tmp_path / "entry.py").write_text(
+        'if __name__ == "__main__":\n    import direct as source\nelse:\n    import imported as source\n' + read
+    )
+    (tmp_path / "direct.py").write_text("def value(): return 8\n")
+    (tmp_path / "imported.py").write_text("def value(): return 9\n")
+    (tmp_path / "inspect_entry.py").write_text("import entry\n")
+
+    result = run([], cwd=tmp_path)
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
+
+
+def test_read_alias_inside_main_guard_branch(tmp_path: Path) -> None:
+    (tmp_path / "entry.py").write_text(
+        'if "__main__" == __name__:\n'
+        "    import direct as source\n"
+        "    print(source.script_value())\n"
+        "else:\n"
+        "    import imported as source\n"
+        "    def show(): print(source.import_value())\n"
+        "    show()\n"
+    )
+    (tmp_path / "direct.py").write_text("def script_value(): return 8\ndef import_value(): return -1\n")
+    (tmp_path / "imported.py").write_text("def script_value(): return -1\ndef import_value(): return 9\n")
+    (tmp_path / "inspect_entry.py").write_text("import entry\n")
+
+    result = run([], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        "direct.py:2:5: unused-function 'import_value'\nimported.py:1:5: unused-function 'script_value'\n"
+    )
+
+
 def test_gitignored_given_directory() -> None:
     # A directory that git ignores is still checked when it is given directly, as with ruff and ty.
     result = run(["main.py", "generated"], cwd=CASES_DIR / "gitignore")
