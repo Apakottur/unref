@@ -59,6 +59,34 @@ def test_default_path(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("entry", "unused"),
+    [
+        pytest.param(
+            "print(0)",
+            f"{Path('pkg/run.py')}:1:5: unused-function 'load'\n"
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'only_if_loaded'\n",
+            id="unused-loader",
+        ),
+        pytest.param("load()", "", id="used-loader"),
+    ],
+)
+def test_sibling_module_loaded_by_reachable_function(tmp_path: Path, entry: str, unused: str) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").touch()
+    (pkg / "tasks.py").write_text("def only_if_loaded(): return 7\n")
+    (pkg / "helpers.py").write_text("from tasks import only_if_loaded\nprint(only_if_loaded())\ndef leaf(): pass\n")
+    (pkg / "run.py").write_text(
+        f'def load():\n    from helpers import leaf\n    leaf()\nif __name__ == "__main__":\n    {entry}\n'
+    )
+
+    result = run([], cwd=tmp_path)
+
+    assert result.exit_code == int(bool(unused))
+    assert result.stdout == unused
+
+
 def test_gitignored_given_directory() -> None:
     # A directory that git ignores is still checked when it is given directly, as with ruff and ty.
     result = run(["main.py", "generated"], cwd=CASES_DIR / "gitignore")

@@ -67,6 +67,33 @@ struct Uses {
     definitions: FxHashSet<DefinitionId>,
 }
 
+type UsesByOwner = FxHashMap<(usize, Owner), Uses>;
+
+#[derive(Default)]
+struct ProjectUses {
+    ordinary: UsesByOwner,
+    sibling: UsesByOwner,
+}
+
+/// Imports that can take advantage of a script's search directory.
+#[derive(Default)]
+struct SiblingImports {
+    roots: Vec<usize>,
+    qualifications: FxHashMap<usize, FxHashSet<String>>,
+    loads: FxHashMap<(usize, Owner), FxHashSet<usize>>,
+}
+
+impl SiblingImports {
+    fn qualifies(&self, file: usize, module: Option<&str>, level: u32) -> bool {
+        level == 0
+            && module.is_some_and(|module| {
+                self.qualifications
+                    .get(&file)
+                    .is_some_and(|names| names.contains(module))
+            })
+    }
+}
+
 /// The modules of the project, by the index of their file.
 struct Project {
     /// The files that parse.
@@ -131,7 +158,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             .push(index);
     }
     let mut external = ExternalModules::new(search_path(&files, &names, options.python.as_deref()));
-    import_siblings(&mut facts, &names, &files_by_name, &mut external);
+    let siblings = import_siblings(&mut facts, &names, &files_by_name, &mut external);
 
     let mut definitions = Vec::new();
     let mut definition_files = Vec::new();
@@ -155,13 +182,23 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     let modules: Vec<Arc<ModuleSymbols>> = (0..project.files.len())
         .map(|index| {
             let file_facts = &project.facts[index];
-            Arc::new(ModuleSymbols::of(
+            let mut symbols = ModuleSymbols::of(
                 project.files[index].clone(),
                 project.names[index].clone(),
                 project.file_definitions(index),
                 &file_facts.references,
                 file_facts.lazy.clone(),
-            ))
+            );
+            for star in &mut symbols.stars {
+                if siblings.qualifies(index, Some(star), 0)
+                    && let Some(qualified) = project.names[index].resolve(Some(star), 1)
+                {
+                    *star = qualified;
+                }
+            }
+            symbols.stars.sort();
+            symbols.stars.dedup();
+            Arc::new(symbols)
         })
         .collect();
     let hierarchy = ClassHierarchy::new(modules, project.files_by_name.clone(), external);
@@ -173,7 +210,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         .into_iter()
         .map(|((file, class), fields)| (join(&project.names[file].name, &class), fields))
         .collect();
-    let uses = find_uses(&project, &classes, &typed_dicts);
+    let uses = find_uses(&project, &classes, &typed_dicts, &siblings);
 
     let file_definitions: Vec<ProjectFile> = (0..project.files.len())
         .map(|index| {
@@ -204,7 +241,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
 
     let implementations = classes.implementations(&project);
-    let mut graph = Graph::new(&project, &uses, &fields, enums, implementations);
+    let mut graph = Graph::new(&project, &uses, &siblings, &fields, enums, implementations);
 
     // An ignore comment is needed for a definition that is unused without it. Such a definition is
     // then used, and so is what it uses.
@@ -232,6 +269,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     std::mem::forget(rules);
     std::mem::forget(file_definitions);
     std::mem::forget(uses);
+    std::mem::forget(siblings);
     std::mem::forget(classes);
     std::mem::forget(hierarchy);
     std::mem::forget(project);
@@ -287,8 +325,10 @@ fn find_uses(
     project: &Project,
     classes: &Classes,
     typed_dicts: &FxHashMap<String, Vec<DefinitionId>>,
-) -> FxHashMap<(usize, Owner), Uses> {
-    let mut uses: FxHashMap<(usize, Owner), Uses> = FxHashMap::default();
+    siblings: &SiblingImports,
+) -> ProjectUses {
+    let mut all_uses = ProjectUses::default();
+    let uses = &mut all_uses.ordinary;
     // The names of the TypedDicts, so that a value that cannot be one is not resolved.
     let typed_dict_names: FxHashSet<&str> = typed_dicts
         .keys()
@@ -313,10 +353,27 @@ fn find_uses(
         }
 
         for read in &references.imported_reads {
+            let is_sibling =
+                siblings.qualifies(file, read.binding.module.as_deref(), read.binding.level);
+            let uses = if is_sibling {
+                &mut all_uses.sibling
+            } else {
+                &mut *uses
+            };
             let owner_uses = uses.entry((file, read.owner)).or_default();
+            let binding;
+            let binding = if is_sibling {
+                binding = Binding {
+                    level: 1,
+                    ..read.binding.clone()
+                };
+                &binding
+            } else {
+                &read.binding
+            };
             let Some(resolved) = resolve_import(
                 &project.names[file],
-                &read.binding,
+                binding,
                 &read.attributes,
                 &project.files_by_name,
             ) else {
@@ -359,8 +416,17 @@ fn find_uses(
         }
 
         for import in &references.imports {
+            let is_sibling = siblings.qualifies(file, import.module.as_deref(), import.level);
+            let uses = if is_sibling {
+                &mut all_uses.sibling
+            } else {
+                &mut *uses
+            };
             let module = project.names[file]
-                .resolve(import.module.as_deref(), import.level)
+                .resolve(
+                    import.module.as_deref(),
+                    if is_sibling { 1 } else { import.level },
+                )
                 .unwrap_or_default();
             for &imported in project.files_by_name.get(&module).into_iter().flatten() {
                 let owner_uses = uses.entry((file, import.owner)).or_default();
@@ -430,7 +496,7 @@ fn find_uses(
                 .insert(project.first_definition[file] + index);
         }
     }
-    uses
+    all_uses
 }
 
 impl Uses {
@@ -893,7 +959,23 @@ fn import_siblings(
     names: &[ModuleName],
     files_by_name: &FxHashMap<String, Vec<usize>>,
     external: &mut ExternalModules,
-) {
+) -> SiblingImports {
+    let package_of = |file: usize| {
+        let name = &names[file];
+        if name.is_package {
+            return None;
+        }
+        Some(name.name.rsplit_once('.')?.0)
+    };
+    let mut siblings = SiblingImports {
+        roots: (0..facts.len())
+            .filter(|&file| facts[file].is_script && package_of(file).is_some())
+            .collect(),
+        ..SiblingImports::default()
+    };
+    if siblings.roots.is_empty() {
+        return siblings;
+    }
     // The names of the modules and packages of the project, with every package above a module.
     let known: FxHashSet<&str> = files_by_name
         .keys()
@@ -903,82 +985,79 @@ fn import_siblings(
                 .chain([name.as_str()])
         })
         .collect();
-    let package_of = |file: usize| {
-        let name = &names[file];
-        (!name.is_package)
-            .then(|| name.name.rsplit_once('.').map(|(package, _)| package))
-            .flatten()
-    };
-    let mut pending: Vec<usize> = (0..facts.len())
-        .filter(|&file| facts[file].is_script && package_of(file).is_some())
-        .collect();
+    let mut pending = siblings.roots.clone();
     let mut seen: FxHashSet<usize> = pending.iter().copied().collect();
     let mut is_elsewhere: FxHashMap<String, bool> = FxHashMap::default();
     while let Some(file) = pending.pop() {
         let Some(package) = package_of(file) else {
             continue;
         };
-        let mut siblings: Vec<String> = Vec::new();
-        import_relative(&mut facts[file], |module, level| {
-            let Some(top) = module.and_then(|module| module.split('.').next()) else {
-                return false;
+        let references = &facts[file].references;
+        for (module, level, owner) in references
+            .imports
+            .iter()
+            .map(|import| (import.module.as_deref(), import.level, import.owner))
+            .chain(references.imported_reads.iter().map(|read| {
+                (
+                    read.binding.module.as_deref(),
+                    read.binding.level,
+                    read.owner,
+                )
+            }))
+            .chain(
+                references
+                    .bindings
+                    .values()
+                    .map(|binding| (binding.module.as_deref(), binding.level, None)),
+            )
+        {
+            let Some(module) = module.filter(|_| level == 0) else {
+                continue;
             };
+            let top = module.split('.').next().unwrap_or_default();
             let sibling = format!("{package}.{top}");
-            let is_sibling = level == 0
-                && !known.contains(top)
-                && known.contains(sibling.as_str())
-                && !*is_elsewhere
+            if known.contains(top)
+                || !known.contains(sibling.as_str())
+                || *is_elsewhere
                     .entry(top.to_string())
-                    .or_insert_with(|| external.exists(top));
-            if is_sibling {
-                siblings.push(sibling);
+                    .or_insert_with(|| external.exists(top))
+            {
+                continue;
             }
-            is_sibling
-        });
-        for sibling in siblings {
-            for &imported in files_by_name.get(&sibling).into_iter().flatten() {
-                if package_of(imported).is_some() && seen.insert(imported) {
-                    pending.push(imported);
+            siblings
+                .qualifications
+                .entry(file)
+                .or_default()
+                .insert(module.to_owned());
+            for &loaded in files_by_name.get(&sibling).into_iter().flatten() {
+                if package_of(loaded).is_some() {
+                    siblings
+                        .loads
+                        .entry((file, owner))
+                        .or_default()
+                        .insert(loaded);
+                    if seen.insert(loaded) {
+                        pending.push(loaded);
+                    }
                 }
             }
         }
-    }
-}
 
-/// Make the imports of a file that `is_sibling` tells, by their module and their number of leading
-/// dots, relative imports from its package.
-fn import_relative(
-    file_facts: &mut FileFacts,
-    mut is_sibling: impl FnMut(Option<&str>, u32) -> bool,
-) {
-    let references = &mut file_facts.references;
-    references.imports = std::mem::take(&mut references.imports)
-        .into_iter()
-        .map(|mut import| {
-            if is_sibling(import.module.as_deref(), import.level) {
-                import.level = 1;
+        // Declarations also need qualified names for symbol lookup. Finishing that lookup
+        // does not execute the imports. The graph follows their owners separately.
+        let facts = &mut facts[file];
+        for binding in facts
+            .references
+            .bindings
+            .values_mut()
+            .chain(facts.lazy.values_mut().flatten())
+        {
+            if siblings.qualifies(file, binding.module.as_deref(), binding.level) {
+                binding.level = 1;
             }
-            import
-        })
-        .collect();
-    references.imported_reads = std::mem::take(&mut references.imported_reads)
-        .into_iter()
-        .map(|mut read| {
-            if is_sibling(read.binding.module.as_deref(), read.binding.level) {
-                read.binding.level = 1;
-            }
-            read
-        })
-        .collect();
-    for binding in references
-        .bindings
-        .values_mut()
-        .chain(file_facts.lazy.values_mut().flatten())
-    {
-        if is_sibling(binding.module.as_deref(), binding.level) {
-            binding.level = 1;
         }
     }
+    siblings
 }
 
 /// Find the attributes of the classes of a project that inherit from given base classes, such as the
@@ -1260,7 +1339,10 @@ fn findings(
 /// So a function that is unused uses nothing.
 struct Graph<'a> {
     project: &'a Project,
-    uses: &'a FxHashMap<(usize, Owner), Uses>,
+    uses: &'a ProjectUses,
+    siblings: &'a SiblingImports,
+    active_siblings: Vec<bool>,
+    waiting_siblings: FxHashMap<usize, Vec<u32>>,
     /// The members of each enum of the project, by its file and its name in the module, with their
     /// names.
     enums: FxHashMap<(usize, String), (Vec<DefinitionId>, FxHashSet<String>)>,
@@ -1273,12 +1355,16 @@ struct Graph<'a> {
     implementations: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
     /// The implementations of used abstract methods, by the class that is not used yet.
     waiting: FxHashMap<DefinitionId, Vec<DefinitionId>>,
-    /// What is used so far, and what is left to follow. An owner is left to follow once: a module at
-    /// the start, and a function when it is first used, as no two functions of a file have their name
-    /// on the same line.
+    /// What is used so far, and what is left to follow. The ordinary and sibling references of
+    /// an owner are each visited at most once.
     used: Vec<bool>,
-    pending: Vec<(usize, Owner)>,
+    pending: Vec<PendingUses>,
     seen: Seen,
+}
+
+enum PendingUses {
+    Ordinary(usize, Owner),
+    Sibling(usize, Owner),
 }
 
 /// What the uses of the owners followed so far read, so that each is looked up once.
@@ -1294,7 +1380,8 @@ struct Seen {
 impl<'a> Graph<'a> {
     fn new(
         project: &'a Project,
-        uses: &'a FxHashMap<(usize, Owner), Uses>,
+        uses: &'a ProjectUses,
+        siblings: &'a SiblingImports,
         fields: &FxHashSet<DefinitionId>,
         enums: FxHashMap<(usize, String), Vec<DefinitionId>>,
         implementations: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
@@ -1350,9 +1437,12 @@ impl<'a> Graph<'a> {
             })
             .collect();
 
-        Self {
+        let mut graph = Self {
             project,
             uses,
+            siblings,
+            active_siblings: vec![false; project.files.len()],
+            waiting_siblings: FxHashMap::default(),
             enums,
             by_name,
             by_attribute,
@@ -1361,9 +1451,31 @@ impl<'a> Graph<'a> {
             implementations,
             waiting: FxHashMap::default(),
             used: vec![false; project.definitions.len()],
-            // The code of every module runs.
-            pending: (0..project.files.len()).map(|file| (file, None)).collect(),
+            // Every module's ordinary references are entry points for the check.
+            pending: (0..project.files.len())
+                .map(|file| PendingUses::Ordinary(file, None))
+                .collect(),
             seen: Seen::default(),
+        };
+        for &file in &siblings.roots {
+            graph.activate_siblings(file);
+        }
+        graph
+    }
+
+    fn activate_siblings(&mut self, file: usize) {
+        if !self.siblings.qualifications.contains_key(&file)
+            || std::mem::replace(&mut self.active_siblings[file], true)
+        {
+            return;
+        }
+        self.pending.push(PendingUses::Sibling(file, None));
+        if let Some(waiting) = self.waiting_siblings.remove(&file) {
+            self.pending.extend(
+                waiting
+                    .into_iter()
+                    .map(|line| PendingUses::Sibling(file, Some(line))),
+            );
         }
     }
 
@@ -1375,8 +1487,23 @@ impl<'a> Graph<'a> {
     /// the one before stopped.
     fn use_definitions(&mut self, roots: impl IntoIterator<Item = DefinitionId>) -> Vec<bool> {
         self.add(roots);
-        while let Some(owner) = self.pending.pop() {
-            let Some(uses) = self.uses.get(&owner) else {
+        while let Some(pending) = self.pending.pop() {
+            let uses = match pending {
+                PendingUses::Ordinary(file, owner) => self.uses.ordinary.get(&(file, owner)),
+                PendingUses::Sibling(file, owner) => {
+                    for &loaded in self
+                        .siblings
+                        .loads
+                        .get(&(file, owner))
+                        .into_iter()
+                        .flatten()
+                    {
+                        self.activate_siblings(loaded);
+                    }
+                    self.uses.sibling.get(&(file, owner))
+                }
+            };
+            let Some(uses) = uses else {
                 continue;
             };
             let mut seen = std::mem::take(&mut self.seen);
@@ -1404,10 +1531,15 @@ impl<'a> Graph<'a> {
         }
         let implementations = self.implementations.get(&id).into_iter().flatten();
         reached.extend(implementations.map(|&(_, method)| method));
-        let Some(uses) = self.uses.get(&(*file, Some(definition.line))) else {
-            return reached;
-        };
-        self.look_up(uses, None, &mut reached);
+        let owner = (*file, Some(definition.line));
+        if let Some(uses) = self.uses.ordinary.get(&owner) {
+            self.look_up(uses, None, &mut reached);
+        }
+        if self.active_siblings[*file]
+            && let Some(uses) = self.uses.sibling.get(&owner)
+        {
+            self.look_up(uses, None, &mut reached);
+        }
         reached
     }
 
@@ -1500,7 +1632,13 @@ impl<'a> Graph<'a> {
                 &self.project.definitions[id],
             );
             if definition.kind.is_function() {
-                self.pending.push((*file, Some(definition.line)));
+                let line = definition.line;
+                self.pending.push(PendingUses::Ordinary(*file, Some(line)));
+                if self.active_siblings[*file] {
+                    self.pending.push(PendingUses::Sibling(*file, Some(line)));
+                } else if self.siblings.qualifications.contains_key(file) {
+                    self.waiting_siblings.entry(*file).or_default().push(line);
+                }
             }
             for &(class, method) in self.implementations.get(&id).into_iter().flatten() {
                 if self.used[class] {
