@@ -733,11 +733,9 @@ impl<'a> Walker<'_, '_> {
         let Some(first) = generators.first() else {
             return;
         };
-        // A comprehension over a mapping reads its keys.
-        for generator in generators {
-            let values = self.value_calls(&generator.iter);
-            self.add_whole_read(values, None);
-        }
+        // The first iterable is read outside the comprehension.
+        let values = self.value_calls(&first.iter);
+        self.add_whole_read(values, None);
         self.visit_expr(&first.iter);
         let (scope, binder) = (self.scope, self.binder);
         let mut inner = Scope::new(ScopeKind::Function);
@@ -750,6 +748,10 @@ impl<'a> Walker<'_, '_> {
         self.binder = self.scope;
         for (index, generator) in generators.iter().enumerate() {
             if index > 0 {
+                // A comprehension over a mapping reads its keys in the current scope,
+                // after the earlier iteration targets have been bound.
+                let values = self.value_calls(&generator.iter);
+                self.add_whole_read(values, None);
                 self.visit_expr(&generator.iter);
             }
             self.visit_expr(&generator.target);
