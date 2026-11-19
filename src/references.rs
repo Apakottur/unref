@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ruff_python_ast::name::Name;
 use ruff_python_ast::visitor::{
-    Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt, walk_type_param,
+    Visitor, walk_body, walk_except_handler, walk_expr, walk_pattern, walk_stmt, walk_type_param,
     walk_with_item,
 };
 use ruff_python_ast::{
@@ -17,7 +17,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use ruff_python_stdlib::builtins::is_python_builtin;
 
-use crate::definitions::{Definition, Kind, Unwrap, annotation_name, decorator_names, dotted_name};
+use crate::definitions::{
+    Base, Definition, Kind, Unwrap, annotation_name, decorator_names, dotted_name,
+};
 use crate::positions::SourcePositions;
 
 /// A name that a module imports: the module it is imported from, as it is written, the number of
@@ -40,14 +42,55 @@ enum MainGuard {
     Imported,
 }
 
+/// A point in the module's import order and the mode that can reach it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ImportPoint {
+    guard: Option<MainGuard>,
+    order: usize,
+}
+
+struct OrderedImport {
+    order: usize,
+    conditional_body: Option<usize>,
+    binding: Binding,
+}
+
+#[derive(Default)]
+struct ImportHistory {
+    common: Vec<OrderedImport>,
+    script: Vec<OrderedImport>,
+    imported: Vec<OrderedImport>,
+}
+
+impl ImportHistory {
+    fn add(&mut self, guard: Option<MainGuard>, import: OrderedImport) {
+        match guard {
+            Some(MainGuard::Script) => &mut self.script,
+            Some(MainGuard::Imported) => &mut self.imported,
+            None => &mut self.common,
+        }
+        .push(import);
+    }
+
+    fn has_guarded_binding(&self) -> bool {
+        !self.script.is_empty() || !self.imported.is_empty()
+    }
+
+    fn imports_in(&self, mode: MainGuard) -> &[OrderedImport] {
+        match mode {
+            MainGuard::Script => &self.script,
+            MainGuard::Imported => &self.imported,
+        }
+    }
+}
+
 /// A read of a name, or of a chain of attributes that starts with one (`package.module.name`).
 ///
 /// The names are kept as the syntax tree holds them, which copies a long name without allocating.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Read {
     pub owner: Owner,
-    main_guard: Option<MainGuard>,
-    guard_imports_seen: usize,
+    import_point: ImportPoint,
     pub root: Name,
     /// The attributes, in order.
     pub attributes: Vec<Name>,
@@ -196,25 +239,32 @@ pub(crate) fn walk_module(
         binder: 0,
         owner: None,
         main_guard: None,
-        guard_imports_seen: 0,
-        script_imports: FxHashMap::default(),
-        imported_imports: FxHashMap::default(),
-        module_bindings: None,
+        import_order: 0,
+        module_imports: module
+            .body
+            .iter()
+            .any(|stmt| matches!(stmt, Stmt::If(branch) if is_main_guard(&branch.test)))
+            .then(FxHashMap::default),
+        conditional_body: None,
+        conditional_ends: Vec::new(),
         in_signature: false,
     };
     for stmt in &module.body {
         if let Stmt::If(branch) = stmt
             && is_main_guard(&branch.test)
         {
-            if walker.module_bindings.is_none() {
-                walker.module_bindings = Some(walker.scopes[0].imports.clone());
-            }
             walker.visit_expr(&branch.test);
             walker.main_guard = Some(MainGuard::Script);
-            walker.visit_body(&branch.body);
+            walk_body(&mut walker, &branch.body);
             walker.main_guard = Some(MainGuard::Imported);
-            for clause in &branch.elif_else_clauses {
-                walker.visit_elif_else_clause(clause);
+            if let [clause] = &*branch.elif_else_clauses
+                && clause.test.is_none()
+            {
+                walk_body(&mut walker, &clause.body);
+            } else {
+                for clause in &branch.elif_else_clauses {
+                    walker.visit_elif_else_clause(clause);
+                }
             }
             walker.main_guard = None;
         } else {
@@ -223,9 +273,7 @@ pub(crate) fn walk_module(
     }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
-    walker.references.bindings = walker
-        .module_bindings
-        .unwrap_or_else(|| std::mem::take(&mut walker.scopes[0].imports));
+    walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
     (walker.definitions, walker.references)
 }
 
@@ -357,16 +405,32 @@ struct Walker<'p, 'a> {
     owner: Owner,
     /// The branch of the module's main guard that contains the node, if any.
     main_guard: Option<MainGuard>,
-    guard_imports_seen: usize,
-    script_imports: FxHashMap<String, (usize, Binding)>,
-    imported_imports: FxHashMap<String, (usize, Binding)>,
-    /// The first module bindings for symbol lookup, including declarations inside a guard.
-    module_bindings: Option<FxHashMap<String, Binding>>,
+    import_order: usize,
+    /// The imports in source order, only collected in a module with a main guard.
+    module_imports: Option<FxHashMap<String, ImportHistory>>,
+    /// The conditional suite around a module import, and the order at the end of each suite.
+    conditional_body: Option<usize>,
+    conditional_ends: Vec<usize>,
     /// Whether the node is in the annotation of a parameter or the return of a function.
     in_signature: bool,
 }
 
 impl<'a> Visitor<'a> for Walker<'_, '_> {
+    fn visit_body(&mut self, body: &'a [Stmt]) {
+        if self.binder != 0 || self.module_imports.is_none() {
+            walk_body(self, body);
+            return;
+        }
+
+        let index = self.conditional_ends.len();
+        self.conditional_ends.push(usize::MAX);
+        let previous = self.conditional_body.replace(index);
+        walk_body(self, body);
+        self.import_order += 1;
+        self.conditional_ends[index] = self.import_order;
+        self.conditional_body = previous;
+    }
+
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::FunctionDef(function) => self.visit_function_def(function),
@@ -582,6 +646,13 @@ impl<'a> Walker<'_, '_> {
         self.scopes.len() - 1
     }
 
+    fn import_point(&self) -> ImportPoint {
+        ImportPoint {
+            guard: self.main_guard,
+            order: self.import_order,
+        }
+    }
+
     /// Add a read of a name, or of a chain of attributes that starts with one.
     ///
     /// In a class body, a name that the body has bound so far is read from the class: it is a
@@ -607,8 +678,7 @@ impl<'a> Walker<'_, '_> {
         }
         let read = Read {
             owner: self.owner,
-            main_guard: self.main_guard,
-            guard_imports_seen: self.guard_imports_seen,
+            import_point: self.import_point(),
             root: root.clone(),
             attributes,
             reads_object: !self.in_signature,
@@ -666,10 +736,10 @@ impl<'a> Walker<'_, '_> {
         let Expr::StringLiteral(literal) = key else {
             return;
         };
+        let import_point = self.import_point();
         self.scopes[0].reads.push(Read {
             owner: self.owner,
-            main_guard: self.main_guard,
-            guard_imports_seen: self.guard_imports_seen,
+            import_point,
             root: Name::new(literal.value.to_str()),
             attributes: Vec::new(),
             reads_object: true,
@@ -965,9 +1035,10 @@ impl<'a> Walker<'_, '_> {
             .arguments
             .as_deref()
             .map_or_default(|arguments| &*arguments.args);
-        let bases: Vec<String> = written_bases
+        let bases: Vec<Base> = written_bases
             .iter()
             .filter_map(|base| dotted_name(base, Unwrap::Subscript))
+            .map(|name| self.class_base(name))
             .collect();
         let other_bases = bases.len() < written_bases.len();
         let definition = Definition {
@@ -1009,6 +1080,17 @@ impl<'a> Walker<'_, '_> {
         self.close(inner, &imported, Target::Scope(target));
         // The name is bound once the class is defined.
         self.bind_definition(class.name.as_str(), index);
+    }
+
+    /// Save the guarded bindings visible when a module-level class evaluates its base.
+    fn class_base(&self, name: String) -> Base {
+        let root = name.split('.').next().unwrap_or(&name);
+        let bindings = self.guarded_imports(self.binder, root).map(|history| {
+            let mut bindings = FxHashSet::default();
+            self.import_bindings(history, self.import_point(), false, &mut bindings);
+            bindings.into_iter().collect()
+        });
+        Base { name, bindings }
     }
 
     /// Bind the names that an `import` statement imports.
@@ -1107,8 +1189,7 @@ impl<'a> Walker<'_, '_> {
             for name in string_literals(value) {
                 self.references.reads.insert(Read {
                     owner: self.owner,
-                    main_guard: self.main_guard,
-                    guard_imports_seen: self.guard_imports_seen,
+                    import_point: self.import_point(),
                     root: name.into(),
                     attributes: Vec::new(),
                     reads_object: true,
@@ -1380,13 +1461,15 @@ impl<'a> Walker<'_, '_> {
         let name = name.id.as_str();
         // The builtins of any version of Python.
         is_python_builtin(name, u8::MAX, false)
-            || [self.scope, 0]
-                .iter()
-                .any(|&scope| self.scopes[scope].imports.contains_key(name))
-            || self.main_guard != Some(MainGuard::Imported)
-                && self.script_imports.contains_key(name)
-            || self.main_guard != Some(MainGuard::Script)
-                && self.imported_imports.contains_key(name)
+            || self.scope != 0 && self.scopes[self.scope].imports.contains_key(name)
+            || self.guarded_imports(0, name).map_or_else(
+                || self.scopes[0].imports.contains_key(name),
+                |history| {
+                    self.main_guard.is_none_or(|mode| {
+                        !history.common.is_empty() || !history.imports_in(mode).is_empty()
+                    })
+                },
+            )
     }
 
     /// Add a read of a value as a whole, given by the dotted names of what it is the result of calling.
@@ -1460,63 +1543,85 @@ impl<'a> Walker<'_, '_> {
 
     /// Bind the names that a statement imports.
     ///
-    /// When a name is imported more than once, as by an `import` in a `try` and a fallback in its
-    /// `except`, the first import is the one that counts. Within one statement, the last one does.
+    /// Keep the first import for ordinary name lookup. Within one statement, the last one counts.
+    /// Module reads and class bases can also use import order for names affected by a main guard.
     fn bind_imports(&mut self, statement: FxHashMap<String, Binding>) {
         for (name, binding) in statement {
             self.bind(&name);
             if self.binder == 0
-                && let Some(module_bindings) = &mut self.module_bindings
+                && let Some(imports) = &mut self.module_imports
             {
-                module_bindings
-                    .entry(name.clone())
-                    .or_insert_with(|| binding.clone());
+                self.import_order += 1;
+                let history = imports.entry(name.clone()).or_default();
+                history.add(
+                    self.main_guard,
+                    OrderedImport {
+                        order: self.import_order,
+                        conditional_body: self.conditional_body,
+                        binding: binding.clone(),
+                    },
+                );
             }
-            let guarded = match (self.binder, self.main_guard) {
-                (0, Some(MainGuard::Script)) => &mut self.script_imports,
-                (0, Some(MainGuard::Imported)) => &mut self.imported_imports,
-                (binder, _) => {
-                    self.scopes[binder].imports.entry(name).or_insert(binding);
-                    continue;
-                }
-            };
-            self.guard_imports_seen += 1;
-            guarded
+            self.scopes[self.binder]
+                .imports
                 .entry(name)
-                .or_insert((self.guard_imports_seen, binding));
+                .or_insert(binding);
         }
     }
 
-    /// For a module read, choose the import bindings from the modes that can reach it.
-    fn read_bindings(&self, inner: usize, read: &Read) -> [Option<&Binding>; 3] {
-        let name = read.root.as_str();
-        let common = self.scopes[inner].imports.get(name);
-        if inner != 0 || (self.script_imports.is_empty() && self.imported_imports.is_empty()) {
-            return [common, None, None];
+    fn guarded_imports(&self, scope: usize, name: &str) -> Option<&ImportHistory> {
+        if scope != 0 {
+            return None;
         }
-        let deferred = read.owner.is_some();
-        let script = self.script_imports.get(name);
-        let imported = self.imported_imports.get(name);
-        let earlier = deferred
-            && script
-                .into_iter()
-                .chain(imported)
-                .any(|(order, _)| *order > read.guard_imports_seen);
-        let [script, imported] = [script, imported].map(|guarded| {
-            guarded
-                .filter(|(order, _)| deferred || *order <= read.guard_imports_seen)
-                .map(|(_, binding)| binding)
-                .or(common)
-        });
-        let [first, second] = match read.main_guard {
-            Some(MainGuard::Script) => [script, None],
-            Some(MainGuard::Imported) => [imported, None],
-            None if script == imported => [script, None],
-            None => [script, imported],
+        self.module_imports
+            .as_ref()?
+            .get(name)
+            .filter(|history| history.has_guarded_binding())
+    }
+
+    /// In each mode, a definite import replaces all earlier imports of the alias. A conditional
+    /// import replaces them within its body, and is only an alternative outside it.
+    fn import_bindings(
+        &self,
+        history: &ImportHistory,
+        point: ImportPoint,
+        deferred: bool,
+        bindings: &mut FxHashSet<Binding>,
+    ) {
+        // A function can be called after imports that follow its definition.
+        let applicable = |imports: &'_ [OrderedImport]| {
+            if deferred {
+                imports.len()
+            } else {
+                imports.partition_point(|import| import.order <= point.order)
+            }
         };
-        // A function defined before the guard can run before or after its import executes.
-        let earlier = common.filter(|_| earlier && common != first && common != second);
-        [first, second, earlier]
+        let common = &history.common[..applicable(&history.common)];
+        for mode in [MainGuard::Script, MainGuard::Imported] {
+            if point.guard.is_some_and(|guard| guard != mode) {
+                continue;
+            }
+            let guarded = history.imports_in(mode);
+            let mut guarded = guarded[..applicable(guarded)].iter().rev().peekable();
+            let mut common = common.iter().rev().peekable();
+            let ordered = std::iter::from_fn(|| match (guarded.peek(), common.peek()) {
+                (Some(guard), Some(shared)) if guard.order > shared.order => guarded.next(),
+                (_, Some(_)) => common.next(),
+                (_, None) => guarded.next(),
+            });
+            for import in ordered {
+                if !bindings.contains(&import.binding) {
+                    bindings.insert(import.binding.clone());
+                }
+                if import.order <= point.order
+                    && import
+                        .conditional_body
+                        .is_none_or(|body| point.order < self.conditional_ends[body])
+                {
+                    break;
+                }
+            }
+        }
     }
 
     /// End a scope: drop the reads of its local variables, resolve the reads of the names that it
@@ -1553,20 +1658,28 @@ impl<'a> Walker<'_, '_> {
             .filter(|instance| !scope.bound.contains(instance))
             .zip(scope.class_name.clone());
         let mut passed = Vec::new();
+        let mut guarded_bindings = FxHashSet::default();
         for read in reads {
-            let mut bindings = self
-                .read_bindings(inner, &read)
-                .map(Option::<&Binding>::cloned)
-                .into_iter()
-                .flatten();
-            if let Some(binding) = bindings.next_back() {
+            let name = read.root.as_str();
+            let binding = if let Some(history) = self.guarded_imports(inner, name) {
+                self.import_bindings(
+                    history,
+                    read.import_point,
+                    read.owner.is_some(),
+                    &mut guarded_bindings,
+                );
+                None
+            } else {
+                scope.imports.get(name).cloned()
+            };
+            let mut bindings = binding.into_iter().chain(guarded_bindings.drain());
+            if let Some(binding) = bindings.next() {
                 // A plain read of a name that is not local, at the module or declared `global`, is also
                 // a read of the name of the enclosing scope, without reading the object.
                 if read.attributes.is_empty() && !local_names.contains(read.root.as_str()) {
                     passed.push(Read {
                         owner: read.owner,
-                        main_guard: read.main_guard,
-                        guard_imports_seen: read.guard_imports_seen,
+                        import_point: read.import_point,
                         root: read.root.clone(),
                         attributes: Vec::new(),
                         reads_object: false,

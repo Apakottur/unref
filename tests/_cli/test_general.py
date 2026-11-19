@@ -122,14 +122,61 @@ def test_read_before_main_guard_uses_earlier_import(tmp_path: Path) -> None:
     assert result.stdout == "another.py:1:5: unused-function 'value'\nlater.py:1:5: unused-function 'value'\n"
 
 
-def test_base_of_class_in_main_guard(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "read", ["source.value()\n", "def show(): source.value()\nshow()\n"], ids=["module", "function"]
+)
+def test_import_after_main_guard_replaces_both_aliases(tmp_path: Path, read: str) -> None:
+    (tmp_path / "entry.py").write_text(
+        "import shared as source\n"
+        'if __name__ == "__main__":\n'
+        "    import direct as source\n"
+        "else:\n"
+        "    import imported as source\n"
+        "import shared as source\n" + read
+    )
+    for name in ("direct", "imported", "shared"):
+        (tmp_path / f"{name}.py").write_text("def value(): return 7\n")
+    (tmp_path / "inspect_entry.py").write_text("import entry\n")
+
+    result = run([], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == "direct.py:1:5: unused-function 'value'\nimported.py:1:5: unused-function 'value'\n"
+
+
+def test_conditional_import_in_main_guard_keeps_fallback(tmp_path: Path) -> None:
+    (tmp_path / "entry.py").write_text(
+        "import sys\n"
+        "import shared as source\n"
+        'if __name__ == "__main__":\n'
+        "    if len(sys.argv) > 1:\n"
+        "        import direct as source\n"
+        "        source.branch()\n"
+        "else:\n"
+        "    import imported as source\n"
+        "source.value()\n"
+    )
+    for name in ("direct", "imported", "shared"):
+        (tmp_path / f"{name}.py").write_text("def value(): return 7\ndef branch(): pass\n")
+    (tmp_path / "inspect_entry.py").write_text("import entry\n")
+
+    result = run([], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == "imported.py:2:5: unused-function 'branch'\nshared.py:2:5: unused-function 'branch'\n"
+
+
+@pytest.mark.parametrize("branch", ["script", "imported", "shared"])
+def test_base_of_class_in_main_guard(tmp_path: Path, branch: str) -> None:
+    subclass = "class Derived(Base): pass\nDerived().execute()\n"
+    inside_branch = "    class Derived(Base): pass\n    Derived().execute()\n"
     (tmp_path / "entry.py").write_text(
         'if __name__ == "__main__":\n'
         "    from script_classes import Base\n"
-        "    class Derived(Base): pass\n"
-        "    print(Derived().execute())\n"
-        "else:\n"
-        "    from imported_classes import Base\n"
+        + (inside_branch if branch == "script" else "")
+        + "else:\n    from imported_classes import Base\n"
+        + (inside_branch if branch == "imported" else "")
+        + (subclass if branch == "shared" else "")
     )
     for name in ("script_classes", "imported_classes"):
         (tmp_path / f"{name}.py").write_text("class Base:\n    def execute(self): return 7\n")
@@ -137,8 +184,13 @@ def test_base_of_class_in_main_guard(tmp_path: Path) -> None:
 
     result = run([], cwd=tmp_path)
 
-    assert result.exit_code == 1
-    assert result.stdout == "imported_classes.py:2:9: unused-method 'execute'\n"
+    expected = {
+        "script": "imported_classes.py:2:9: unused-method 'execute'\n",
+        "imported": "script_classes.py:2:9: unused-method 'execute'\n",
+        "shared": "",
+    }
+    assert result.exit_code == (0 if branch == "shared" else 1)
+    assert result.stdout == expected[branch]
 
 
 def test_gitignored_given_directory() -> None:

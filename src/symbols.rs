@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::definitions::{Definition, Kind};
+use crate::definitions::{Base, Definition, Kind};
 use crate::modules::ModuleName;
 use crate::references::{Binding, References};
 
@@ -24,10 +24,10 @@ pub(crate) struct ModuleSymbols {
     /// The names that the module gives out from its `__getattr__`, each with the imports of it.
     pub lazy: FxHashMap<String, Vec<Binding>>,
     /// The classes and functions of the module, by their name in the module (`Outer.Inner` for a
-    /// nested class, `function.<locals>.Local` for a class in a function), with their base classes as
-    /// they are written. A function has none. Classes of one name in one scope, such as the two of an
+    /// nested class, `function.<locals>.Local` for a class in a function), with their base classes.
+    /// A function has none. Classes of one name in one scope, such as the two of an
     /// `if` and its `else`, are one class with the base classes, decorators and members of each.
-    pub bases: FxHashMap<String, Vec<String>>,
+    pub bases: FxHashMap<String, Vec<Base>>,
     /// The classes and functions that are defined in the functions of the module, by their own name,
     /// each with its names in the module.
     pub locals: FxHashMap<String, Vec<String>>,

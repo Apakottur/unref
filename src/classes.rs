@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::definitions::LOCALS;
+use crate::definitions::{Base, LOCALS};
 use crate::external::ExternalModules;
 use crate::references::Binding;
 use crate::symbols::ModuleSymbols;
@@ -90,7 +90,7 @@ impl ClassHierarchy {
             let mut found = FxHashSet::default();
             let symbols = self.module(module);
             for base in symbols.bases.get(name).into_iter().flatten() {
-                found.extend(self.resolve_in(module, name, base).iter().cloned());
+                found.extend(self.resolve_base(module, name, base).iter().cloned());
             }
             found
         })
@@ -155,15 +155,39 @@ impl ClassHierarchy {
     pub(crate) fn resolve(&self, module: usize, written: &str) -> Names {
         cached(&self.resolved, module, written, || {
             let mut found = FxHashSet::default();
-            self.resolve_written(module, "", written, &mut FxHashSet::default(), &mut found);
+            self.resolve_written(
+                module,
+                "",
+                written,
+                None,
+                &mut FxHashSet::default(),
+                &mut found,
+            );
             found
         })
+    }
+
+    /// Resolve a base using the imports visible when the class was defined, if recorded.
+    pub(crate) fn resolve_base(&self, module: usize, scope: &str, base: &Base) -> Names {
+        let Some(bindings) = &base.bindings else {
+            return self.resolve_in(module, scope, &base.name);
+        };
+        let mut found = FxHashSet::default();
+        self.resolve_written(
+            module,
+            scope,
+            &base.name,
+            Some(bindings),
+            &mut FxHashSet::default(),
+            &mut found,
+        );
+        Rc::new(found)
     }
 
     /// Get the dotted names of a name as it is written where a class or function of a module is
     /// defined, such as a base class of the class. `scope` is the name of that class or function in
     /// the module: one that is defined in a function sees the classes and functions of that function.
-    pub(crate) fn resolve_in(&self, module: usize, scope: &str, written: &str) -> Names {
+    fn resolve_in(&self, module: usize, scope: &str, written: &str) -> Names {
         if !scope.contains(LOCALS) {
             return self.resolve(module, written);
         }
@@ -172,6 +196,7 @@ impl ClassHierarchy {
             module,
             scope,
             written,
+            None,
             &mut FxHashSet::default(),
             &mut found,
         );
@@ -204,11 +229,18 @@ impl ClassHierarchy {
         module: usize,
         scope: &str,
         written: &str,
+        bindings: Option<&[Binding]>,
         seen: &mut FxHashSet<String>,
         found: &mut FxHashSet<String>,
     ) {
         let symbols = self.module(module);
         let (first, rest) = written.split_once('.').unwrap_or((written, ""));
+        let bindings = bindings.unwrap_or_else(|| {
+            symbols
+                .bindings
+                .get(first)
+                .map_or(&[], std::slice::from_ref)
+        });
 
         let mut functions = scope;
         while let Some((function, _)) = functions.rsplit_once(LOCALS) {
@@ -224,10 +256,12 @@ impl ClassHierarchy {
         if symbols.bases.contains_key(first) {
             // A class or function of the module itself.
             self.follow(&format!("{}.{written}", symbols.name.name), seen, found);
-        } else if let Some(binding) = symbols.bindings.get(first) {
-            // A name that the module imports.
-            if let Some(imported) = imported(&symbols, binding) {
-                self.follow(&join(&imported, rest), seen, found);
+        } else if !bindings.is_empty() {
+            // Each import that can supply this name.
+            for binding in bindings {
+                if let Some(imported) = imported(&symbols, binding) {
+                    self.follow(&join(&imported, rest), seen, found);
+                }
             }
         } else if !scope.contains(LOCALS)
             && let Some(locals) = symbols.locals.get(first)
@@ -260,7 +294,14 @@ impl ClassHierarchy {
             let (first, rest) = symbol.split_once('.').unwrap_or((&symbol, ""));
             if let Some(bases) = symbols.bases.get(&symbol) {
                 for base in bases {
-                    self.resolve_written(file, &symbol, base, seen, found);
+                    self.resolve_written(
+                        file,
+                        &symbol,
+                        &base.name,
+                        base.bindings.as_deref(),
+                        seen,
+                        found,
+                    );
                 }
             } else if let Some(binding) = symbols.bindings.get(first) {
                 if let Some(imported) = imported(&symbols, binding) {

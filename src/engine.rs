@@ -531,9 +531,10 @@ impl<'a> Classes<'a> {
             let id = ids[&(*file, name.clone())];
             unknown_bases[id] |= definition.other_bases;
             for base in &definition.bases {
-                let names = hierarchy.resolve_in(*file, &name, base);
+                let names = hierarchy.resolve_base(*file, &name, base);
                 protocols[id] |= PROTOCOLS.iter().any(|protocol| names.contains(*protocol));
-                unknown_bases[id] |= is_unknown_class(project, &by_dotted, *file, base, &names);
+                unknown_bases[id] |=
+                    is_unknown_class(project, &by_dotted, *file, &base.name, &names);
             }
         }
         for (file, name) in &keys {
@@ -974,6 +975,14 @@ fn import_relative(
         .bindings
         .values_mut()
         .chain(file_facts.lazy.values_mut().flatten())
+        .chain(
+            file_facts
+                .definitions
+                .iter_mut()
+                .flat_map(|definition| &mut definition.bases)
+                .filter_map(|base| base.bindings.as_mut())
+                .flatten(),
+        )
     {
         if is_sibling(binding.module.as_deref(), binding.level) {
             binding.level = 1;

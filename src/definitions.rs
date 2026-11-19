@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ruff_python_ast::{Decorator, Expr};
 
 use crate::models::Rule;
-use crate::references::Owner;
+use crate::references::{Binding, Owner};
 
 /// What is defined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -62,9 +62,8 @@ pub(crate) struct Definition {
     /// The function that the definition is in, by the line of its name, or None if it is not in a
     /// function. A class in a function is in it, and so are the methods of the class.
     pub owner: Owner,
-    /// For a class, the dotted names of its base classes as they are written, without their type
-    /// arguments. A base class that is not a dotted name is left out.
-    pub bases: Vec<String>,
+    /// The base classes with dotted names, without their type arguments.
+    pub bases: Vec<Base>,
     /// For a class, whether one of its base classes is not a dotted name, such as a call that makes
     /// one, so that what it inherits from is not known.
     pub other_bases: bool,
@@ -87,6 +86,13 @@ pub(crate) struct Definition {
     /// arguments wraps by hand, the dotted name of the decorator as it is written, such as
     /// `field_validator` for `field_validator("name")(check)`.
     pub wrapped_by: Option<String>,
+}
+
+/// A base class, as written and with its import bindings if they depend on a main guard.
+#[derive(Debug, Clone)]
+pub(crate) struct Base {
+    pub name: String,
+    pub bindings: Option<Vec<Binding>>,
 }
 
 /// What is between the name of a function and the name of what is defined in it, as in the
