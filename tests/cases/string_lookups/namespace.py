@@ -37,8 +37,7 @@ globals()["WRITTEN"] = 11
 
 # A name built when the code runs is not known.
 COMPUTED = 12  # expect: 1 [unused-variable]
-SUFFIX = "PUTED"
-print(globals()["COM" + SUFFIX])
+print(globals()["computed".upper()])
 
 # Inside a function, `vars()` and `locals()` hold its local variables, not the variables of the module.
 BY_LOCAL_VARS = 13  # expect: 1 [unused-variable]
