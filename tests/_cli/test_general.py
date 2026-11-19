@@ -132,6 +132,38 @@ def test_qualified_import_does_not_assume_a_script_directory(tmp_path: Path, cas
     assert result.stderr == ""
 
 
+@pytest.mark.parametrize(
+    ("binding", "call"),
+    [
+        ("from .worker import execute", "execute()"),
+        ("from . import worker", "worker.execute()"),
+        ("from pkg.lib import worker", "worker.execute()"),
+    ],
+)
+def test_competing_import_forms_do_not_assign_script_directory(tmp_path: Path, binding: str, call: str) -> None:
+    (tmp_path / "pkg/lib").mkdir(parents=True)
+    (tmp_path / "pkg/__init__.py").touch()
+    (tmp_path / "pkg/lib/__init__.py").touch()
+    files = {
+        "pkg/run.py": 'import pkg.lib.worker\nif __name__ == "__main__": print(7)\n',
+        "pkg/lib/run.py": 'from pkg.lib.wrapper import launch\nif __name__ == "__main__": print(launch())\n',
+        "pkg/lib/wrapper.py": f"{binding}\ndef launch(): return {call}\n",
+        "pkg/lib/worker.py": "def execute():\n    from tasks import value\n    return value()\n",
+        "pkg/lib/tasks.py": "def value(): return 9\n",
+        "pkg/tasks.py": "def value(): return -1\n",
+    }
+    for name, contents in files.items():
+        (tmp_path / name).write_text(contents)
+
+    result = run(["."], cwd=tmp_path, env={"PYTHONPATH": str(tmp_path)})
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        f"{Path('pkg/lib/tasks.py')}:1:5: unused-function 'value'\n"
+        f"{Path('pkg/tasks.py')}:1:5: unused-function 'value'\n"
+    )
+
+
 def test_gitignored_given_directory() -> None:
     # A directory that git ignores is still checked when it is given directly, as with ruff and ty.
     result = run(["main.py", "generated"], cwd=CASES_DIR / "gitignore")

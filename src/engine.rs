@@ -981,6 +981,20 @@ fn import_siblings(
                 );
             }
         }
+        // Relative imports and from-list submodules can compete with an explicit import
+        // even when they do not supply a directory for the new rewrite.
+        for import in &references.imports {
+            let Some(module) = names[file].resolve(import.module.as_deref(), import.level) else {
+                continue;
+            };
+            if import.level != 0 {
+                possible.extend(files_by_name.get(&module).into_iter().flatten().copied());
+            }
+            if import.name != "*" {
+                let child = join(&module, &import.name);
+                possible.extend(files_by_name.get(&child).into_iter().flatten().copied());
+            }
+        }
         project_imports.push(project);
         possible_imports.push(possible);
         sibling_imports.push(siblings);
