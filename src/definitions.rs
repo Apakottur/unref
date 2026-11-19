@@ -79,6 +79,10 @@ pub(crate) struct Definition {
     /// For a variable or an attribute that is first assigned a string literal, its value, such as
     /// `project.urls` for `ROOT_URLCONF = "project.urls"`.
     pub string: Option<String>,
+    /// For a variable or an attribute that is first assigned a function that a decorator with
+    /// arguments wraps by hand, the dotted name of the decorator as it is written, such as
+    /// `field_validator` for `field_validator("name")(check)`.
+    pub wrapped_by: Option<String>,
 }
 
 impl Definition {

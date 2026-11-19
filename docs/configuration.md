@@ -128,7 +128,8 @@ Enabled by default: yes.
 Enabled by default: yes.
 
 - In subclasses of `pydantic.BaseModel`: fields and `model_config`.
-- Anywhere: methods with Pydantic's validator and serializer decorators, and `computed_field`.
+- Anywhere: methods with Pydantic's validator and serializer decorators and `computed_field`, also
+  when applied by hand, as in `_check = field_validator("name")(check)`.
 
 #### `dataclasses`
 
