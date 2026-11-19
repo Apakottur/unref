@@ -22,3 +22,23 @@ such as in its tests. List the public API in `__all__`, or in [`used-names`](con
 ```python
 __all__ = ["parse", "Parser"]
 ```
+
+## Why is a variable that I increment reported as unused?
+
+Writing to a name is not a use of it, and an augmented assignment such as `retries += 1` writes the
+name. It reads the old value only to compute the new one, so a value that is set and updated but never
+read is still unused:
+
+```python
+retries = 0  # unused-variable
+retries += 1
+```
+
+The same goes for attributes (`self.count += 1`) and keys (`counts["total"] += 1`). If the update
+matters by itself, such as `+=` extending a list that other code also holds, ignore the finding on the
+line that first assigns the value:
+
+```python
+items = []  # unref: ignore[unused-variable]
+items += [1]
+```
