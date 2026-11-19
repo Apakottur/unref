@@ -1,15 +1,10 @@
 #!/usr/bin/env python
-# The dependencies are declared here, so that `uv run` installs them without building unref.
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["httpx==0.28.1", "typer==0.29.2"]
-# ///
 """
 Set the version of unref in the files that name it.
 
-Run with `uv run scripts/set_version.py [VERSION] [--package]`, with a version such as `1.2.3`, or without one for the
-latest release on PyPI. The pre-commit examples of the docs and the benchmark name a release. With `--package`, the
-version of the package in `Cargo.toml` is set as well, as the release workflow does from its tag.
+Run with `uv run --only-group dev scripts/set_version.py [VERSION] [--package]`, with a version such as `1.2.3`, or
+without one for the latest release on PyPI. The pre-commit examples of the docs and the benchmark name a release. With
+`--package`, the version of the package in `Cargo.toml` is set as well, as the release workflow does from its tag.
 """
 
 import re

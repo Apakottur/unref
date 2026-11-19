@@ -18,7 +18,12 @@ Install the development dependencies, which builds `unref` and installs it in `.
 uv sync
 ```
 
-`uv run` rebuilds it when its Rust source changes.
+`uv run` rebuilds it when its Rust source changes. To work on the Python code or the scripts without building
+`unref`, install only the development dependencies with `--only-group dev`:
+
+```shell
+uv run --only-group dev mypy --config-file linters/mypy.toml .
+```
 
 ## Running checks locally
 
