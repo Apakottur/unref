@@ -81,24 +81,90 @@ def test_file_symlink_uses_its_own_package(tmp_path: Path) -> None:
     assert result.stderr == ""
 
 
-def test_symlinked_script_imports_from_its_source_directory(tmp_path: Path) -> None:
+@pytest.mark.parametrize("alias", ["package", "directory", "linked-helper"])
+def test_symlinked_script_imports_from_its_source_directory(tmp_path: Path, alias: str) -> None:
     for name in ("original", "public"):
         package = tmp_path / name
         package.mkdir()
-        (package / "__init__.py").touch()
+        if name == "original" or alias == "package":
+            (package / "__init__.py").touch()
     (tmp_path / "original" / "helper.py").write_text("def live(): return 7\n")
+    if alias == "linked-helper":
+        external = tmp_path / "external"
+        external.mkdir()
+        (external / "__init__.py").touch()
+        (external / "implementation.py").write_text("def live(): return 3\n")
+    else:
+        (tmp_path / "public" / "helper.py").write_text("def live(): return 3\n")
     (tmp_path / "original" / "runner.py").write_text(
         'from helper import live\n\nif __name__ == "__main__":\n    print(live())\n'
     )
     try:
         (tmp_path / "public" / "runner.py").symlink_to("../original/runner.py")
+        if alias == "linked-helper":
+            (tmp_path / "public" / "helper.py").symlink_to("../external/implementation.py")
     except OSError as error:
         pytest.skip(f"Could not create a symlink: {error}")
 
-    result = run(["original/helper.py", "public/runner.py"], cwd=tmp_path)
+    paths = ["original/helper.py", "public/runner.py"]
+    if alias == "linked-helper":
+        paths.append("public/helper.py")
+    result = run(paths, cwd=tmp_path)
 
-    assert result.exit_code == 0
-    assert result.output == ""
+    if alias == "linked-helper":
+        assert result.exit_code == 1
+        assert result.stdout == f"{Path('public/helper.py')}:1:5: unused-function 'live'\n"
+        assert result.stderr == ""
+    else:
+        assert result.exit_code == 0
+        assert result.output == ""
+
+
+@pytest.mark.parametrize("module", ["original.impl", "public.api"])
+def test_explicit_symlink_scan_preserves_both_import_names(tmp_path: Path, module: str) -> None:
+    for name in ("original", "public"):
+        package = tmp_path / name
+        package.mkdir()
+        (package / "__init__.py").touch()
+        (package / "helper.py").write_text("def helper(): return 7\n")
+    (tmp_path / "original" / "impl.py").write_text("def run():\n    from .helper import helper\n    return helper()\n")
+    (tmp_path / "app.py").write_text(f"from {module} import run\nprint(run())\n")
+    try:
+        (tmp_path / "public" / "api.py").symlink_to("../original/impl.py")
+    except OSError as error:
+        pytest.skip(f"Could not create a symlink: {error}")
+
+    result = run(["app.py", "original/helper.py", "public/helper.py", "public/api.py"], cwd=tmp_path)
+
+    unused = "public" if module == "original.impl" else "original"
+    assert result.exit_code == 1
+    assert result.stdout == f"{Path(unused) / 'helper.py'}:1:5: unused-function 'helper'\n"
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize("module", ["original.impl", "public.api"])
+def test_explicit_symlink_scan_loads_source_context_on_import(tmp_path: Path, module: str) -> None:
+    for name in ("original", "public"):
+        package = tmp_path / name
+        package.mkdir()
+        (package / "__init__.py").touch()
+        (package / "helper.py").write_text("def helper(): return 7\n")
+    (tmp_path / "original" / "impl.py").write_text("from .helper import helper\nprint(helper())\n")
+    (tmp_path / "app.py").write_text(f"import {module}\n")
+    try:
+        (tmp_path / "public" / "api.py").symlink_to("../original/impl.py")
+    except OSError as error:
+        pytest.skip(f"Could not create a symlink: {error}")
+
+    result = run(["app.py", "original/helper.py", "public/helper.py", "public/api.py"], cwd=tmp_path)
+
+    if module == "original.impl":
+        assert result.exit_code == 0
+        assert result.output == ""
+    else:
+        assert result.exit_code == 1
+        assert result.stdout == f"{Path('original/helper.py')}:1:5: unused-function 'helper'\n"
+        assert result.stderr == ""
 
 
 def test_default_path(tmp_path: Path) -> None:

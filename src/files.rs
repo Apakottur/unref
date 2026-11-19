@@ -22,7 +22,7 @@ static CODING: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// What a Python file defines and refers to.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct FileFacts {
     /// The definitions of the file.
     pub definitions: Vec<Definition>,

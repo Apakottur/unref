@@ -69,8 +69,9 @@ struct Uses {
 
 /// The modules of the project, by the index of their file.
 struct Project {
-    /// The files that parse.
+    /// The files that parse, followed by source contexts for selected file symlinks.
     files: Vec<Arc<Path>>,
+    selected_count: usize,
     /// What each file defines and refers to.
     facts: Vec<FileFacts>,
     /// The module name of each file.
@@ -122,11 +123,52 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         .map(|path| resolve(path))
         .filter(|root| root.is_dir())
         .collect();
-    let import_paths: Vec<PathBuf> = files.iter().map(|path| import_path(path)).collect();
-    let names: Vec<ModuleName> = import_paths
+    let selected_count = files.len();
+    let mut import_paths: Vec<PathBuf> = files.iter().map(|path| import_path(path)).collect();
+    let mut source_paths: Vec<PathBuf> = import_paths
+        .iter()
+        .map(|path| path.canonicalize().unwrap_or_else(|_| path.clone()))
+        .collect();
+    let mut names: Vec<ModuleName> = import_paths
         .iter()
         .map(|path| module_name(path, &roots))
         .collect();
+    let has_links = import_paths != source_paths;
+    let mut source_names: Option<Vec<ModuleName>> = has_links.then(|| {
+        source_paths
+            .iter()
+            .zip(&import_paths)
+            .zip(&names)
+            .map(|((source, import), name)| {
+                if source == import {
+                    name.clone()
+                } else {
+                    module_name(source, &roots)
+                }
+            })
+            .collect()
+    });
+    if let Some(source_names) = &mut source_names {
+        // A caller can still use the source name if the scan explicitly selected only a symlink.
+        // Resolve each context's references separately because their relative imports can differ.
+        let mut known_paths: FxHashSet<_> = import_paths.iter().map(PathBuf::as_path).collect();
+        let missing_sources: Vec<_> = source_paths
+            .iter()
+            .enumerate()
+            .filter(|&(file, source)| {
+                source_names[file] != names[file] && known_paths.insert(source.as_path())
+            })
+            .map(|(file, source)| (file, source.clone()))
+            .collect();
+        for (alias, source) in missing_sources {
+            files.push(Arc::from(source.clone()));
+            facts.push(facts[alias].clone());
+            import_paths.push(source.clone());
+            source_paths.push(source);
+            names.push(source_names[alias].clone());
+            source_names.push(source_names[alias].clone());
+        }
+    }
     let mut files_by_name: FxHashMap<String, Vec<usize>> = FxHashMap::default();
     for (index, name) in names.iter().enumerate() {
         files_by_name
@@ -139,13 +181,21 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         &names,
         options.python.as_deref(),
     ));
+    // A lexical link directory is useful when importing the alias, but the script fallback
+    // must keep the source-based search roots used before file aliases were supported.
+    let mut source_external = source_names.as_ref().map(|source_names| {
+        ExternalModules::new(search_path(
+            &source_paths,
+            source_names,
+            options.python.as_deref(),
+        ))
+    });
     import_siblings(
         &mut facts,
         &names,
-        &import_paths,
-        &roots,
+        source_names.as_deref().unwrap_or(&names),
         &files_by_name,
-        &mut external,
+        source_external.as_mut().unwrap_or(&mut external),
     );
 
     let mut definitions = Vec::new();
@@ -159,6 +209,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     }
     let project = Project {
         files,
+        selected_count,
         facts,
         names,
         files_by_name,
@@ -223,7 +274,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
 
     // An ignore comment is needed for a definition that is unused without it. Such a definition is
     // then used, and so is what it uses.
-    let aliases = project.definition_aliases();
+    let aliases = project.definition_aliases(&source_paths);
     let mut kept_used = graph.use_definitions(kept.iter().copied());
     share_alias_usage(&mut kept_used, &aliases);
     let needed: Vec<DefinitionId> = ignored.into_iter().filter(|id| !kept_used[*id]).collect();
@@ -275,13 +326,10 @@ impl Project {
     }
 
     /// Pair each alias definition with its counterpart in the first path to the same source.
-    fn definition_aliases(&self) -> Vec<(DefinitionId, DefinitionId)> {
+    fn definition_aliases(&self, source_paths: &[PathBuf]) -> Vec<(DefinitionId, DefinitionId)> {
         let mut first_by_source = FxHashMap::default();
         let mut aliases = Vec::new();
-        for (file, path) in self.files.iter().enumerate() {
-            let Ok(source) = path.canonicalize() else {
-                continue;
-            };
+        for (file, source) in source_paths.iter().enumerate() {
             let first = *first_by_source.entry(source).or_insert(file);
             if first != file {
                 aliases.extend(self.ids_of_file(first).zip(self.ids_of_file(file)).filter(
@@ -934,8 +982,7 @@ fn search_path(paths: &[PathBuf], names: &[ModuleName], python: Option<&Path>) -
 fn import_siblings(
     facts: &mut [FileFacts],
     names: &[ModuleName],
-    import_paths: &[PathBuf],
-    roots: &[PathBuf],
+    source_names: &[ModuleName],
     files_by_name: &FxHashMap<String, Vec<usize>>,
     external: &mut ExternalModules,
 ) {
@@ -948,26 +995,29 @@ fn import_siblings(
                 .chain([name.as_str()])
         })
         .collect();
+    let source_tops: FxHashSet<&str> = source_names
+        .iter()
+        .filter_map(|name| name.name.split('.').next())
+        .collect();
     // A script reached through a symlink looks for siblings beside the source. Its import name
     // still comes from the symlink, including when resolving the script's explicit relative imports.
-    let script_names: FxHashMap<_, _> = facts
+    let scripts: FxHashSet<_> = facts
         .iter()
-        .zip(import_paths)
         .enumerate()
-        .filter(|(_, (facts, _))| facts.is_script)
-        .filter_map(|(file, (_, path))| {
-            let source = path.canonicalize().ok()?;
-            (source != *path).then(|| (file, module_name(&source, roots)))
-        })
+        .filter_map(|(file, facts)| facts.is_script.then_some(file))
         .collect();
     let package_of = |file: usize| {
-        let name = script_names.get(&file).unwrap_or(&names[file]);
+        let name = if scripts.contains(&file) {
+            &source_names[file]
+        } else {
+            &names[file]
+        };
         (!name.is_package)
             .then(|| name.name.rsplit_once('.').map(|(package, _)| package))
             .flatten()
     };
     let mut pending: Vec<usize> = (0..facts.len())
-        .filter(|&file| facts[file].is_script && package_of(file).is_some())
+        .filter(|file| scripts.contains(file) && package_of(*file).is_some())
         .collect();
     let mut seen: FxHashSet<usize> = pending.iter().copied().collect();
     let mut is_elsewhere: FxHashMap<String, bool> = FxHashMap::default();
@@ -980,7 +1030,7 @@ fn import_siblings(
             let module = module.filter(|_| level == 0)?;
             let top = module.split('.').next()?;
             let sibling = format!("{package}.{top}");
-            let is_sibling = !known.contains(top)
+            let is_sibling = !source_tops.contains(top)
                 && known.contains(sibling.as_str())
                 && !*is_elsewhere
                     .entry(top.to_string())
@@ -1255,6 +1305,73 @@ fn share_alias_usage(used: &mut [bool], aliases: &[(DefinitionId, DefinitionId)]
     }
 }
 
+/// Find the imports that can activate a source context whose path was not selected directly.
+fn source_loads(project: &Project) -> FxHashMap<(usize, Owner), FxHashSet<usize>> {
+    let mut loads: FxHashMap<_, FxHashSet<_>> = FxHashMap::default();
+    if project.selected_count == project.files.len() {
+        return loads;
+    }
+    for (file, facts) in project.facts.iter().enumerate() {
+        let mut add = |owner, module: &str| {
+            for prefix in module
+                .match_indices('.')
+                .map(|(end, _)| &module[..end])
+                .chain([module])
+            {
+                for &imported in project.files_by_name.get(prefix).into_iter().flatten() {
+                    if imported >= project.selected_count {
+                        loads.entry((file, owner)).or_default().insert(imported);
+                    }
+                }
+            }
+        };
+        for (owner, module) in &facts.references.module_imports {
+            add(*owner, module.as_str());
+        }
+        for import in &facts.references.imports {
+            let Some(module) = project.names[file].resolve(import.module.as_deref(), import.level)
+            else {
+                continue;
+            };
+            add(import.owner, &module);
+            if import.name == "*" {
+                continue;
+            }
+            let child = join(&module, &import.name);
+            if project.files_by_name.contains_key(&child)
+                && !project
+                    .files_by_name
+                    .get(&module)
+                    .into_iter()
+                    .flatten()
+                    .any(|&package| {
+                        let facts = &project.facts[package];
+                        facts.lazy.contains_key(&import.name)
+                            || facts
+                                .references
+                                .bindings
+                                .get(&import.name)
+                                .is_some_and(|binding| {
+                                    binding.name.as_deref() != Some(import.name.as_str())
+                                        || project.names[package]
+                                            .resolve(binding.module.as_deref(), binding.level)
+                                            .as_deref()
+                                            != Some(module.as_str())
+                                })
+                            || project.file_definitions(package).iter().any(|definition| {
+                                definition.owner.is_none()
+                                    && definition.class.is_none()
+                                    && definition.name == import.name
+                            })
+                    })
+            {
+                add(import.owner, &child);
+            }
+        }
+    }
+    loads
+}
+
 /// Make the findings of a project.
 ///
 /// Returns a finding for each unused definition, for each problem with an ignore comment, and for each
@@ -1343,6 +1460,8 @@ struct Graph<'a> {
     /// on the same line.
     used: Vec<bool>,
     pending: Vec<(usize, Owner)>,
+    source_loads: FxHashMap<(usize, Owner), FxHashSet<usize>>,
+    loaded_sources: FxHashSet<usize>,
     seen: Seen,
 }
 
@@ -1426,8 +1545,12 @@ impl<'a> Graph<'a> {
             implementations,
             waiting: FxHashMap::default(),
             used: vec![false; project.definitions.len()],
-            // The code of every module runs.
-            pending: (0..project.files.len()).map(|file| (file, None)).collect(),
+            // Selected modules are roots. Additional source contexts load on demand.
+            pending: (0..project.selected_count)
+                .map(|file| (file, None))
+                .collect(),
+            source_loads: source_loads(project),
+            loaded_sources: FxHashSet::default(),
             seen: Seen::default(),
         }
     }
@@ -1441,6 +1564,11 @@ impl<'a> Graph<'a> {
     fn use_definitions(&mut self, roots: impl IntoIterator<Item = DefinitionId>) -> Vec<bool> {
         self.add(roots);
         while let Some(owner) = self.pending.pop() {
+            for &file in self.source_loads.get(&owner).into_iter().flatten() {
+                if self.loaded_sources.insert(file) {
+                    self.pending.push((file, None));
+                }
+            }
             let Some(uses) = self.uses.get(&owner) else {
                 continue;
             };

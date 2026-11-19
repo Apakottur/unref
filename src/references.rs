@@ -108,7 +108,7 @@ const STRING_CALLS: [&str; 2] = ["include", "setdefault"];
 /// What a Python module refers to.
 ///
 /// Each reference is made from an owner: the function that it is in, or the module itself.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct References {
     /// The reads of the names of the module itself, without the local variables and parameters. A name
     /// that is listed in `__all__` is read as a plain name. A plain read of a name that the module
@@ -132,6 +132,8 @@ pub(crate) struct References {
     pub whole_reads: FxHashSet<WholeRead>,
     /// The names that are imported from another module. A star import has the name `*`.
     pub imports: FxHashSet<Import>,
+    /// The written modules in plain import statements.
+    pub module_imports: Vec<(Owner, Name)>,
     /// Whether the module defines `__all__`.
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
@@ -954,6 +956,12 @@ impl<'a> Walker<'_, '_> {
 
     /// Bind the names that an `import` statement imports.
     fn visit_import(&mut self, import: &ast::StmtImport) {
+        self.references.module_imports.extend(
+            import
+                .names
+                .iter()
+                .map(|alias| (self.owner, alias.name.id.clone())),
+        );
         let bindings = import.names.iter().map(|alias| match &alias.asname {
             // `import package.module` binds `package`.
             None => {
