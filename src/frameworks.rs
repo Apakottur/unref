@@ -688,6 +688,11 @@ impl<'a> FrameworkRules<'a> {
         {
             return true;
         }
+        // pytest collects what is at the top level of a module or in a class there, not what is in
+        // a function.
+        if definition.owner.is_some() {
+            return false;
+        }
 
         let Some(class) = &definition.class else {
             if file_name(path) == PYTEST_CONFTEST {
@@ -714,12 +719,16 @@ impl<'a> FrameworkRules<'a> {
 
     /// Check whether unittest finds and calls a definition by itself.
     fn unittest_uses(&self, definition: &Definition, module: usize) -> bool {
+        // unittest finds the test cases and the functions of a module, not those in a function. The
+        // methods of a test case in a function still count, since the function can return the class.
         if definition.kind == Kind::Class {
-            return self.is_test_case(module, &definition.qualified_name());
+            return definition.owner.is_none()
+                && self.is_test_case(module, &definition.qualified_name());
         }
         let name = definition.name.as_str();
         let Some(class) = &definition.class else {
             return definition.kind == Kind::Function
+                && definition.owner.is_none()
                 && UNITTEST_MODULE_FUNCTIONS.contains(&name)
                 && fnmatch(file_name(&definition.path), UNITTEST_FILES);
         };

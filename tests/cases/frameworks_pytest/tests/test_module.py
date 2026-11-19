@@ -119,3 +119,32 @@ class TestClass:
 class Helper:  # expect: 7 [unused-class]
     def test_method(self):  # expect: 9 [unused-method] transitive
         pass
+
+
+# pytest does not collect what is in a function.
+def test_with_locals():
+    def test_local():  # expect: 9 [unused-function]
+        pass
+
+    def setup_function():  # expect: 9 [unused-function]
+        pass
+
+    class TestLocal:  # expect: 11 [unused-class]
+        pytestmark = pytest.mark.slow  # expect: 9 [unused-attribute] transitive
+
+        def test_method(self):  # expect: 13 [unused-method] transitive
+            pass
+
+        class TestNested:  # expect: 15 [unused-class] transitive
+            def test_nested(self):  # expect: 17 [unused-method] transitive
+                pass
+
+    pytestmark = pytest.mark.slow
+
+    # A fixture and a hook can be registered from anywhere.
+    @pytest.fixture
+    def local_fixture():
+        pass
+
+    def pytest_local_hook():
+        pass
