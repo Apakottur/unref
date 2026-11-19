@@ -105,9 +105,6 @@ jobs:
   compare:
     name: Compare with main
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
     steps:
       # A pull request is checked out as its merge into the current main, which is the merge's first parent. The
       # base SHA of the event can be an older main, whose later commits would count as changes of the PR. A manual
@@ -194,15 +191,23 @@ jobs:
           done > report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
 
-      # A pull request from a fork has a read-only token, so it gets the job summary only.
-      - name: Comment on the pull request
-        if: >-
-          ${{ !cancelled() && hashFiles('benchmark.md', 'ecosystem.md') != '' && github.event_name == 'pull_request'
-          && github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+      # This run has a read-only token, also for a pull request from a fork, so the comment workflow posts the
+      # report. The number tells it which pull request the report is for.
+      - name: Save the pull request number
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          NUMBER: ${{ github.event.number }}
+        run: echo "$NUMBER" > number
+
+      - name: Upload the report
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          header: compare
-          path: report.md
+          name: compare-report
+          path: |
+            report.md
+            number
+          retention-days: 1
 
   check:
     name: Check All
