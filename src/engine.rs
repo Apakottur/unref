@@ -193,7 +193,8 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     );
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
 
-    let mut graph = Graph::new(&project, &uses, &fields, enums);
+    let abstract_methods = AbstractMethods::new(&project, &classes);
+    let mut graph = Graph::new(&project, &uses, &fields, enums, abstract_methods);
 
     // An ignore comment is needed for a definition that is unused without it. Such a definition is
     // then used, and so is what it uses.
@@ -385,6 +386,8 @@ struct Classes<'a> {
     hierarchy: &'a ClassHierarchy,
     /// Each class by its file and its name in the module.
     ids: FxHashMap<(usize, String), ClassId>,
+    /// The definition of each class, in class id order.
+    definitions: Vec<DefinitionId>,
     /// The classes by their dotted names, such as `package.module.Class`.
     by_dotted: FxHashMap<String, Vec<ClassId>>,
     /// The names of the classes, without their modules, so that a name that cannot be a class is not
@@ -413,9 +416,15 @@ impl<'a> Classes<'a> {
     ) -> Self {
         let mut keys: Vec<(usize, String)> = Vec::new();
         let mut ids = FxHashMap::default();
+        let mut definitions = Vec::new();
         let mut by_dotted: FxHashMap<String, Vec<ClassId>> = FxHashMap::default();
         let mut names = FxHashSet::default();
-        for (file, definition) in project.definition_files.iter().zip(&project.definitions) {
+        for (index, (file, definition)) in project
+            .definition_files
+            .iter()
+            .zip(&project.definitions)
+            .enumerate()
+        {
             if definition.kind == Kind::Class {
                 let key = (*file, definition.qualified_name());
                 if ids.contains_key(&key) {
@@ -427,6 +436,7 @@ impl<'a> Classes<'a> {
                 by_dotted.entry(dotted).or_default().push(id);
                 names.insert(definition.name.clone());
                 keys.push(key);
+                definitions.push(index);
             }
         }
         let mut ancestors = Vec::new();
@@ -502,6 +512,7 @@ impl<'a> Classes<'a> {
         Self {
             hierarchy,
             ids,
+            definitions,
             by_dotted,
             names,
             ancestors,
@@ -588,6 +599,102 @@ impl<'a> Classes<'a> {
             }
         }
         self.members(lineage, name)
+    }
+}
+
+/// An override of an abstract method is used when both its class and the abstract contract are used.
+/// The contract is used when its declaration or any override is used.
+#[derive(Default)]
+struct AbstractMethods {
+    /// The abstract declarations that each method declares or overrides.
+    contracts_by_method: FxHashMap<DefinitionId, Vec<DefinitionId>>,
+    /// The overrides of each abstract declaration, paired with their class definitions.
+    overrides_by_contract: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
+    /// The overrides in each class, paired with the abstract declarations they implement.
+    overrides_by_class: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
+    used_contracts: FxHashSet<DefinitionId>,
+}
+
+impl AbstractMethods {
+    fn new(project: &Project, classes: &Classes) -> Self {
+        let mut methods = Self::default();
+        for (contract, definition) in project.definitions.iter().enumerate() {
+            if definition.kind != Kind::Method || definition.decorators.is_empty() {
+                continue;
+            }
+            let file = project.definition_files[contract];
+            let Some(class) = definition
+                .class
+                .as_ref()
+                .and_then(|name| classes.ids.get(&(file, name.clone())))
+            else {
+                continue;
+            };
+            if classes.descendants[*class].is_empty()
+                || !definition.decorators.iter().any(|decorator| {
+                    classes
+                        .hierarchy
+                        .resolve(file, decorator)
+                        .contains("abc.abstractmethod")
+                })
+            {
+                continue;
+            }
+            for &descendant in &classes.descendants[*class] {
+                let class_definition = classes.definitions[descendant];
+                for &method in classes
+                    .by_member
+                    .get(&(descendant, definition.name.clone()))
+                    .into_iter()
+                    .flatten()
+                {
+                    if project.definitions[method].kind != Kind::Method {
+                        continue;
+                    }
+                    methods
+                        .contracts_by_method
+                        .entry(method)
+                        .or_default()
+                        .push(contract);
+                    methods
+                        .overrides_by_contract
+                        .entry(contract)
+                        .or_default()
+                        .push((class_definition, method));
+                    methods
+                        .overrides_by_class
+                        .entry(class_definition)
+                        .or_default()
+                        .push((contract, method));
+                }
+            }
+            if methods.overrides_by_contract.contains_key(&contract) {
+                methods
+                    .contracts_by_method
+                    .entry(contract)
+                    .or_default()
+                    .push(contract);
+            }
+        }
+        methods
+    }
+
+    /// Queue overrides whose class and contract are now both used.
+    fn extend_used(&mut self, id: DefinitionId, used: &[bool], pending: &mut Vec<DefinitionId>) {
+        for &(contract, method) in self.overrides_by_class.get(&id).into_iter().flatten() {
+            if self.used_contracts.contains(&contract) {
+                pending.push(method);
+            }
+        }
+        for &contract in self.contracts_by_method.get(&id).into_iter().flatten() {
+            if self.used_contracts.insert(contract) {
+                pending.extend(
+                    self.overrides_by_contract[&contract]
+                        .iter()
+                        .filter_map(|&(class, method)| used[class].then_some(method)),
+                );
+            }
+        }
     }
 }
 
@@ -1027,6 +1134,7 @@ fn findings(
 struct Graph<'a> {
     project: &'a Project,
     uses: &'a FxHashMap<(usize, Owner), Uses>,
+    abstract_methods: AbstractMethods,
     /// The members of each enum of the project, by its file and its name in the module, with their
     /// names.
     enums: FxHashMap<(usize, String), (Vec<DefinitionId>, FxHashSet<String>)>,
@@ -1058,6 +1166,7 @@ impl<'a> Graph<'a> {
         uses: &'a FxHashMap<(usize, Owner), Uses>,
         fields: &FxHashSet<DefinitionId>,
         enums: FxHashMap<(usize, String), Vec<DefinitionId>>,
+        abstract_methods: AbstractMethods,
     ) -> Self {
         let mut by_name: FxHashMap<(usize, String), Vec<DefinitionId>> = FxHashMap::default();
         let mut by_attribute: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
@@ -1118,6 +1227,7 @@ impl<'a> Graph<'a> {
         Self {
             project,
             uses,
+            abstract_methods,
             enums,
             by_name,
             by_attribute,
@@ -1246,18 +1356,26 @@ impl<'a> Graph<'a> {
 
     /// Mark definitions as used, and queue the code of the functions among them.
     fn add(&mut self, definitions: impl IntoIterator<Item = DefinitionId>) {
+        let mut overrides = Vec::new();
         for id in definitions {
-            if !self.used[id] {
-                self.used[id] = true;
-                let (file, definition) = (
-                    &self.project.definition_files[id],
-                    &self.project.definitions[id],
-                );
-                if definition.kind.is_function() {
-                    self.pending.push((*file, Some(definition.line)));
-                }
-            }
+            self.mark_used(id, &mut overrides);
         }
+        while let Some(id) = overrides.pop() {
+            self.mark_used(id, &mut overrides);
+        }
+    }
+
+    fn mark_used(&mut self, id: DefinitionId, overrides: &mut Vec<DefinitionId>) {
+        if self.used[id] {
+            return;
+        }
+        self.used[id] = true;
+        let definition = &self.project.definitions[id];
+        if definition.kind.is_function() {
+            self.pending
+                .push((self.project.definition_files[id], Some(definition.line)));
+        }
+        self.abstract_methods.extend_used(id, &self.used, overrides);
     }
 }
 
