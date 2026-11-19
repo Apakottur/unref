@@ -1033,7 +1033,8 @@ impl<'a> Walker<'_, '_> {
                 );
             }
         }
-        if targets.iter().any(is_all) {
+        // Only the `__all__` of the module is its public interface.
+        if self.binder == 0 && targets.iter().any(is_all) {
             self.references.has_all = true;
             for name in string_literals(value) {
                 self.references.reads.insert(Read {
