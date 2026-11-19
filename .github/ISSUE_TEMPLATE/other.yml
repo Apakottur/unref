@@ -1,5 +1,6 @@
 name: Other
 description: A question, a documentation fix or anything else.
+labels: ["triage"]
 body:
   - type: textarea
     id: description
