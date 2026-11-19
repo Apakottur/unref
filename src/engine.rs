@@ -6,6 +6,7 @@ use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 use ruff_python_ast::name::Name;
+use ruff_python_stdlib::builtins::is_python_builtin;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::{ClassHierarchy, join};
@@ -18,7 +19,7 @@ use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::ignores::{apply_ignore_comments, ignored_codes};
 use crate::models::{Finding, Framework, Override, fnmatch};
 use crate::modules::{ModuleName, import_root, module_name, resolve};
-use crate::references::{Binding, Owner, Receiver, WHOLE_READERS};
+use crate::references::{Binding, Owner, Receiver};
 use crate::symbols::ModuleSymbols;
 use crate::transitive::transitive;
 
@@ -259,8 +260,9 @@ impl Project {
 /// A plain name refers to the module that it is read in, and an imported name to the module that it
 /// is imported from. A member of a class of the project that is plain, as in `self.name`,
 /// `super().name`, `Class.name` or `Class().name`, is matched in the classes that it can be in, and
-/// any other attribute of an object by name only. A TypedDict of the project that is read as a whole
-/// has all its fields used, and those of the TypedDicts that it inherits from.
+/// any other attribute of an object by name only. A TypedDict of the project that is read as a whole,
+/// or passed to a function from outside the project, has all its fields used, and those of the
+/// TypedDicts that it inherits from.
 ///
 /// `typed_dicts` are the fields of each TypedDict of the project, by its dotted name.
 fn find_uses(
@@ -372,23 +374,23 @@ fn find_uses(
                 .insert(name.clone());
         }
         for read in &references.whole_reads {
-            let hierarchy = classes.hierarchy;
-            let reads_all = read.reader.as_ref().is_none_or(|reader| {
-                let resolved = hierarchy.resolve(file, reader);
-                WHOLE_READERS.iter().any(|name| resolved.contains(*name))
-            });
-            if !reads_all {
-                continue;
-            }
-            let fields = hierarchy
+            let fields: Vec<DefinitionId> = classes
+                .hierarchy
                 .resolve(file, &read.value)
                 .iter()
                 .flat_map(|dotted| typed_dicts.get(dotted).into_iter().flatten().copied())
-                .collect::<Vec<_>>();
-            uses.entry((file, read.owner))
-                .or_default()
-                .definitions
-                .extend(fields);
+                .collect();
+            if !fields.is_empty()
+                && read
+                    .reader
+                    .as_ref()
+                    .is_none_or(|reader| is_external(project, classes.hierarchy, file, reader))
+            {
+                uses.entry((file, read.owner))
+                    .or_default()
+                    .definitions
+                    .extend(fields);
+            }
         }
         for (owner, index) in &references.local_reads {
             uses.entry((file, *owner))
@@ -637,6 +639,22 @@ impl<'a> Classes<'a> {
         });
         self.members(lineage.iter().copied(), name)
     }
+}
+
+/// Check whether a function, as it is written in a module, is from outside the project: a builtin, or
+/// a name that the module imports from outside the project. Any other name, such as a method of a local
+/// variable, is not known.
+fn is_external(project: &Project, hierarchy: &ClassHierarchy, file: usize, written: &str) -> bool {
+    let root = written.split('.').next().unwrap_or(written);
+    // The builtins of any version of Python.
+    let is_known = project.facts[file].references.bindings.contains_key(root)
+        || is_python_builtin(root, u8::MAX, false);
+    is_known
+        && hierarchy.resolve(file, written).iter().all(|name| {
+            !name
+                .match_indices('.')
+                .any(|(index, _)| project.files_by_name.contains_key(&name[..index]))
+        })
 }
 
 /// Check whether a base class of a class, as it is written in its module, is not known: it is
