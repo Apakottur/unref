@@ -245,6 +245,8 @@ struct Scope {
     /// In a function, the local variables that are assigned the result of a call, each with the
     /// dotted names of what they call as they are written.
     calls: FxHashMap<String, Vec<String>>,
+    /// The scope a comprehension reads from when a name is not local to it.
+    comprehension_parent: Option<usize>,
     /// In a class body, the nearest scope around it that is not a class body. The functions,
     /// lambdas and comprehensions in a class body do not see its names, and neither does a class
     /// body nested in it, so their reads go on to this scope, as do the reads of the class body that
@@ -270,6 +272,7 @@ impl Scope {
             function_name: None,
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
+            comprehension_parent: None,
             outer: None,
         }
     }
@@ -738,12 +741,14 @@ impl<'a> Walker<'_, '_> {
         self.add_whole_read(values, None);
         self.visit_expr(&first.iter);
         let (scope, binder) = (self.scope, self.binder);
+        let target = self.reads_target(scope);
         let mut inner = Scope::new(ScopeKind::Function);
         // A walrus binds its name in the function that the comprehension is in as well. It cannot be
         // used in a comprehension in a class body.
         if self.scopes[binder].kind != ScopeKind::Class {
             inner.enclosing = Some(binder);
         }
+        inner.comprehension_parent = Some(target);
         self.scope = self.push_scope(inner);
         self.binder = self.scope;
         for (index, generator) in generators.iter().enumerate() {
@@ -766,7 +771,6 @@ impl<'a> Walker<'_, '_> {
         self.scope = scope;
         self.binder = binder;
         let local_names = self.scopes[inner].bound.clone();
-        let target = self.reads_target(scope);
         self.close(inner, &local_names, Target::Scope(target));
     }
 
@@ -1348,7 +1352,7 @@ impl<'a> Walker<'_, '_> {
     }
 
     /// Get the dotted names of what a local variable is assigned the result of calling, as they are
-    /// written: in the scope that it is read in, or the scopes that bind its names as well.
+    /// written, looking through enclosing scopes for a comprehension.
     fn variable_calls(&self, name: &str) -> Vec<String> {
         let mut scope = Some(self.scope);
         while let Some(index) = scope {
@@ -1356,7 +1360,7 @@ impl<'a> Walker<'_, '_> {
             if found.bound.contains(name) {
                 return found.calls.get(name).cloned().unwrap_or_default();
             }
-            scope = found.enclosing;
+            scope = found.comprehension_parent;
         }
         Vec::new()
     }

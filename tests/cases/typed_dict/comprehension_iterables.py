@@ -9,6 +9,10 @@ class Envelope(TypedDict):
     payload: int
 
 
+class Defaults(TypedDict):
+    option: int
+
+
 def read():
     packet = Packet(secret=1)
     envelope = Envelope(payload=2)
@@ -18,4 +22,13 @@ def read():
     return keys, [key for _ in range(1) for key in envelope]
 
 
-print(read())
+def read_defaults():
+    defaults = Defaults(option=3)
+
+    def keys(values=[key for _ in range(1) for key in defaults]):
+        return values
+
+    return keys()
+
+
+print(read(), read_defaults())
