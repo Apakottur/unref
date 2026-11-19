@@ -191,7 +191,7 @@ jobs:
           done > report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
 
-      # This run has a read-only token, also for a pull request from a fork, so the comment workflow posts the
+      # This run has a read-only token, also for a pull request from a fork, so Publish Comparison posts the
       # report. The number tells it which pull request the report is for.
       - name: Save the pull request number
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}

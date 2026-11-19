@@ -1,4 +1,4 @@
-name: Comment
+name: Publish Comparison
 
 # Posts the report of the comparison with main on its pull request, also on one from a fork, whose CI run has a
 # read-only token. This workflow has write access, so it never checks out or runs code of the pull request, and
