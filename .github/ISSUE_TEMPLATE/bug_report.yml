@@ -20,21 +20,20 @@ body:
     id: files
     attributes:
       label: Files
-      description: The Python files, each with its path.
+      description: The Python files and the configuration file, if any, each with its path.
       placeholder: |
         `main.py`:
         ```python
 
         ```
+
+        `pyproject.toml`:
+        ```toml
+        [tool.unref]
+
+        ```
     validations:
       required: true
-
-  - type: textarea
-    id: config
-    attributes:
-      label: Configuration
-      description: The `[tool.unref]` table of `pyproject.toml`, or the file given to `--config`. Leave empty if none.
-      render: toml
 
   - type: input
     id: command

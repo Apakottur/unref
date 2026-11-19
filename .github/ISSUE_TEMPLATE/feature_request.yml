@@ -14,10 +14,18 @@ body:
     id: files
     attributes:
       label: Example
-      description: A few short files that use the feature, each with its path, and what `unref` should report.
+      description: >-
+        A few short files that use the feature and the configuration file, if any, each with its path,
+        and what `unref` should report.
       placeholder: |
         `main.py`:
         ```python
+
+        ```
+
+        `pyproject.toml`:
+        ```toml
+        [tool.unref]
 
         ```
 
@@ -26,3 +34,5 @@ body:
     attributes:
       label: Version
       description: The output of `unref --version`.
+    validations:
+      required: true

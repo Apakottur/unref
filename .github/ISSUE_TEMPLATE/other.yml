@@ -14,3 +14,5 @@ body:
     attributes:
       label: Version
       description: The output of `unref --version`.
+    validations:
+      required: true
