@@ -24,7 +24,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use crate::config::{OutputFormat, load_config};
-use crate::discover::{discover, rebase};
+use crate::discover::{discover_for_listing, rebase};
 use crate::engine::find_unused;
 use crate::external::interpreter_environment;
 use crate::models::Finding;
@@ -184,14 +184,23 @@ fn run(cli: Cli) -> ExitCode {
     };
 
     if cli.show_files {
+        let (files, errors) = discover_for_listing(&paths, &options);
         let mut stdout = std::io::BufWriter::new(std::io::stdout().lock());
-        for file in discover(&paths, &options) {
+        for file in &files {
             if writeln!(stdout, "{}", file.display()).is_err() {
                 break;
             }
         }
         let _ = stdout.flush();
-        return ExitCode::SUCCESS;
+        let mut stderr = std::io::stderr().lock();
+        for error in &errors {
+            let _ = writeln!(stderr, "{error}");
+        }
+        return if errors.is_empty() || cli.exit_zero {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
     }
 
     let environment = match cli.python.or_else(|| options.python.clone()) {
