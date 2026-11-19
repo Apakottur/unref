@@ -35,13 +35,13 @@ def _latest_version() -> str:
 def _set(path: str, pattern: str, version: str) -> None:
     """Set the version that the first match of a pattern names in a file, keeping its line endings."""
     file = _ROOT / path
-    with file.open(encoding="utf-8", newline="") as stream:
+    with file.open(newline="") as stream:
         text = stream.read()
     text, count = re.subn(pattern, rf"\g<1>{version}", text, count=1)
     if count != 1:
         print(f"No version of unref found in {path}.")
         raise typer.Exit(1)
-    with file.open("w", encoding="utf-8", newline="") as stream:
+    with file.open("w", newline="") as stream:
         stream.write(text)
 
 
