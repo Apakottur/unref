@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
+use ruff_python_ast::name::Name;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::{ClassHierarchy, join};
@@ -48,14 +49,14 @@ type ClassId = usize;
 #[derive(Default)]
 struct Uses {
     /// The names of the modules of the project that the code uses, each with its module.
-    names: FxHashSet<(usize, String)>,
+    names: FxHashSet<(usize, Name)>,
     /// The names that the code reads as attributes of an object.
-    attributes: FxHashSet<String>,
+    attributes: FxHashSet<Name>,
     /// The string keys that the code reads from a mapping.
     keys: FxHashSet<String>,
     /// The objects of the modules of the project that the code reads, each with its module and its
     /// name in the module followed by the attributes that are read from it, in order.
-    objects: FxHashSet<(usize, Vec<String>)>,
+    objects: FxHashSet<(usize, Vec<Name>)>,
     /// The modules that the code star imports.
     stars: FxHashSet<usize>,
     /// The functions and classes that are local variables of a function, the members of a class read
@@ -332,7 +333,7 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
                 if import.name == "*" {
                     owner_uses.stars.insert(imported);
                 } else {
-                    owner_uses.names.insert((imported, import.name.clone()));
+                    owner_uses.names.insert((imported, Name::new(&import.name)));
                 }
             }
         }
@@ -370,11 +371,11 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
 impl Uses {
     /// Add a read of a member: the definitions that it can stand for, or its name if it is not known
     /// what it is read from.
-    fn add_member(&mut self, found: Option<Vec<DefinitionId>>, name: &str) {
+    fn add_member(&mut self, found: Option<Vec<DefinitionId>>, name: &Name) {
         match found {
             Some(found) => self.definitions.extend(found),
             None => {
-                self.attributes.insert(name.to_string());
+                self.attributes.insert(name.clone());
             }
         }
     }
@@ -641,7 +642,7 @@ fn is_unknown_class(
 /// The dotted name that an imported name and the attributes read from it stand for, as its parts,
 /// and each shorter start of it that is a module of the project, shortest first, as its number of
 /// parts with its files.
-type Resolved = (Vec<String>, Vec<(usize, Vec<usize>)>);
+type Resolved = (Vec<Name>, Vec<(usize, Vec<usize>)>);
 
 /// Find the dotted name that an imported name, and the attributes read from it, stand for.
 ///
@@ -649,13 +650,13 @@ type Resolved = (Vec<String>, Vec<(usize, Vec<usize>)>);
 fn resolve_import(
     module: &ModuleName,
     binding: &Binding,
-    attributes: &[String],
+    attributes: &[Name],
     files_by_name: &FxHashMap<String, Vec<usize>>,
 ) -> Option<Resolved> {
     let resolved = module.resolve(binding.module.as_deref(), binding.level)?;
-    let mut parts: Vec<String> = resolved.split('.').map(ToString::to_string).collect();
+    let mut parts: Vec<Name> = resolved.split('.').map(Name::new).collect();
     if let Some(name) = binding.name.as_ref().filter(|name| !name.is_empty()) {
-        parts.push(name.clone());
+        parts.push(Name::new(name));
     }
     parts.extend(attributes.iter().cloned());
     let starts = (1..parts.len())
@@ -672,11 +673,11 @@ fn resolve_import(
 /// it, stand for, through the modules that import the name in turn.
 ///
 /// Returns each object with its module, and its name in the module followed by the attributes.
-fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize, Vec<String>)> {
+fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize, Vec<Name>)> {
     let mut found = FxHashSet::default();
     // Each binding that is followed is followed once, which ends a cycle of modules that import the
     // names of each other.
-    let mut followed: FxHashSet<(usize, String)> = FxHashSet::default();
+    let mut followed: FxHashSet<(usize, Name)> = FxHashSet::default();
     let mut pending = vec![resolved.clone()];
     while let Some((parts, starts)) = pending.pop() {
         let Some((index, modules)) = starts.last() else {
@@ -693,7 +694,7 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
         // longest module is followed, as `package.module.name` reads `name` from `package.module`.
         for &module in modules {
             let name = &parts[*index];
-            if let Some(binding) = project.facts[module].references.bindings.get(name)
+            if let Some(binding) = project.facts[module].references.bindings.get(name.as_str())
                 && followed.insert((module, name.clone()))
                 && let Some(next) = resolve_import(
                     &project.names[module],
@@ -1045,7 +1046,7 @@ struct Graph<'a> {
     /// The members of each enum of the project, by its file and its name in the module, with their
     /// names.
     enums: FxHashMap<(usize, String), (Vec<DefinitionId>, FxHashSet<String>)>,
-    by_name: FxHashMap<(usize, String), Vec<DefinitionId>>,
+    by_name: FxHashMap<(usize, Name), Vec<DefinitionId>>,
     by_attribute: FxHashMap<String, Vec<DefinitionId>>,
     by_key: FxHashMap<String, Vec<DefinitionId>>,
     public: FxHashMap<usize, Vec<DefinitionId>>,
@@ -1060,10 +1061,10 @@ struct Graph<'a> {
 /// What the uses of the owners followed so far read, so that each is looked up once.
 #[derive(Default)]
 struct Seen {
-    names: FxHashSet<(usize, String)>,
-    attributes: FxHashSet<String>,
+    names: FxHashSet<(usize, Name)>,
+    attributes: FxHashSet<Name>,
     keys: FxHashSet<String>,
-    objects: FxHashSet<(usize, Vec<String>)>,
+    objects: FxHashSet<(usize, Vec<Name>)>,
     stars: FxHashSet<usize>,
 }
 
@@ -1074,7 +1075,7 @@ impl<'a> Graph<'a> {
         fields: &FxHashSet<DefinitionId>,
         enums: FxHashMap<(usize, String), Vec<DefinitionId>>,
     ) -> Self {
-        let mut by_name: FxHashMap<(usize, String), Vec<DefinitionId>> = FxHashMap::default();
+        let mut by_name: FxHashMap<(usize, Name), Vec<DefinitionId>> = FxHashMap::default();
         let mut by_attribute: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         let mut by_key: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         let mut public: FxHashMap<usize, Vec<DefinitionId>> = FxHashMap::default();
@@ -1093,7 +1094,7 @@ impl<'a> Graph<'a> {
                 .contains(&(id - project.first_definition[*file]));
             if !is_local && definition.class.is_none() {
                 by_name
-                    .entry((*file, definition.name.clone()))
+                    .entry((*file, Name::new(&definition.name)))
                     .or_default()
                     .push(id);
             }
@@ -1211,7 +1212,7 @@ impl<'a> Graph<'a> {
             {
                 found.extend(
                     self.by_attribute
-                        .get(attribute)
+                        .get(attribute.as_str())
                         .into_iter()
                         .flatten()
                         .copied(),
@@ -1247,11 +1248,11 @@ impl<'a> Graph<'a> {
     /// A member read as an attribute, as in `Color.RED`, is used by its name. Any other read of an enum,
     /// such as `Color(value)`, `list(Color)`, `Color.parse(text)` or an annotation, can reach any
     /// member, so it uses them all.
-    fn enums_read(&self, file: usize, parts: &[String]) -> Vec<DefinitionId> {
+    fn enums_read(&self, file: usize, parts: &[Name]) -> Vec<DefinitionId> {
         let mut found = Vec::new();
         for index in 1..=parts.len() {
             if let Some((members, names)) = self.enums.get(&(file, parts[..index].join(".")))
-                && (index == parts.len() || !names.contains(&parts[index]))
+                && (index == parts.len() || !names.contains(parts[index].as_str()))
             {
                 found.extend(members);
             }
