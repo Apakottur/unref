@@ -1,9 +1,12 @@
 //! The unused definitions of a Python project, which are those that nothing references.
 
+use std::cell::OnceCell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
+use ruff_python_ast::name::Name;
+use ruff_python_stdlib::builtins::is_python_builtin;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::{ClassHierarchy, join};
@@ -37,6 +40,7 @@ const NODE_VISITOR_PREFIX: &str = "visit_";
 /// `Protocol`, as `typing` and `typing_extensions` give it out, whose members a class has without
 /// inheriting from it.
 const PROTOCOLS: [&str; 2] = ["typing.Protocol", "typing_extensions.Protocol"];
+const ABSTRACT_METHOD: &str = "abc.abstractmethod";
 
 /// A definition of the project, by its index among the definitions of every file in order.
 type DefinitionId = usize;
@@ -47,14 +51,14 @@ type ClassId = usize;
 #[derive(Default)]
 struct Uses {
     /// The names of the modules of the project that the code uses, each with its module.
-    names: FxHashSet<(usize, String)>,
+    names: FxHashSet<(usize, Name)>,
     /// The names that the code reads as attributes of an object.
-    attributes: FxHashSet<String>,
+    attributes: FxHashSet<Name>,
     /// The string keys that the code reads from a mapping.
     keys: FxHashSet<String>,
     /// The objects of the modules of the project that the code reads, each with its module and its
     /// name in the module followed by the attributes that are read from it, in order.
-    objects: FxHashSet<(usize, Vec<String>)>,
+    objects: FxHashSet<(usize, Vec<Name>)>,
     /// The modules that the code star imports.
     stars: FxHashSet<usize>,
     /// The functions and classes that are local variables of a function, the members of a class read
@@ -126,6 +130,8 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             .or_default()
             .push(index);
     }
+    let mut external = ExternalModules::new(search_path(&files, &names, options.python.as_deref()));
+    import_siblings(&mut facts, &names, &files_by_name, &mut external);
 
     let mut definitions = Vec::new();
     let mut definition_files = Vec::new();
@@ -158,12 +164,16 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             ))
         })
         .collect();
-    let hierarchy = make_hierarchy(&project, modules, options.python.as_deref());
+    let hierarchy = ClassHierarchy::new(modules, project.files_by_name.clone(), external);
     let typed_dicts = subclass_attributes(&project, &hierarchy, &TYPED_DICTS);
     let enums = subclass_attributes(&project, &hierarchy, &ENUMS);
     let fields: FxHashSet<DefinitionId> = typed_dicts.values().flatten().copied().collect();
     let classes = Classes::new(&project, &hierarchy, &fields);
-    let uses = find_uses(&project, &classes);
+    let typed_dicts: FxHashMap<String, Vec<DefinitionId>> = typed_dicts
+        .into_iter()
+        .map(|((file, class), fields)| (join(&project.names[file].name, &class), fields))
+        .collect();
+    let uses = find_uses(&project, &classes, &typed_dicts);
 
     let file_definitions: Vec<ProjectFile> = (0..project.files.len())
         .map(|index| {
@@ -193,7 +203,8 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     );
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
 
-    let mut graph = Graph::new(&project, &uses, &fields, enums);
+    let implementations = classes.implementations(&project);
+    let mut graph = Graph::new(&project, &uses, &fields, enums, implementations);
 
     // An ignore comment is needed for a definition that is unused without it. Such a definition is
     // then used, and so is what it uses.
@@ -251,9 +262,22 @@ impl Project {
 /// A plain name refers to the module that it is read in, and an imported name to the module that it
 /// is imported from. A member of a class of the project that is plain, as in `self.name`,
 /// `super().name`, `Class.name` or `Class().name`, is matched in the classes that it can be in, and
-/// any other attribute of an object by name only.
-fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), Uses> {
+/// any other attribute of an object by name only. A TypedDict of the project that is read as a whole,
+/// or passed to a function from outside the project, has all its fields used, and those of the
+/// TypedDicts that it inherits from.
+///
+/// `typed_dicts` are the fields of each TypedDict of the project, by its dotted name.
+fn find_uses(
+    project: &Project,
+    classes: &Classes,
+    typed_dicts: &FxHashMap<String, Vec<DefinitionId>>,
+) -> FxHashMap<(usize, Owner), Uses> {
     let mut uses: FxHashMap<(usize, Owner), Uses> = FxHashMap::default();
+    // The names of the TypedDicts, so that a value that cannot be one is not resolved.
+    let typed_dict_names: FxHashSet<&str> = typed_dicts
+        .keys()
+        .map(|dotted| dotted.rsplit('.').next().unwrap_or(dotted))
+        .collect();
     for (file, file_facts) in project.facts.iter().enumerate() {
         let references = &file_facts.references;
         let module = &project.names[file].name;
@@ -331,7 +355,7 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
                 if import.name == "*" {
                     owner_uses.stars.insert(imported);
                 } else {
-                    owner_uses.names.insert((imported, import.name.clone()));
+                    owner_uses.names.insert((imported, Name::new(&import.name)));
                 }
             }
         }
@@ -356,6 +380,37 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
                 .keys
                 .insert(name.clone());
         }
+        for read in &references.whole_reads {
+            // A TypedDict is called by its name, or by a name that it is imported as.
+            let (root, _) = read.value.split_once('.').unwrap_or((&read.value, ""));
+            let last = read.value.rsplit('.').next().unwrap_or(&read.value);
+            let imported = references
+                .bindings
+                .get(root)
+                .and_then(|binding| binding.name.as_deref());
+            if !typed_dict_names.contains(last)
+                && !imported.is_some_and(|name| typed_dict_names.contains(name))
+            {
+                continue;
+            }
+            let fields: Vec<DefinitionId> = classes
+                .hierarchy
+                .resolve(file, &read.value)
+                .iter()
+                .flat_map(|dotted| typed_dicts.get(dotted).into_iter().flatten().copied())
+                .collect();
+            if !fields.is_empty()
+                && read
+                    .reader
+                    .as_ref()
+                    .is_none_or(|reader| is_external(project, classes.hierarchy, file, reader))
+            {
+                uses.entry((file, read.owner))
+                    .or_default()
+                    .definitions
+                    .extend(fields);
+            }
+        }
         for (owner, index) in &references.local_reads {
             uses.entry((file, *owner))
                 .or_default()
@@ -369,11 +424,11 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
 impl Uses {
     /// Add a read of a member: the definitions that it can stand for, or its name if it is not known
     /// what it is read from.
-    fn add_member(&mut self, found: Option<Vec<DefinitionId>>, name: &str) {
+    fn add_member(&mut self, found: Option<Vec<DefinitionId>>, name: &Name) {
         match found {
             Some(found) => self.definitions.extend(found),
             None => {
-                self.attributes.insert(name.to_string());
+                self.attributes.insert(name.clone());
             }
         }
     }
@@ -385,6 +440,8 @@ struct Classes<'a> {
     hierarchy: &'a ClassHierarchy,
     /// Each class by its file and its name in the module.
     ids: FxHashMap<(usize, String), ClassId>,
+    /// The definition of each class.
+    definitions: Vec<DefinitionId>,
     /// The classes by their dotted names, such as `package.module.Class`.
     by_dotted: FxHashMap<String, Vec<ClassId>>,
     /// The names of the classes, without their modules, so that a name that cannot be a class is not
@@ -396,8 +453,12 @@ struct Classes<'a> {
     descendants: Vec<Vec<ClassId>>,
     /// Whether each class is a metaclass, whose instances are classes of their own.
     metaclasses: Vec<bool>,
-    /// The members of each class by their name. A field of a `TypedDict` is read as a key instead.
-    by_member: FxHashMap<(ClassId, String), Vec<DefinitionId>>,
+    /// The classes that a member read from the first parameter of a method of each class can be in,
+    /// and from `super()` in it, found when first needed.
+    lineages: Vec<[OnceCell<Vec<ClassId>>; 2]>,
+    /// The members of the classes, by their name and then their class. A field of a `TypedDict` is
+    /// read as a key instead.
+    by_member: FxHashMap<String, FxHashMap<ClassId, Vec<DefinitionId>>>,
     /// The members, by their name, of the classes that any member read can stand for: the
     /// protocols, which a class matches without inheriting from them, and the classes that inherit
     /// from a base class that is not known, such as a call or a variable, and the classes that
@@ -413,9 +474,15 @@ impl<'a> Classes<'a> {
     ) -> Self {
         let mut keys: Vec<(usize, String)> = Vec::new();
         let mut ids = FxHashMap::default();
+        let mut definitions = Vec::new();
         let mut by_dotted: FxHashMap<String, Vec<ClassId>> = FxHashMap::default();
         let mut names = FxHashSet::default();
-        for (file, definition) in project.definition_files.iter().zip(&project.definitions) {
+        for (definition_id, (file, definition)) in project
+            .definition_files
+            .iter()
+            .zip(&project.definitions)
+            .enumerate()
+        {
             if definition.kind == Kind::Class {
                 let key = (*file, definition.qualified_name());
                 if ids.contains_key(&key) {
@@ -423,6 +490,7 @@ impl<'a> Classes<'a> {
                 }
                 let id = keys.len();
                 ids.insert(key.clone(), id);
+                definitions.push(definition_id);
                 let dotted = join(&project.names[*file].name, &key.1);
                 by_dotted.entry(dotted).or_default().push(id);
                 names.insert(definition.name.clone());
@@ -478,7 +546,8 @@ impl<'a> Classes<'a> {
                         .any(|&class| unknown_bases[class])
             })
             .collect();
-        let mut by_member: FxHashMap<(ClassId, String), Vec<DefinitionId>> = FxHashMap::default();
+        let mut by_member: FxHashMap<String, FxHashMap<ClassId, Vec<DefinitionId>>> =
+            FxHashMap::default();
         let mut loose: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         for (id, (file, definition)) in project
             .definition_files
@@ -491,7 +560,9 @@ impl<'a> Classes<'a> {
                 && let Some(&class) = ids.get(&(*file, class_name.clone()))
             {
                 by_member
-                    .entry((class, definition.name.clone()))
+                    .entry(definition.name.clone())
+                    .or_default()
+                    .entry(class)
                     .or_default()
                     .push(id);
                 if is_loose[class] {
@@ -502,9 +573,13 @@ impl<'a> Classes<'a> {
         Self {
             hierarchy,
             ids,
+            definitions,
             by_dotted,
             names,
             ancestors,
+            lineages: std::iter::repeat_with(Default::default)
+                .take(descendants.len())
+                .collect(),
             descendants,
             metaclasses,
             by_member,
@@ -521,9 +596,10 @@ impl<'a> Classes<'a> {
         classes: impl IntoIterator<Item = ClassId>,
         name: &str,
     ) -> Option<Vec<DefinitionId>> {
+        let by_class = self.by_member.get(name)?;
         let mut found = Vec::new();
         for class in classes {
-            if let Some(members) = self.by_member.get(&(class, name.to_string())) {
+            if let Some(members) = by_class.get(&class) {
                 found.extend(members);
             }
         }
@@ -573,22 +649,89 @@ impl<'a> Classes<'a> {
         skip_own: bool,
     ) -> Option<Vec<DefinitionId>> {
         let &id = self.ids.get(&(file, class.to_string()))?;
-        if self.metaclasses[id] {
+        if self.metaclasses[id] || !self.by_member.contains_key(name) {
             return None;
         }
-        let mut lineage: FxHashSet<ClassId> = FxHashSet::default();
-        for &instance in std::iter::once(&id).chain(&self.descendants[id]) {
-            lineage.insert(instance);
-            lineage.extend(&self.ancestors[instance]);
-        }
-        if skip_own {
-            lineage.remove(&id);
-            for descendant in &self.descendants[id] {
-                lineage.remove(descendant);
+        let lineage = self.lineages[id][usize::from(skip_own)].get_or_init(|| {
+            let mut lineage: FxHashSet<ClassId> = FxHashSet::default();
+            for &instance in std::iter::once(&id).chain(&self.descendants[id]) {
+                lineage.insert(instance);
+                lineage.extend(&self.ancestors[instance]);
+            }
+            if skip_own {
+                lineage.remove(&id);
+                for descendant in &self.descendants[id] {
+                    lineage.remove(descendant);
+                }
+            }
+            lineage.into_iter().collect()
+        });
+        self.members(lineage.iter().copied(), name)
+    }
+
+    /// Find the implementations of each abstract method: the members of its name in the classes that
+    /// inherit from its class, each with the definition of its class.
+    fn implementations(
+        &self,
+        project: &Project,
+    ) -> FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>> {
+        let mut implementations = FxHashMap::default();
+        for (id, (file, definition)) in project
+            .definition_files
+            .iter()
+            .zip(&project.definitions)
+            .enumerate()
+        {
+            let Some(class_name) = &definition.class else {
+                continue;
+            };
+            if !definition.kind.is_function() || definition.decorators.is_empty() {
+                continue;
+            }
+            let (Some(&class), Some(by_class)) = (
+                self.ids.get(&(*file, class_name.clone())),
+                self.by_member.get(&definition.name),
+            ) else {
+                continue;
+            };
+            let found: Vec<(DefinitionId, DefinitionId)> = self.descendants[class]
+                .iter()
+                .flat_map(|&subclass| {
+                    by_class
+                        .get(&subclass)
+                        .into_iter()
+                        .flatten()
+                        .map(move |&member| (self.definitions[subclass], member))
+                })
+                .collect();
+            if !found.is_empty()
+                && definition.decorators.iter().any(|decorator| {
+                    self.hierarchy
+                        .resolve(*file, decorator)
+                        .contains(ABSTRACT_METHOD)
+                })
+            {
+                implementations.insert(id, found);
             }
         }
-        self.members(lineage, name)
+        implementations
     }
+}
+
+/// Check whether a function, as it is written in a module, is from outside the project: a builtin, or
+/// a name that the module imports from outside the project. Any other name, such as a method of a local
+/// variable, is not known.
+fn is_external(project: &Project, hierarchy: &ClassHierarchy, file: usize, written: &str) -> bool {
+    let root = written.split('.').next().unwrap_or(written);
+    // The builtins of any version of Python.
+    let is_known = project.facts[file].references.bindings.contains_key(root)
+        || is_python_builtin(root, u8::MAX, false);
+    is_known
+        && hierarchy.resolve(file, written).iter().all(|name| {
+            !name
+                .match_indices('.')
+                .any(|(index, _)| project.files_by_name.contains_key(&name[..index]))
+        })
 }
 
 /// Check whether a base class of a class, as it is written in its module, is not known: it is
@@ -626,7 +769,7 @@ fn is_unknown_class(
 /// The dotted name that an imported name and the attributes read from it stand for, as its parts,
 /// and each shorter start of it that is a module of the project, shortest first, as its number of
 /// parts with its files.
-type Resolved = (Vec<String>, Vec<(usize, Vec<usize>)>);
+type Resolved = (Vec<Name>, Vec<(usize, Vec<usize>)>);
 
 /// Find the dotted name that an imported name, and the attributes read from it, stand for.
 ///
@@ -634,13 +777,13 @@ type Resolved = (Vec<String>, Vec<(usize, Vec<usize>)>);
 fn resolve_import(
     module: &ModuleName,
     binding: &Binding,
-    attributes: &[String],
+    attributes: &[Name],
     files_by_name: &FxHashMap<String, Vec<usize>>,
 ) -> Option<Resolved> {
     let resolved = module.resolve(binding.module.as_deref(), binding.level)?;
-    let mut parts: Vec<String> = resolved.split('.').map(ToString::to_string).collect();
+    let mut parts: Vec<Name> = resolved.split('.').map(Name::new).collect();
     if let Some(name) = binding.name.as_ref().filter(|name| !name.is_empty()) {
-        parts.push(name.clone());
+        parts.push(Name::new(name));
     }
     parts.extend(attributes.iter().cloned());
     let starts = (1..parts.len())
@@ -657,11 +800,11 @@ fn resolve_import(
 /// it, stand for, through the modules that import the name in turn.
 ///
 /// Returns each object with its module, and its name in the module followed by the attributes.
-fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize, Vec<String>)> {
+fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize, Vec<Name>)> {
     let mut found = FxHashSet::default();
     // Each binding that is followed is followed once, which ends a cycle of modules that import the
     // names of each other.
-    let mut followed: FxHashSet<(usize, String)> = FxHashSet::default();
+    let mut followed: FxHashSet<(usize, Name)> = FxHashSet::default();
     let mut pending = vec![resolved.clone()];
     while let Some((parts, starts)) = pending.pop() {
         let Some((index, modules)) = starts.last() else {
@@ -678,7 +821,7 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
         // longest module is followed, as `package.module.name` reads `name` from `package.module`.
         for &module in modules {
             let name = &parts[*index];
-            if let Some(binding) = project.facts[module].references.bindings.get(name)
+            if let Some(binding) = project.facts[module].references.bindings.get(name.as_str())
                 && followed.insert((module, name.clone()))
                 && let Some(next) = resolve_import(
                     &project.names[module],
@@ -694,22 +837,17 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
     found
 }
 
-/// Build the hierarchy of the classes of a project.
+/// Get the directories that a module from outside the project is looked for in.
 ///
 /// A module from outside the project is looked for where the modules of the project are imported from
 /// first, as an excluded module is, then in the directories of `PYTHONPATH`, in the site-packages of
 /// the environment of the project, if there is one, and then in the standard library.
-fn make_hierarchy(
-    project: &Project,
-    modules: Vec<Arc<ModuleSymbols>>,
-    python: Option<&Path>,
-) -> ClassHierarchy {
+fn search_path(files: &[Arc<Path>], names: &[ModuleName], python: Option<&Path>) -> Vec<PathBuf> {
     let mut search_path: Vec<PathBuf> = Vec::new();
     let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
-    let roots = project
-        .files
+    let roots = files
         .iter()
-        .zip(&project.names)
+        .zip(names)
         .map(|(path, name)| import_root(path, name));
     // The directories of `PYTHONPATH` come before the installed packages, as Python puts them.
     let python_path: Vec<PathBuf> = std::env::var_os("PYTHONPATH")
@@ -730,11 +868,107 @@ fn make_hierarchy(
             search_path.push(path);
         }
     }
-    ClassHierarchy::new(
-        modules,
-        project.files_by_name.clone(),
-        ExternalModules::new(search_path),
-    )
+    search_path
+}
+
+/// Make the absolute imports of the scripts in a package that only a module beside them can stand
+/// for relative imports of it. Python runs a script with its own directory first on the import path,
+/// so that `from helpers import name` in a script imports `helpers.py` beside it, and so do the
+/// modules beside it that it imports in turn.
+///
+/// A module of the project or of the environment with the name comes first, as Python finds it when
+/// the module is imported rather than run.
+fn import_siblings(
+    facts: &mut [FileFacts],
+    names: &[ModuleName],
+    files_by_name: &FxHashMap<String, Vec<usize>>,
+    external: &mut ExternalModules,
+) {
+    // The names of the modules and packages of the project, with every package above a module.
+    let known: FxHashSet<&str> = files_by_name
+        .keys()
+        .flat_map(|name| {
+            name.match_indices('.')
+                .map(|(index, _)| &name[..index])
+                .chain([name.as_str()])
+        })
+        .collect();
+    let package_of = |file: usize| {
+        let name = &names[file];
+        (!name.is_package)
+            .then(|| name.name.rsplit_once('.').map(|(package, _)| package))
+            .flatten()
+    };
+    let mut pending: Vec<usize> = (0..facts.len())
+        .filter(|&file| facts[file].is_script && package_of(file).is_some())
+        .collect();
+    let mut seen: FxHashSet<usize> = pending.iter().copied().collect();
+    let mut is_elsewhere: FxHashMap<String, bool> = FxHashMap::default();
+    while let Some(file) = pending.pop() {
+        let Some(package) = package_of(file) else {
+            continue;
+        };
+        let mut siblings: Vec<String> = Vec::new();
+        import_relative(&mut facts[file], |module, level| {
+            let Some(top) = module.and_then(|module| module.split('.').next()) else {
+                return false;
+            };
+            let sibling = format!("{package}.{top}");
+            let is_sibling = level == 0
+                && !known.contains(top)
+                && known.contains(sibling.as_str())
+                && !*is_elsewhere
+                    .entry(top.to_string())
+                    .or_insert_with(|| external.exists(top));
+            if is_sibling {
+                siblings.push(sibling);
+            }
+            is_sibling
+        });
+        for sibling in siblings {
+            for &imported in files_by_name.get(&sibling).into_iter().flatten() {
+                if package_of(imported).is_some() && seen.insert(imported) {
+                    pending.push(imported);
+                }
+            }
+        }
+    }
+}
+
+/// Make the imports of a file that `is_sibling` tells, by their module and their number of leading
+/// dots, relative imports from its package.
+fn import_relative(
+    file_facts: &mut FileFacts,
+    mut is_sibling: impl FnMut(Option<&str>, u32) -> bool,
+) {
+    let references = &mut file_facts.references;
+    references.imports = std::mem::take(&mut references.imports)
+        .into_iter()
+        .map(|mut import| {
+            if is_sibling(import.module.as_deref(), import.level) {
+                import.level = 1;
+            }
+            import
+        })
+        .collect();
+    references.imported_reads = std::mem::take(&mut references.imported_reads)
+        .into_iter()
+        .map(|mut read| {
+            if is_sibling(read.binding.module.as_deref(), read.binding.level) {
+                read.binding.level = 1;
+            }
+            read
+        })
+        .collect();
+    for binding in references
+        .bindings
+        .values_mut()
+        .chain(file_facts.lazy.values_mut().flatten())
+    {
+        if is_sibling(binding.module.as_deref(), binding.level) {
+            binding.level = 1;
+        }
+    }
 }
 
 /// Find the attributes of the classes of a project that inherit from given base classes, such as the
@@ -1043,10 +1277,15 @@ struct Graph<'a> {
     /// The members of each enum of the project, by its file and its name in the module, with their
     /// names.
     enums: FxHashMap<(usize, String), (Vec<DefinitionId>, FxHashSet<String>)>,
-    by_name: FxHashMap<(usize, String), Vec<DefinitionId>>,
+    by_name: FxHashMap<(usize, Name), Vec<DefinitionId>>,
     by_attribute: FxHashMap<String, Vec<DefinitionId>>,
     by_key: FxHashMap<String, Vec<DefinitionId>>,
     public: FxHashMap<usize, Vec<DefinitionId>>,
+    /// The implementations of each abstract method, each with the definition of its class. An
+    /// implementation is used once both the abstract method and its class are.
+    implementations: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
+    /// The implementations of used abstract methods, by the class that is not used yet.
+    waiting: FxHashMap<DefinitionId, Vec<DefinitionId>>,
     /// What is used so far, and what is left to follow. An owner is left to follow once: a module at
     /// the start, and a function when it is first used, as no two functions of a file have their name
     /// on the same line.
@@ -1058,10 +1297,10 @@ struct Graph<'a> {
 /// What the uses of the owners followed so far read, so that each is looked up once.
 #[derive(Default)]
 struct Seen {
-    names: FxHashSet<(usize, String)>,
-    attributes: FxHashSet<String>,
+    names: FxHashSet<(usize, Name)>,
+    attributes: FxHashSet<Name>,
     keys: FxHashSet<String>,
-    objects: FxHashSet<(usize, Vec<String>)>,
+    objects: FxHashSet<(usize, Vec<Name>)>,
     stars: FxHashSet<usize>,
 }
 
@@ -1071,8 +1310,9 @@ impl<'a> Graph<'a> {
         uses: &'a FxHashMap<(usize, Owner), Uses>,
         fields: &FxHashSet<DefinitionId>,
         enums: FxHashMap<(usize, String), Vec<DefinitionId>>,
+        implementations: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
     ) -> Self {
-        let mut by_name: FxHashMap<(usize, String), Vec<DefinitionId>> = FxHashMap::default();
+        let mut by_name: FxHashMap<(usize, Name), Vec<DefinitionId>> = FxHashMap::default();
         let mut by_attribute: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         let mut by_key: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         let mut public: FxHashMap<usize, Vec<DefinitionId>> = FxHashMap::default();
@@ -1091,7 +1331,7 @@ impl<'a> Graph<'a> {
                 .contains(&(id - project.first_definition[*file]));
             if !is_local && definition.class.is_none() {
                 by_name
-                    .entry((*file, definition.name.clone()))
+                    .entry((*file, Name::new(&definition.name)))
                     .or_default()
                     .push(id);
             }
@@ -1136,6 +1376,8 @@ impl<'a> Graph<'a> {
             by_attribute,
             by_key,
             public,
+            implementations,
+            waiting: FxHashMap::default(),
             used: vec![false; project.definitions.len()],
             // The code of every module runs.
             pending: (0..project.files.len()).map(|file| (file, None)).collect(),
@@ -1209,7 +1451,7 @@ impl<'a> Graph<'a> {
             {
                 found.extend(
                     self.by_attribute
-                        .get(attribute)
+                        .get(attribute.as_str())
                         .into_iter()
                         .flatten()
                         .copied(),
@@ -1245,11 +1487,11 @@ impl<'a> Graph<'a> {
     /// A member read as an attribute, as in `Color.RED`, is used by its name. Any other read of an enum,
     /// such as `Color(value)`, `list(Color)`, `Color.parse(text)` or an annotation, can reach any
     /// member, so it uses them all.
-    fn enums_read(&self, file: usize, parts: &[String]) -> Vec<DefinitionId> {
+    fn enums_read(&self, file: usize, parts: &[Name]) -> Vec<DefinitionId> {
         let mut found = Vec::new();
         for index in 1..=parts.len() {
             if let Some((members, names)) = self.enums.get(&(file, parts[..index].join(".")))
-                && (index == parts.len() || !names.contains(&parts[index]))
+                && (index == parts.len() || !names.contains(parts[index].as_str()))
             {
                 found.extend(members);
             }
@@ -1257,19 +1499,30 @@ impl<'a> Graph<'a> {
         found
     }
 
-    /// Mark definitions as used, and queue the code of the functions among them.
+    /// Mark definitions as used, with the implementations of abstract methods that they make used, and
+    /// queue the code of the functions among them.
     fn add(&mut self, definitions: impl IntoIterator<Item = DefinitionId>) {
-        for id in definitions {
-            if !self.used[id] {
-                self.used[id] = true;
-                let (file, definition) = (
-                    &self.project.definition_files[id],
-                    &self.project.definitions[id],
-                );
-                if definition.kind.is_function() {
-                    self.pending.push((*file, Some(definition.line)));
+        let mut queue: Vec<DefinitionId> = definitions.into_iter().collect();
+        while let Some(id) = queue.pop() {
+            if self.used[id] {
+                continue;
+            }
+            self.used[id] = true;
+            let (file, definition) = (
+                &self.project.definition_files[id],
+                &self.project.definitions[id],
+            );
+            if definition.kind.is_function() {
+                self.pending.push((*file, Some(definition.line)));
+            }
+            for &(class, method) in self.implementations.get(&id).into_iter().flatten() {
+                if self.used[class] {
+                    queue.push(method);
+                } else {
+                    self.waiting.entry(class).or_default().push(method);
                 }
             }
+            queue.extend(self.waiting.remove(&id).into_iter().flatten());
         }
     }
 }

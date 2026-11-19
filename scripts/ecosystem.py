@@ -15,19 +15,27 @@ from pathlib import Path
 import shpyx
 import typer
 
-# Projects that use the frameworks that unref knows.
+# The projects that unref runs on.
 _PROJECTS = {
+    "black": "https://github.com/psf/black",
     "django": "https://github.com/django/django",
     "fastapi": "https://github.com/fastapi/fastapi",
     "flask": "https://github.com/pallets/flask",
+    "freqtrade": "https://github.com/freqtrade/freqtrade",
     "full-stack-fastapi-template": "https://github.com/fastapi/full-stack-fastapi-template",
     "mealie": "https://github.com/mealie-recipes/mealie",
+    "openlibrary": "https://github.com/internetarchive/openlibrary",
+    "prefect": "https://github.com/PrefectHQ/prefect",
     "pydantic": "https://github.com/pydantic/pydantic",
     "pytest": "https://github.com/pytest-dev/pytest",
     "rich": "https://github.com/Textualize/rich",
     "saleor": "https://github.com/saleor/saleor",
     "sphinx": "https://github.com/sphinx-doc/sphinx",
     "sqlalchemy": "https://github.com/sqlalchemy/sqlalchemy",
+    "starlette": "https://github.com/Kludex/starlette",
+    "strawberry": "https://github.com/strawberry-graphql/strawberry",
+    "werkzeug": "https://github.com/pallets/werkzeug",
+    "zulip": "https://github.com/zulip/zulip",
 }
 # The changes shown for each project. A comment on GitHub holds at most 65536 characters.
 _MAX_CHANGES = 50

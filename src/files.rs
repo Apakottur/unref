@@ -5,7 +5,7 @@ use std::sync::{Arc, LazyLock};
 
 use rayon::prelude::*;
 use regex::bytes::Regex;
-use ruff_python_ast::{ModModule, Stmt};
+use ruff_python_ast::{CmpOp, Expr, ModModule, Stmt};
 use ruff_python_parser::Parsed;
 use ruff_text_size::Ranged;
 use rustc_hash::FxHashMap;
@@ -34,6 +34,8 @@ pub(crate) struct FileFacts {
     pub ignore_findings: Vec<Finding>,
     /// The names that the file gives out from its `__getattr__`, each with the imports of it.
     pub lazy: FxHashMap<String, Vec<Binding>>,
+    /// Whether the file is run as a script: it checks `if __name__ == "__main__":` at its top level.
+    pub is_script: bool,
 }
 
 /// Find what each Python file defines and refers to, or a finding for a file that does not parse.
@@ -72,6 +74,30 @@ pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
         ignore_comments,
         ignore_findings,
         lazy,
+        is_script: is_script(parsed.syntax()),
+    })
+}
+
+/// Check whether a module checks `if __name__ == "__main__":` at its top level, in either order.
+fn is_script(module: &ModModule) -> bool {
+    module.body.iter().any(|stmt| {
+        let Stmt::If(stmt_if) = stmt else {
+            return false;
+        };
+        let Expr::Compare(compare) = &*stmt_if.test else {
+            return false;
+        };
+        let [CmpOp::Eq] = &*compare.ops else {
+            return false;
+        };
+        let [left, right] = &*compare.operands else {
+            return false;
+        };
+        let is_name = |expr: &Expr| matches!(expr, Expr::Name(name) if name.id == "__name__");
+        let is_main = |expr: &Expr| {
+            matches!(expr, Expr::StringLiteral(literal) if literal.value.to_str() == "__main__")
+        };
+        (is_name(left) && is_main(right)) || (is_main(left) && is_name(right))
     })
 }
 

@@ -28,7 +28,7 @@ uses. Unused code piles up in every codebase, faster than ever now that AI tools
 - **Fast**: 20x faster than [vulture](https://github.com/jendrikseipp/vulture), it checks all of CPython's Python
   code in under a second.
 - **Just works**: built-in rules for pytest, Django, Flask, Pydantic, SQLAlchemy and
-  [more](configuration.md#frameworks), so most projects need little or no configuration.
+  [more](frameworks.md), so most projects need little or no configuration.
 - **Flexible**: works for applications and libraries alike, see
   [what counts as dead code](faq.md#what-counts-as-dead-code).
 - **Modern**: follows the conventions of [Ruff](https://docs.astral.sh/ruff/) and [ty](https://docs.astral.sh/ty/).

@@ -1,0 +1,60 @@
+name: Publish Comparison
+
+# Posts the report of the comparison with main on its pull request, also on one from a fork, whose CI run has a
+# read-only token. This workflow has write access, so it never checks out or runs code of the pull request, and
+# treats the report and the number of its artifact as untrusted.
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: [CI]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  comment:
+    name: Comment on the pull request
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to download the artifact of the CI run.
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Download the report
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: compare-report
+          path: ${{ runner.temp }}/compare
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      # A run of a fork could name any pull request, so its number must be one whose head is the head of the run.
+      # A newer push to the pull request skips the comment, as the run of that push posts its own.
+      - name: Check the pull request number
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          NUMBER_FILE: ${{ runner.temp }}/compare/number
+        run: |
+          number=$(head -c 20 "$NUMBER_FILE" | tr -d '[:space:]')
+          if ! [[ "$number" =~ ^[0-9]+$ ]]; then
+            echo "Not a pull request number: $number"
+            exit 1
+          fi
+          pr_sha=$(gh api "repos/$REPO/pulls/$number" --jq .head.sha)
+          if [ "$pr_sha" != "$HEAD_SHA" ]; then
+            echo "The head of pull request #$number is $pr_sha, not $HEAD_SHA"
+            exit 0
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Comment on the pull request
+        if: steps.pr.outputs.number != ''
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: compare
+          number_force: ${{ steps.pr.outputs.number }}
+          path: ${{ runner.temp }}/compare/report.md
+          ignore_empty: true

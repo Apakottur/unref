@@ -1,3 +1,4 @@
+abstractmethod
 addoption
 addopts
 anyio
@@ -33,7 +34,9 @@ fastapi
 feff
 fnmatch
 fnmatchcase
+freqtrade
 getattr
+hasattr
 httpx
 ignorelist
 isenabled
@@ -57,6 +60,7 @@ modifyitems
 musllinux
 mypy
 mysite
+openlibrary
 pathlib
 pathspec
 peekable
@@ -67,6 +71,7 @@ profdata
 profraw
 purelib
 pycache
+pypi
 Pydantic
 Pydocstyle
 pypackages
@@ -81,6 +86,7 @@ rfind
 Rozantsev
 rsplit
 rustc
+rustup
 saleor
 sdist
 setdefault
@@ -91,6 +97,7 @@ softprops
 sqlalchemy
 startproject
 staticmethod
+stdlib
 strerror
 subclassing
 Swatinem
@@ -106,3 +113,5 @@ vararg
 venv
 wsgi
 Yossi
+zizmor
+zulip
