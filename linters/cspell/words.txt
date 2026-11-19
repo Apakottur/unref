@@ -67,6 +67,7 @@ profdata
 profraw
 purelib
 pycache
+pypi
 Pydantic
 Pydocstyle
 pypackages

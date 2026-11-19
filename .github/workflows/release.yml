@@ -89,6 +89,7 @@ jobs:
     name: Release
     needs: [wheels, sdist]
     runs-on: ubuntu-latest
+    environment: pypi
 
     permissions:
       # Required for PyPI Trusted Publishing (OIDC), so no API token is stored.
