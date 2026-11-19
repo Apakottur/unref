@@ -6,16 +6,16 @@ requires = ["maturin>=1.9,<2.0"]
 dev = [
   "httpx==0.28.1",
   "mypy==2.4.1",
-  "prek==0.5.10",
+  "prek==0.5.11",
   "pytest==9.2.0",
-  "ruff==0.17.4",
-  "shpyx==1.0.0",
-  "ty==0.0.101",
-  "typer==0.29.1",
+  "ruff==0.17.5",
+  "shpyx==1.0.2",
+  "ty==0.0.107",
+  "typer==0.29.2",
 ]
 docs = [
   #
-  "zensical==0.1.1",
+  "zensical==0.1.2",
 ]
 
 [project]
