@@ -35,6 +35,7 @@ fnmatch
 fnmatchcase
 freqtrade
 getattr
+hasattr
 httpx
 ignorelist
 isenabled
