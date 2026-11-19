@@ -26,4 +26,3 @@ body:
     attributes:
       label: Version
       description: The output of `unref --version`.
-      placeholder: unref 0.2.0
