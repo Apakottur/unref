@@ -128,6 +128,8 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             .or_default()
             .push(index);
     }
+    let mut external = ExternalModules::new(search_path(&files, &names, options.python.as_deref()));
+    import_siblings(&mut facts, &names, &files_by_name, &mut external);
 
     let mut definitions = Vec::new();
     let mut definition_files = Vec::new();
@@ -160,7 +162,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             ))
         })
         .collect();
-    let hierarchy = make_hierarchy(&project, modules, options.python.as_deref());
+    let hierarchy = ClassHierarchy::new(modules, project.files_by_name.clone(), external);
     let typed_dicts = subclass_attributes(&project, &hierarchy, &TYPED_DICTS);
     let enums = subclass_attributes(&project, &hierarchy, &ENUMS);
     let fields: FxHashSet<DefinitionId> = typed_dicts.values().flatten().copied().collect();
@@ -710,22 +712,17 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
     found
 }
 
-/// Build the hierarchy of the classes of a project.
+/// Get the directories that a module from outside the project is looked for in.
 ///
 /// A module from outside the project is looked for where the modules of the project are imported from
 /// first, as an excluded module is, then in the directories of `PYTHONPATH`, in the site-packages of
 /// the environment of the project, if there is one, and then in the standard library.
-fn make_hierarchy(
-    project: &Project,
-    modules: Vec<Arc<ModuleSymbols>>,
-    python: Option<&Path>,
-) -> ClassHierarchy {
+fn search_path(files: &[Arc<Path>], names: &[ModuleName], python: Option<&Path>) -> Vec<PathBuf> {
     let mut search_path: Vec<PathBuf> = Vec::new();
     let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
-    let roots = project
-        .files
+    let roots = files
         .iter()
-        .zip(&project.names)
+        .zip(names)
         .map(|(path, name)| import_root(path, name));
     // The directories of `PYTHONPATH` come before the installed packages, as Python puts them.
     let python_path: Vec<PathBuf> = std::env::var_os("PYTHONPATH")
@@ -746,11 +743,107 @@ fn make_hierarchy(
             search_path.push(path);
         }
     }
-    ClassHierarchy::new(
-        modules,
-        project.files_by_name.clone(),
-        ExternalModules::new(search_path),
-    )
+    search_path
+}
+
+/// Make the absolute imports of the scripts in a package that only a module beside them can stand
+/// for relative imports of it. Python runs a script with its own directory first on the import path,
+/// so that `from helpers import name` in a script imports `helpers.py` beside it, and so do the
+/// modules beside it that it imports in turn.
+///
+/// A module of the project or of the environment with the name comes first, as Python finds it when
+/// the module is imported rather than run.
+fn import_siblings(
+    facts: &mut [FileFacts],
+    names: &[ModuleName],
+    files_by_name: &FxHashMap<String, Vec<usize>>,
+    external: &mut ExternalModules,
+) {
+    // The names of the modules and packages of the project, with every package above a module.
+    let known: FxHashSet<&str> = files_by_name
+        .keys()
+        .flat_map(|name| {
+            name.match_indices('.')
+                .map(|(index, _)| &name[..index])
+                .chain([name.as_str()])
+        })
+        .collect();
+    let package_of = |file: usize| {
+        let name = &names[file];
+        (!name.is_package)
+            .then(|| name.name.rsplit_once('.').map(|(package, _)| package))
+            .flatten()
+    };
+    let mut pending: Vec<usize> = (0..facts.len())
+        .filter(|&file| facts[file].is_script && package_of(file).is_some())
+        .collect();
+    let mut seen: FxHashSet<usize> = pending.iter().copied().collect();
+    let mut is_elsewhere: FxHashMap<String, bool> = FxHashMap::default();
+    while let Some(file) = pending.pop() {
+        let Some(package) = package_of(file) else {
+            continue;
+        };
+        let mut siblings: Vec<String> = Vec::new();
+        import_relative(&mut facts[file], |module, level| {
+            let Some(top) = module.and_then(|module| module.split('.').next()) else {
+                return false;
+            };
+            let sibling = format!("{package}.{top}");
+            let is_sibling = level == 0
+                && !known.contains(top)
+                && known.contains(sibling.as_str())
+                && !*is_elsewhere
+                    .entry(top.to_string())
+                    .or_insert_with(|| external.exists(top));
+            if is_sibling {
+                siblings.push(sibling);
+            }
+            is_sibling
+        });
+        for sibling in siblings {
+            for &imported in files_by_name.get(&sibling).into_iter().flatten() {
+                if package_of(imported).is_some() && seen.insert(imported) {
+                    pending.push(imported);
+                }
+            }
+        }
+    }
+}
+
+/// Make the imports of a file that `is_sibling` tells, by their module and their number of leading
+/// dots, relative imports from its package.
+fn import_relative(
+    file_facts: &mut FileFacts,
+    mut is_sibling: impl FnMut(Option<&str>, u32) -> bool,
+) {
+    let references = &mut file_facts.references;
+    references.imports = std::mem::take(&mut references.imports)
+        .into_iter()
+        .map(|mut import| {
+            if is_sibling(import.module.as_deref(), import.level) {
+                import.level = 1;
+            }
+            import
+        })
+        .collect();
+    references.imported_reads = std::mem::take(&mut references.imported_reads)
+        .into_iter()
+        .map(|mut read| {
+            if is_sibling(read.binding.module.as_deref(), read.binding.level) {
+                read.binding.level = 1;
+            }
+            read
+        })
+        .collect();
+    for binding in references
+        .bindings
+        .values_mut()
+        .chain(file_facts.lazy.values_mut().flatten())
+    {
+        if is_sibling(binding.module.as_deref(), binding.level) {
+            binding.level = 1;
+        }
+    }
 }
 
 /// Find the attributes of the classes of a project that inherit from given base classes, such as the
