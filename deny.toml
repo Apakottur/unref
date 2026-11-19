@@ -1,0 +1,21 @@
+# The configuration of cargo-deny, which checks the advisories, licenses and sources of the dependencies.
+
+[graph]
+all-features = true
+
+[advisories]
+# Fail on a yanked version, as Renovate updates to a release that is not.
+yanked = "deny"
+
+[licenses]
+# Each dependency needs one of its licenses here, so licenses that only appear as an alternative to these are left out.
+allow = ["Apache-2.0", "BSD-3-Clause", "MIT", "Unicode-3.0", "Unicode-DFS-2016"]
+
+[bans]
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# Ruff's crates are not published on crates.io.
+allow-git = ["https://github.com/astral-sh/ruff"]
