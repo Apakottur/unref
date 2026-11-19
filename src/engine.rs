@@ -1,5 +1,6 @@
 //! The unused definitions of a Python project, which are those that nothing references.
 
+use std::cell::OnceCell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
@@ -396,8 +397,12 @@ struct Classes<'a> {
     descendants: Vec<Vec<ClassId>>,
     /// Whether each class is a metaclass, whose instances are classes of their own.
     metaclasses: Vec<bool>,
-    /// The members of each class by their name. A field of a `TypedDict` is read as a key instead.
-    by_member: FxHashMap<(ClassId, String), Vec<DefinitionId>>,
+    /// The classes that a member read from the first parameter of a method of each class can be in,
+    /// and from `super()` in it, found when first needed.
+    lineages: Vec<[OnceCell<Vec<ClassId>>; 2]>,
+    /// The members of the classes, by their name and then their class. A field of a `TypedDict` is
+    /// read as a key instead.
+    by_member: FxHashMap<String, FxHashMap<ClassId, Vec<DefinitionId>>>,
     /// The members, by their name, of the classes that any member read can stand for: the
     /// protocols, which a class matches without inheriting from them, and the classes that inherit
     /// from a base class that is not known, such as a call or a variable, and the classes that
@@ -478,7 +483,8 @@ impl<'a> Classes<'a> {
                         .any(|&class| unknown_bases[class])
             })
             .collect();
-        let mut by_member: FxHashMap<(ClassId, String), Vec<DefinitionId>> = FxHashMap::default();
+        let mut by_member: FxHashMap<String, FxHashMap<ClassId, Vec<DefinitionId>>> =
+            FxHashMap::default();
         let mut loose: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         for (id, (file, definition)) in project
             .definition_files
@@ -491,7 +497,9 @@ impl<'a> Classes<'a> {
                 && let Some(&class) = ids.get(&(*file, class_name.clone()))
             {
                 by_member
-                    .entry((class, definition.name.clone()))
+                    .entry(definition.name.clone())
+                    .or_default()
+                    .entry(class)
                     .or_default()
                     .push(id);
                 if is_loose[class] {
@@ -505,6 +513,9 @@ impl<'a> Classes<'a> {
             by_dotted,
             names,
             ancestors,
+            lineages: std::iter::repeat_with(Default::default)
+                .take(descendants.len())
+                .collect(),
             descendants,
             metaclasses,
             by_member,
@@ -521,9 +532,10 @@ impl<'a> Classes<'a> {
         classes: impl IntoIterator<Item = ClassId>,
         name: &str,
     ) -> Option<Vec<DefinitionId>> {
+        let by_class = self.by_member.get(name)?;
         let mut found = Vec::new();
         for class in classes {
-            if let Some(members) = self.by_member.get(&(class, name.to_string())) {
+            if let Some(members) = by_class.get(&class) {
                 found.extend(members);
             }
         }
@@ -573,21 +585,24 @@ impl<'a> Classes<'a> {
         skip_own: bool,
     ) -> Option<Vec<DefinitionId>> {
         let &id = self.ids.get(&(file, class.to_string()))?;
-        if self.metaclasses[id] {
+        if self.metaclasses[id] || !self.by_member.contains_key(name) {
             return None;
         }
-        let mut lineage: FxHashSet<ClassId> = FxHashSet::default();
-        for &instance in std::iter::once(&id).chain(&self.descendants[id]) {
-            lineage.insert(instance);
-            lineage.extend(&self.ancestors[instance]);
-        }
-        if skip_own {
-            lineage.remove(&id);
-            for descendant in &self.descendants[id] {
-                lineage.remove(descendant);
+        let lineage = self.lineages[id][usize::from(skip_own)].get_or_init(|| {
+            let mut lineage: FxHashSet<ClassId> = FxHashSet::default();
+            for &instance in std::iter::once(&id).chain(&self.descendants[id]) {
+                lineage.insert(instance);
+                lineage.extend(&self.ancestors[instance]);
             }
-        }
-        self.members(lineage, name)
+            if skip_own {
+                lineage.remove(&id);
+                for descendant in &self.descendants[id] {
+                    lineage.remove(descendant);
+                }
+            }
+            lineage.into_iter().collect()
+        });
+        self.members(lineage.iter().copied(), name)
     }
 }
 
