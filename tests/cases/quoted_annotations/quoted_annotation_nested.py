@@ -44,7 +44,7 @@ def take(
     sixth: Annotated["InAnnotated", "InMetadata"],
     seventh: Literal["InLiteral"],
 ) -> None:
-    print(first, second, third, fourth, fifth, sixth, seventh)
+    first, second, third, fourth, fifth, sixth, seventh
 
 
 take([], None, 1, print, {}, 1, "InLiteral")

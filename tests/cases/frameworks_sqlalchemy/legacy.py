@@ -23,4 +23,4 @@ class Order(DecoratedBase):
     total = Column(Integer)
 
 
-print(Account, Order)
+Account, Order

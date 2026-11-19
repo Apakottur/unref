@@ -18,4 +18,4 @@ def second():
     return Dummy()
 
 
-print(first(), second())
+first(), second()

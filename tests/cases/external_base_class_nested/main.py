@@ -51,4 +51,4 @@ class FromMissing(Outer.Missing):
         return record
 
 
-print(Handler, FromExternal, FromImported, FromReexport, FromLazy, FromMissing)
+Handler, FromExternal, FromImported, FromReexport, FromLazy, FromMissing

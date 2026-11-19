@@ -8,7 +8,7 @@ class Default:  # expect: 7 [unused-class]
 
 
 def take(value: int = "Default") -> None:  # type: ignore[assignment]
-    print("Plain", value)
+    "Plain", value
 
 
 take()

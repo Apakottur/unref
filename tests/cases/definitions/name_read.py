@@ -17,4 +17,4 @@ OTHER = 20  # expect: 1 [unused-variable]
 function()
 Class()
 sorted([1, 2, 3], key=key)
-print(LIMIT)
+LIMIT

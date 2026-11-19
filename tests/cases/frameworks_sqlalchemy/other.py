@@ -13,4 +13,4 @@ class NotModel(Base):
     id = Column(Integer)  # expect: 5 [unused-attribute]
 
 
-print(NotModel)
+NotModel

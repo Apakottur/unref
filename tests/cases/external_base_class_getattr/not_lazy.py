@@ -4,4 +4,4 @@ def load():
     return Handler
 
 
-print(load)
+load

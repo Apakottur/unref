@@ -14,8 +14,8 @@ class Box:
 
 
 def measure(item: Sized) -> None:
-    print(item)
+    item
 
 
 measure(Box())
-print(Box().size())
+Box().size()

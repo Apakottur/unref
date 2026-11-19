@@ -4,7 +4,7 @@ mapping = 2  # expect: 1 [unused-variable]
 GROUPS = [[3], [4]]
 MAPPINGS = [{"a": 5}]
 
-print([*items for items in GROUPS])
-print({*items for items in GROUPS})
-print({**mapping for mapping in MAPPINGS})
-print(list(*items for items in GROUPS))
+[*items for items in GROUPS]
+{*items for items in GROUPS}
+{**mapping for mapping in MAPPINGS}
+list(*items for items in GROUPS)

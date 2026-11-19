@@ -76,4 +76,4 @@ def plain_command():  # expect: 5 [unused-function]
 
 app.cli.add_command(users)
 app.register_blueprint(bp)
-print(register, plain)
+register, plain

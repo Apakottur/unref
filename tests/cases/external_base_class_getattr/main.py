@@ -44,4 +44,4 @@ class FromOtherFunction(not_lazy.Handler):
         return record
 
 
-print(Executor, Processes, FromLazy, FromComputed, FromTooFar, FromOtherFunction)
+Executor, Processes, FromLazy, FromComputed, FromTooFar, FromOtherFunction

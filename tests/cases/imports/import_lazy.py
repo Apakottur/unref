@@ -5,4 +5,4 @@ lazy from import_lazy_helpers import function
 
 __lazy_modules__ = ["json"]
 
-print(function(), Renamed(), import_lazy_other.used())
+function(), Renamed(), import_lazy_other.used()

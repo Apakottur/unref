@@ -1,0 +1,28 @@
+# The test cases under `tests/cases`, which `ruff.toml` excludes, are checked only to keep them small.
+
+# The cases use the syntax of the newest Python.
+target-version = "py315"
+
+output-format = "concise"
+
+# A fix would remove code that a case tests.
+fix = false
+
+extend-exclude = [
+  # Invalid Python on purpose.
+  "tests/cases/syntax_error/bad.py",
+  "tests/cases/override_base_class_external/vendored/broken.py",
+  # Encoded in other encodings than UTF-8, which Ruff does not read.
+  "tests/cases/columns/cp1252.py",
+  "tests/cases/columns/euc_jp.py",
+  "tests/cases/columns/latin1.py",
+]
+
+[lint]
+select = [
+  "T20", # `print`: use a name as a bare expression instead
+  "PIE790", # Unnecessary `pass`
+  "B015", # Pointless comparison
+  "RET504", # Unnecessary assignment before `return`
+  "RUF100", # Unused suppression comment
+]

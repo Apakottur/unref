@@ -11,4 +11,4 @@ class FromStarCycleMissing(Nowhere):
     table_name = {}  # expect: 5 [unused-attribute]
 
 
-print(FromStarCycle, FromStarCycleMissing)
+FromStarCycle, FromStarCycleMissing

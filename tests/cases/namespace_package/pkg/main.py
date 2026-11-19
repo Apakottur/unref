@@ -9,4 +9,4 @@ class Child(Base):
     pass
 
 
-print(by_absolute(), pkg.sub.mod.by_attribute(), pkg.sub.deeper.mod.by_nested_attribute())
+by_absolute(), pkg.sub.mod.by_attribute(), pkg.sub.deeper.mod.by_nested_attribute()

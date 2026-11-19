@@ -2,4 +2,4 @@
 from missing import function
 from os import path
 
-print(function(), path)
+function(), path

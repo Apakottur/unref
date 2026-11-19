@@ -31,4 +31,4 @@ def read_defaults():
     return keys()
 
 
-print(read(), read_defaults())
+read(), read_defaults()

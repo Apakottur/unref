@@ -61,7 +61,7 @@ class Referenced:
         return 21
 
 
-print(referenced(), Referenced().referenced_method())  # unref: ignore[unused-function]  # expect: 56 [unused-ignore-comment]
+referenced(), Referenced().referenced_method()  # unref: ignore[unused-function]  # expect: 49 [unused-ignore-comment]
 visit_name = 22  # unref: ignore[unused-variable]  # expect: 18 [unused-ignore-comment]
 __version__ = 23  # unref: ignore[unused-variable]  # expect: 19 [unused-ignore-comment]
 

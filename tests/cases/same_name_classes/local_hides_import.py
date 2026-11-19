@@ -21,4 +21,4 @@ class Group(Model):
     name: str
 
 
-print(User, Group, make())
+User, Group, make()

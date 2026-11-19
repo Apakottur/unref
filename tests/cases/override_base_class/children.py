@@ -57,4 +57,4 @@ class FromTooFar(TooFar):
     table_name = {}  # expect: 5 [unused-attribute]
 
 
-print(FromImport, FromModule, FromNested, FromNestedModule, FromSubmodule, FromReexport, FromMissing, FromUndefined, FromCycle, FromBeyond, FromTooFar)
+FromImport, FromModule, FromNested, FromNestedModule, FromSubmodule, FromReexport, FromMissing, FromUndefined, FromCycle, FromBeyond, FromTooFar

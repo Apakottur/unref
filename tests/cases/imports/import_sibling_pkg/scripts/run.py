@@ -8,4 +8,4 @@ import json
 from import_from_module_helpers import Class
 
 if __name__ == "__main__":
-    print(warn("no data"), helpers_module.used(), json.dumps({}), Class)
+    warn("no data"), helpers_module.used(), json.dumps({}), Class

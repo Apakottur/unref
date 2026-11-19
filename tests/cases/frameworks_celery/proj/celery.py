@@ -12,4 +12,4 @@ app.autodiscover_tasks()
 # Celery's workers run the tasks that the decorators of an application register.
 @app.task(bind=True, ignore_result=True)
 def debug_task(self):
-    print(self.request)
+    self.request
