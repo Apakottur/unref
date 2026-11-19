@@ -1,4 +1,4 @@
-//! What a module defines and imports at its top level.
+//! What a module defines, at its top level or not, and imports at its top level.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -9,8 +9,8 @@ use crate::definitions::{Definition, Kind};
 use crate::modules::ModuleName;
 use crate::references::{Binding, References};
 
-/// What a module defines and imports at its top level, as the base classes and decorators of its
-/// classes are followed through it, whether it is a module of the project or one outside it.
+/// What a module defines, at its top level or not, and imports at its top level, as the base classes
+/// and decorators of its classes are followed through it, whether it is a module of the project or one outside it.
 #[derive(Debug)]
 pub(crate) struct ModuleSymbols {
     /// The file of the module.
@@ -34,7 +34,7 @@ pub(crate) struct ModuleSymbols {
 }
 
 impl ModuleSymbols {
-    /// Collect what a module defines and imports at its top level.
+    /// Collect what a module defines, and what it imports at its top level.
     pub(crate) fn of(
         path: Arc<Path>,
         name: ModuleName,

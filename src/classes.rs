@@ -86,14 +86,26 @@ impl ClassHierarchy {
     /// `module` is the module of the class and `name` its name in the module.
     pub(crate) fn ancestors(&self, module: usize, name: &str) -> Names {
         cached(&self.ancestors, module, name, || {
-            let mut seen = FxHashSet::default();
             let mut found = FxHashSet::default();
             let symbols = self.module(module);
             for base in symbols.bases.get(name).into_iter().flatten() {
-                self.resolve_written(module, base, &mut seen, &mut found);
+                found.extend(self.resolve(module, base).iter().cloned());
             }
             found
         })
+    }
+
+    /// Check whether a class inherits from one of the given classes, by their dotted names, directly
+    /// or not.
+    pub(crate) fn inherits(&self, module: usize, name: &str, bases: &[impl AsRef<str>]) -> bool {
+        let ancestors = self.ancestors(module, name);
+        bases.iter().any(|base| ancestors.contains(base.as_ref()))
+    }
+
+    /// Check whether a name, as it is written in a module, resolves to one of the given dotted names.
+    pub(crate) fn resolves_to(&self, module: usize, written: &str, names: &[&str]) -> bool {
+        let resolved = self.resolve(module, written);
+        names.iter().any(|name| resolved.contains(*name))
     }
 
     /// Get the names of the members that a class inherits from the base classes outside the project.

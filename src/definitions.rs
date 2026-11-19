@@ -98,7 +98,7 @@ impl Definition {
 /// The kind of expression that a dotted name is unwrapped from.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Unwrap {
-    /// A decorator, such as `app.command` for `@app.command("name")`.
+    /// A decorator or a call, such as `app.command` for `@app.command("name")`.
     Call,
     /// A base class or an annotation, such as `pydantic.BaseModel` for `pydantic.BaseModel[int]`.
     Subscript,
@@ -124,7 +124,8 @@ pub(crate) fn annotation_name(annotation: &Expr) -> String {
     dotted_name(annotation, Unwrap::Subscript).unwrap_or_default()
 }
 
-/// Get the dotted name of a decorator or a base class.
+/// Get the dotted name of an expression, such as a decorator, a base class, an annotation or what a
+/// call calls.
 ///
 /// Returns None if the expression is not a dotted name, for example `@decorators[0]` or `make_base()`.
 pub(crate) fn dotted_name(expression: &Expr, unwrap: Unwrap) -> Option<String> {

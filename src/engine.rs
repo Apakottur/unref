@@ -255,6 +255,22 @@ impl Project {
     fn file_definitions(&self, file: usize) -> &[Definition] {
         &self.definitions[self.ids_of_file(file)]
     }
+
+    /// Every definition, with its id and its file.
+    fn definitions_by_file(&self) -> impl Iterator<Item = (DefinitionId, usize, &Definition)> {
+        self.definition_files
+            .iter()
+            .zip(&self.definitions)
+            .enumerate()
+            .map(|(id, (&file, definition))| (id, file, definition))
+    }
+
+    /// Check whether a dotted name is in a module of the project: whether a start of it, shorter than
+    /// the whole, is the name of one.
+    fn holds(&self, name: &str) -> bool {
+        name.match_indices('.')
+            .any(|(index, _)| self.files_by_name.contains_key(&name[..index]))
+    }
 }
 
 /// Find what the code of each owner uses.
@@ -289,8 +305,7 @@ fn find_uses(
             // Each attribute, and the one read from the result of the call, is read from the chain
             // before it.
             for (index, attribute) in read.attributes.iter().chain(&read.called).enumerate() {
-                let written = join(module, &parts[..=index].join("."));
-                owner_uses.add_member(classes.read_from(&written, attribute), attribute);
+                owner_uses.add_member_of(classes, module, &parts[..=index], attribute);
             }
             if read.reads_object {
                 owner_uses.objects.insert((file, parts));
@@ -316,8 +331,7 @@ fn find_uses(
                     .extend(imported_objects(&resolved, project));
             }
             if let Some(called) = &read.called {
-                let written = resolved.0.join(".");
-                owner_uses.add_member(classes.read_from(&written, called), called);
+                owner_uses.add_member_of(classes, "", &resolved.0, called);
             }
             if read.attributes.is_empty() {
                 continue;
@@ -340,9 +354,7 @@ fn find_uses(
                 .max()
                 .unwrap_or(0);
             for index in first_of_object..parts.len() {
-                let written = parts[..index].join(".");
-                let found = classes.read_from(&written, &parts[index]);
-                owner_uses.add_member(found, &parts[index]);
+                owner_uses.add_member_of(classes, "", &parts[..index], &parts[index]);
             }
         }
 
@@ -422,6 +434,15 @@ fn find_uses(
 }
 
 impl Uses {
+    /// Add a read of a member from a chain of names, such as `name` from `package.module.Class`.
+    ///
+    /// `module` is the module that the chain is written in, or empty for a chain that starts with
+    /// the name of a module.
+    fn add_member_of(&mut self, classes: &Classes, module: &str, chain: &[Name], name: &Name) {
+        let written = join(module, &chain.join("."));
+        self.add_member(classes.read_from(&written, name), name);
+    }
+
     /// Add a read of a member: the definitions that it can stand for, or its name if it is not known
     /// what it is read from.
     fn add_member(&mut self, found: Option<Vec<DefinitionId>>, name: &Name) {
@@ -676,12 +697,7 @@ impl<'a> Classes<'a> {
         project: &Project,
     ) -> FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>> {
         let mut implementations = FxHashMap::default();
-        for (id, (file, definition)) in project
-            .definition_files
-            .iter()
-            .zip(&project.definitions)
-            .enumerate()
-        {
+        for (id, file, definition) in project.definitions_by_file() {
             let Some(class_name) = &definition.class else {
                 continue;
             };
@@ -689,7 +705,7 @@ impl<'a> Classes<'a> {
                 continue;
             }
             let (Some(&class), Some(by_class)) = (
-                self.ids.get(&(*file, class_name.clone())),
+                self.ids.get(&(file, class_name.clone())),
                 self.by_member.get(&definition.name),
             ) else {
                 continue;
@@ -707,7 +723,7 @@ impl<'a> Classes<'a> {
             if !found.is_empty()
                 && definition.decorators.iter().any(|decorator| {
                     self.hierarchy
-                        .resolve(*file, decorator)
+                        .resolve(file, decorator)
                         .contains(ABSTRACT_METHOD)
                 })
             {
@@ -727,11 +743,10 @@ fn is_external(project: &Project, hierarchy: &ClassHierarchy, file: usize, writt
     let is_known = project.facts[file].references.bindings.contains_key(root)
         || is_python_builtin(root, u8::MAX, false);
     is_known
-        && hierarchy.resolve(file, written).iter().all(|name| {
-            !name
-                .match_indices('.')
-                .any(|(index, _)| project.files_by_name.contains_key(&name[..index]))
-        })
+        && hierarchy
+            .resolve(file, written)
+            .iter()
+            .all(|name| !project.holds(name))
 }
 
 /// Check whether a base class of a class, as it is written in its module, is not known: it is
@@ -757,12 +772,7 @@ fn is_unknown_class(
                 .iter()
                 .any(|definition| definition.class.is_none() && definition.name == written);
         }
-        let parts: Vec<&str> = name.split('.').collect();
-        (1..parts.len()).any(|index| {
-            project
-                .files_by_name
-                .contains_key(&parts[..index].join("."))
-        })
+        project.holds(name)
     })
 }
 
@@ -983,25 +993,17 @@ fn subclass_attributes(
     bases: &[&str],
 ) -> FxHashMap<(usize, String), Vec<DefinitionId>> {
     let mut attributes: FxHashMap<(usize, String), Vec<DefinitionId>> = FxHashMap::default();
-    for (id, (file, definition)) in project
-        .definition_files
-        .iter()
-        .zip(&project.definitions)
-        .enumerate()
-    {
+    for (id, file, definition) in project.definitions_by_file() {
         if definition.kind == Kind::Attribute
             && let Some(class) = &definition.class
         {
             attributes
-                .entry((*file, class.clone()))
+                .entry((file, class.clone()))
                 .or_default()
                 .push(id);
         }
     }
-    attributes.retain(|(file, class), _| {
-        let ancestors = hierarchy.ancestors(*file, class);
-        bases.iter().any(|base| ancestors.contains(*base))
-    });
+    attributes.retain(|(file, class), _| hierarchy.inherits(*file, class, bases));
     attributes
 }
 
@@ -1059,10 +1061,10 @@ fn find_roots(
                 // A method of a node visitor of `ast`, which its `visit` calls by the name of the node.
                 || (definition.kind == Kind::Method
                     && name.starts_with(NODE_VISITOR_PREFIX)
-                    && definition.class.as_ref().is_some_and(|class| {
-                        let ancestors = hierarchy.ancestors(file, class);
-                        NODE_VISITORS.iter().any(|visitor| ancestors.contains(*visitor))
-                    }))
+                    && definition
+                        .class
+                        .as_ref()
+                        .is_some_and(|class| hierarchy.inherits(file, class, &NODE_VISITORS)))
                 // The objects that the entry points name.
                 || entry_objects
                     .get(&file)
@@ -1096,12 +1098,10 @@ fn covers(
     // An override with base classes applies to what is defined in a class that inherits from one of
     // them.
     if !item.base_classes.is_empty() {
-        let inherits = definition.class.as_ref().is_some_and(|class| {
-            let ancestors = hierarchy.ancestors(file, class);
-            item.base_classes
-                .iter()
-                .any(|base| ancestors.contains(base))
-        });
+        let inherits = definition
+            .class
+            .as_ref()
+            .is_some_and(|class| hierarchy.inherits(file, class, &item.base_classes));
         if !inherits {
             return false;
         }
@@ -1303,22 +1303,17 @@ impl<'a> Graph<'a> {
         let mut by_attribute: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         let mut by_key: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         let mut public: FxHashMap<usize, Vec<DefinitionId>> = FxHashMap::default();
-        for (id, (file, definition)) in project
-            .definition_files
-            .iter()
-            .zip(&project.definitions)
-            .enumerate()
-        {
+        for (id, file, definition) in project.definitions_by_file() {
             // Only a definition of the module itself is read by its name. A function or class that is a
             // local variable of a function, and a member of a class read in its class body, are read
             // by their definition.
-            let is_local = project.facts[*file]
+            let is_local = project.facts[file]
                 .references
                 .local_definitions
-                .contains(&(id - project.first_definition[*file]));
+                .contains(&(id - project.first_definition[file]));
             if !is_local && definition.class.is_none() {
                 by_name
-                    .entry((*file, Name::new(&definition.name)))
+                    .entry((file, Name::new(&definition.name)))
                     .or_default()
                     .push(id);
             }
@@ -1336,12 +1331,12 @@ impl<'a> Graph<'a> {
             // already, or every public name of the module if there is no `__all__`. A method, an
             // attribute, or a function or class that is a local variable of a function is not a name
             // of the module.
-            if !project.facts[*file].references.has_all
+            if !project.facts[file].references.has_all
                 && !definition.name.starts_with('_')
                 && definition.class.is_none()
                 && !is_local
             {
-                public.entry(*file).or_default().push(id);
+                public.entry(file).or_default().push(id);
             }
         }
         let enums = enums
