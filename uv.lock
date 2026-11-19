@@ -31,7 +31,6 @@ version = "4.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "idna" },
-    { name = "typing-extensions", marker = "python_full_version < '3.15'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a1/98/7e457a3b014976887a050561955c0b76e1e7e2d6e27b78ecef2ef80518f2/anyio-4.16.0.tar.gz", hash = "sha256:59bb03251907983d1603d27c3087ddb1e93299ea2163adcdba37899a4fb12ffb", size = 310971, upload-time = "2026-11-01T11:20:07.282Z" }
 wheels = [
@@ -773,28 +772,8 @@ wheels = [
 
 [[package]]
 name = "pymdown-extensions"
-version = "12.3"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11.5'",
-]
-dependencies = [
-    { name = "markdown" },
-    { name = "pyyaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f3/fe/ac50ee24a80a1b344e643f6fb626063cc7041b978cd1dd9a7f9963ae1cd1/pymdown_extensions-12.3.tar.gz", hash = "sha256:a7f2a4e0bc60c6e6babfa7922cfb3b01cd640eb00fb208f3c582e12bae00ea67", size = 870532, upload-time = "2026-10-14T22:40:43.252Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/d0/758afe732c2da502c051b4d03ff88daa3c0fc1a1e671e6c5a6318177bab4/pymdown_extensions-12.3-py3-none-any.whl", hash = "sha256:345493a8e3497e24382902903a1c43a28e34a52f2b7571a1c9641429b820ca74", size = 277597, upload-time = "2026-10-14T22:40:41.543Z" },
-]
-
-[[package]]
-name = "pymdown-extensions"
 version = "13.1"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version >= '3.11.5' and python_full_version < '3.15'",
-]
 dependencies = [
     { name = "markdown" },
     { name = "pyyaml" },
@@ -1074,33 +1053,37 @@ source = { editable = "." }
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
-    { name = "mypy" },
-    { name = "prek" },
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "shpyx" },
-    { name = "ty" },
-    { name = "typer" },
+    { name = "httpx", marker = "python_full_version >= '3.15'" },
+    { name = "mypy", marker = "python_full_version >= '3.15'" },
+    { name = "prek", marker = "python_full_version >= '3.15'" },
+    { name = "pytest", marker = "python_full_version >= '3.15'" },
+    { name = "ruff", marker = "python_full_version >= '3.15'" },
+    { name = "shpyx", marker = "python_full_version >= '3.15'" },
+    { name = "ty", marker = "python_full_version >= '3.15'" },
+    { name = "typer", marker = "python_full_version >= '3.15'" },
 ]
 docs = [
-    { name = "zensical" },
+    { name = "zensical", marker = "python_full_version >= '3.15'" },
 ]
+
+[package.group-requires-python]
+dev = ">=3.15"
+docs = ">=3.15"
 
 [package.metadata]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = "==0.28.1" },
-    { name = "mypy", specifier = "==2.4.1" },
-    { name = "prek", specifier = "==0.5.11" },
-    { name = "pytest", specifier = "==9.2.0" },
-    { name = "ruff", specifier = "==0.17.5" },
-    { name = "shpyx", specifier = "==1.0.2" },
-    { name = "ty", specifier = "==0.0.107" },
-    { name = "typer", specifier = "==0.29.2" },
+    { name = "httpx", marker = "python_full_version >= '3.15'", specifier = "==0.28.1" },
+    { name = "mypy", marker = "python_full_version >= '3.15'", specifier = "==2.4.1" },
+    { name = "prek", marker = "python_full_version >= '3.15'", specifier = "==0.5.11" },
+    { name = "pytest", marker = "python_full_version >= '3.15'", specifier = "==9.2.0" },
+    { name = "ruff", marker = "python_full_version >= '3.15'", specifier = "==0.17.5" },
+    { name = "shpyx", marker = "python_full_version >= '3.15'", specifier = "==1.0.2" },
+    { name = "ty", marker = "python_full_version >= '3.15'", specifier = "==0.0.107" },
+    { name = "typer", marker = "python_full_version >= '3.15'", specifier = "==0.29.2" },
 ]
-docs = [{ name = "zensical", specifier = "==0.1.2" }]
+docs = [{ name = "zensical", marker = "python_full_version >= '3.15'", specifier = "==0.1.2" }]
 
 [[package]]
 name = "zensical"
@@ -1112,8 +1095,7 @@ dependencies = [
     { name = "markdown" },
     { name = "pathspec" },
     { name = "pygments" },
-    { name = "pymdown-extensions", version = "12.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11.5'" },
-    { name = "pymdown-extensions", version = "13.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11.5'" },
+    { name = "pymdown-extensions" },
     { name = "pyyaml" },
     { name = "tomli" },
     { name = "zensical-ui" },
