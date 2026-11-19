@@ -904,8 +904,7 @@ impl<'a> Walker<'_, '_> {
         let written_bases = class
             .arguments
             .as_deref()
-            .map(|arguments| &*arguments.args)
-            .unwrap_or_default();
+            .map_or_default(|arguments| &*arguments.args);
         let bases: Vec<String> = written_bases
             .iter()
             .filter_map(|base| dotted_name(base, Unwrap::Subscript))
