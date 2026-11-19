@@ -340,12 +340,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 Some(&assign.annotation),
                 true,
             ),
-            Stmt::AugAssign(assign) => self.visit_assign(
-                std::slice::from_ref(&*assign.target),
-                Some(&assign.value),
-                None,
-                false,
-            ),
+            Stmt::AugAssign(assign) => self.visit_augmented_assignment(assign),
             Stmt::For(loop_) => {
                 // A loop over a mapping reads its keys.
                 let values = self.value_calls(&loop_.iter);
@@ -390,13 +385,8 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 self.visit_attributes(base, attributes);
             }
             Expr::Subscript(subscript) => {
-                // A read of a string key (`value["name"]`).
                 if subscript.ctx == ExprContext::Load {
-                    self.add_key(&subscript.slice);
-                    // `globals()["name"]` reads the name from the module.
-                    if self.is_module_namespace(&subscript.value) {
-                        self.add_module_read(&subscript.slice);
-                    }
+                    self.read_subscript(subscript);
                 }
                 walk_expr(self, expr);
             }
@@ -1001,6 +991,41 @@ impl<'a> Walker<'_, '_> {
             );
         }
         self.bind_imports(bindings);
+    }
+
+    /// An augmented assignment reads its target before evaluating the value.
+    fn visit_augmented_assignment(&mut self, assign: &'a ast::StmtAugAssign) {
+        let target = &*assign.target;
+        match target {
+            Expr::Name(name) => {
+                self.add_read(&name.id, Vec::new(), None);
+                self.visit_assign(
+                    std::slice::from_ref(target),
+                    Some(&assign.value),
+                    None,
+                    false,
+                );
+            }
+            Expr::Subscript(subscript) => {
+                self.read_subscript(subscript);
+                walk_expr(self, target);
+                self.visit_expr(&assign.value);
+            }
+            _ => self.visit_assign(
+                std::slice::from_ref(target),
+                Some(&assign.value),
+                None,
+                false,
+            ),
+        }
+    }
+
+    /// A read of a subscript uses a literal key and, in `globals()`, the module name it denotes.
+    fn read_subscript(&mut self, subscript: &ast::ExprSubscript) {
+        self.add_key(&subscript.slice);
+        if self.is_module_namespace(&subscript.value) {
+            self.add_module_read(&subscript.slice);
+        }
     }
 
     /// Add the variables and attributes that an assignment defines, the names that an assignment to
