@@ -163,6 +163,14 @@ pub(crate) struct References {
     pub module_imports: Vec<(Owner, Name)>,
     /// Whether the module defines `__all__`.
     pub has_all: bool,
+    /// Names in a single, unconditional literal `__all__` assignment.
+    pub explicit_exports: FxHashSet<String>,
+    /// Names set by declarations in the module body.
+    pub declared_exports: FxHashSet<Name>,
+    /// Names explicitly deleted at module scope, whose export is uncertain.
+    pub deleted_exports: FxHashSet<Name>,
+    /// Unconditional star imports in the module body.
+    pub star_imports: Vec<Binding>,
     /// The names that the module imports at its top level, each with what it stands for.
     pub bindings: ModuleBindings,
     /// The functions and classes that are local variables of a function, by their index in the
@@ -219,6 +227,8 @@ pub(crate) fn walk_module(
         in_signature: false,
     };
     for stmt in &module.body {
+        walker.references.record_module_declarations(stmt);
+        let had_all = walker.references.has_all;
         if let Stmt::If(branch) = stmt
             && is_main_guard(&branch.test)
         {
@@ -233,11 +243,100 @@ pub(crate) fn walk_module(
         } else {
             walker.visit_stmt(stmt);
         }
+        if !had_all && walker.references.has_all {
+            let value = match stmt {
+                Stmt::Assign(assign) => Some(&*assign.value),
+                Stmt::AnnAssign(assign) => assign.value.as_deref(),
+                _ => None,
+            };
+            walker
+                .references
+                .explicit_exports
+                .extend(string_literals(value));
+        }
     }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
+    if !walker.references.explicit_exports.is_empty()
+        && walker
+            .references
+            .reads
+            .iter()
+            .any(|read| read.root.as_str() == "__all__")
+    {
+        // A reference to the list can mutate it, even through an alias.
+        walker.references.explicit_exports.clear();
+    }
     walker.references.bindings.primary = std::mem::take(&mut walker.scopes[0].imports);
     (walker.definitions, walker.references)
+}
+
+impl References {
+    fn record_module_declarations(&mut self, stmt: &Stmt) {
+        let names = &mut self.declared_exports;
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                names.insert(function.name.id.clone());
+            }
+            Stmt::ClassDef(class) => {
+                names.insert(class.name.id.clone());
+            }
+            Stmt::Assign(assign) => {
+                for target in &assign.targets {
+                    Self::record_export_target(names, target);
+                }
+            }
+            Stmt::AnnAssign(assign) if assign.value.is_some() => {
+                Self::record_export_target(names, &assign.target);
+            }
+            Stmt::Delete(delete) => {
+                for target in &delete.targets {
+                    Self::record_export_target(&mut self.deleted_exports, target);
+                }
+            }
+            Stmt::Import(import) => {
+                for alias in &import.names {
+                    let name = alias.asname.as_ref().map_or_else(
+                        || {
+                            let module = alias.name.as_str();
+                            Name::new(module.split_once('.').map_or(module, |(root, _)| root))
+                        },
+                        |name| name.id.clone(),
+                    );
+                    names.insert(name);
+                }
+            }
+            Stmt::ImportFrom(import) => {
+                for alias in &import.names {
+                    if alias.name.as_str() == "*" {
+                        self.star_imports.push(Binding {
+                            module: import.module.as_ref().map(ToString::to_string),
+                            level: import.level,
+                            name: None,
+                        });
+                    } else {
+                        names.insert(alias.asname.as_ref().unwrap_or(&alias.name).id.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn record_export_target(names: &mut FxHashSet<Name>, expr: &Expr) {
+        match expr {
+            Expr::Name(name) => {
+                names.insert(name.id.clone());
+            }
+            Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
+                for target in elts {
+                    Self::record_export_target(names, target);
+                }
+            }
+            Expr::Starred(starred) => Self::record_export_target(names, &starred.value),
+            _ => {}
+        }
+    }
 }
 
 /// Whether a test checks `__name__ == "__main__"`, in either order.
@@ -1122,6 +1221,7 @@ impl<'a> Walker<'_, '_> {
         // Only the `__all__` of the module is its public interface.
         if self.binder == 0 && targets.iter().any(is_all) {
             self.references.has_all = true;
+            self.references.explicit_exports.clear();
             for name in string_literals(value) {
                 self.references.reads.insert(Read {
                     owner: self.owner,

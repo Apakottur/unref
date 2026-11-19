@@ -200,6 +200,61 @@ def test_default_path(tmp_path: Path) -> None:
         ),
         pytest.param(
             {
+                "pkg/run.py": 'from sub import entry\nif __name__ == "__main__": print(entry())\n',
+                "pkg/sub/__init__.py": "from .provider import *\n",
+                "pkg/sub/provider.py": "def entry(): return 7\n",
+                "pkg/sub/entry.py": "from tasks import only_if_loaded\nprint(only_if_loaded())\n",
+                "pkg/tasks.py": "def only_if_loaded(): return -1\n",
+            },
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'only_if_loaded'\n",
+            id="wildcard-export-shadows-submodule",
+        ),
+        pytest.param(
+            {
+                "pkg/run.py": 'from sub import entry\nif __name__ == "__main__": print(entry.result)\n',
+                "pkg/sub/__init__.py": "from .provider import *\n",
+                "pkg/sub/provider.py": "__all__ = []\ndef entry(): return 7\n",
+                "pkg/sub/entry.py": "from tasks import used\nresult = used()\n",
+                "pkg/tasks.py": "def used(): return 7\n",
+            },
+            f"{Path('pkg/sub/provider.py')}:2:5: unused-function 'entry'\n",
+            id="unexported-name-allows-submodule-load",
+        ),
+        pytest.param(
+            {
+                "pkg/run.py": 'from sub import entry\nif __name__ == "__main__": print(entry.result)\n',
+                "pkg/sub/__init__.py": "from .provider import *\n",
+                "pkg/sub/provider.py": "if False:\n    def entry(): return 7\n",
+                "pkg/sub/entry.py": "from tasks import used\nresult = used()\n",
+                "pkg/tasks.py": "def used(): return 7\n",
+            },
+            "",
+            id="conditional-export-allows-submodule-load",
+        ),
+        pytest.param(
+            {
+                "pkg/run.py": 'from sub import entry\nif __name__ == "__main__": print(entry.result)\n',
+                "pkg/sub/__init__.py": "from .provider import *\n",
+                "pkg/sub/provider.py": '__all__ = ["entry"]\n__all__.clear()\ndef entry(): return 7\n',
+                "pkg/sub/entry.py": "from tasks import used\nresult = used()\n",
+                "pkg/tasks.py": "def used(): return 7\n",
+            },
+            "",
+            id="mutable-export-list-allows-submodule-load",
+        ),
+        pytest.param(
+            {
+                "pkg/run.py": 'from sub.parts.worker import execute\nif __name__ == "__main__": print(execute())\n',
+                "pkg/sub/parts.py": "from tasks import only_if_loaded\nprint(only_if_loaded())\n",
+                "pkg/sub/parts/__init__.py": "",
+                "pkg/sub/parts/worker.py": "from tasks import used\ndef execute(): return used()\n",
+                "pkg/tasks.py": "def only_if_loaded(): return -1\ndef used(): return 7\n",
+            },
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'only_if_loaded'\n",
+            id="package-shadows-module-at-dotted-prefix",
+        ),
+        pytest.param(
+            {
                 "pkg/run.py": 'from sub import execute\nif __name__ == "__main__": print(execute())\n',
                 "pkg/sub/__init__.py": "from .worker import execute\n",
                 "pkg/sub/worker.py": "def execute():\n    from tasks import value\n    return value()\n",
@@ -271,7 +326,9 @@ def test_script_sibling_contexts(tmp_path: Path, files: dict[str, str], unused: 
     (tmp_path / "pkg/__init__.py").touch()
     (tmp_path / "pkg/sub/__init__.py").touch()
     for name, source in files.items():
-        (tmp_path / name).write_text(source)
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source)
 
     result = run(["."], cwd=tmp_path)
 

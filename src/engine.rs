@@ -1151,6 +1151,66 @@ fn search_path(files: &[Arc<Path>], names: &[ModuleName], python: Option<&Path>)
     search_path
 }
 
+/// A package initializer takes precedence over a same-named module beside the package.
+fn sibling_import_files<'a>(
+    project: &'a Project,
+    module: &str,
+) -> impl Iterator<Item = usize> + 'a {
+    let files = project
+        .files_by_name
+        .get(module)
+        .map_or(&[][..], Vec::as_slice);
+    files.iter().copied().filter(|&file| {
+        project.names[file].is_package
+            || !files.iter().any(|&package| {
+                project.names[package].is_package
+                    && project.files[package].parent().and_then(Path::parent)
+                        == project.files[file].parent()
+            })
+    })
+}
+
+/// Whether a module's unconditional wildcard imports provide the given attribute.
+fn has_star_imported_name(
+    project: &Project,
+    file: usize,
+    name: &str,
+    mut resolve: impl FnMut(usize, &Binding) -> Option<String>,
+) -> bool {
+    let mut pending = vec![file];
+    let mut visited = FxHashSet::default();
+    while let Some(provider) = pending.pop() {
+        if !visited.insert(provider) {
+            continue;
+        }
+        let references = &project.facts[provider].references;
+        if references.deleted_exports.contains(name) {
+            continue;
+        }
+        if provider != file {
+            if references.has_all || references.declared_exports.contains("__all__") {
+                if references.explicit_exports.contains(name) {
+                    return true;
+                }
+                continue;
+            }
+            if name.starts_with('_') {
+                continue;
+            }
+            if references.declared_exports.contains(name) {
+                return true;
+            }
+        }
+
+        for binding in &references.star_imports {
+            if let Some(module) = resolve(provider, binding) {
+                pending.extend(sibling_import_files(project, &module));
+            }
+        }
+    }
+    false
+}
+
 /// Qualify absolute imports that resolve beside a script. Python runs a script with its directory
 /// first on the import path, and that directory is still on the path when a sibling package or one
 /// of its submodules imports another sibling.
@@ -1185,6 +1245,7 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
     let mut is_elsewhere: FxHashMap<String, bool> = FxHashMap::default();
     let mut scopes = FxHashMap::default();
     let mut flat_loads = Vec::new();
+    let mut wildcard_names = FxHashMap::default();
     while let Some(&(file, package)) = modules.get(imports.contexts.len()) {
         let next_scope = scopes.len();
         let mut context = SiblingContext {
@@ -1195,65 +1256,65 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
         };
         let mut siblings: FxHashSet<(Owner, String)> = FxHashSet::default();
         let mut flat_modules = FxHashSet::default();
-        let mut visit_import = |module: Option<&str>,
-                                level,
-                                imported: Option<&str>,
-                                owner: Owner,
-                                known_to_flat_walk| {
-            let qualified = if level == 0 {
-                let Some(module) = module else { return };
-                let top = module.split('.').next().unwrap_or_default();
-                let sibling = format!("{package}.{top}");
-                if known.contains(top)
-                    || !known.contains(sibling.as_str())
-                    || *is_elsewhere
-                        .entry(top.to_string())
-                        .or_insert_with(|| external.exists(top))
+        let mut qualify = |module: Option<&str>| {
+            let module = module?;
+            let top = module.split('.').next()?;
+            let sibling = format!("{package}.{top}");
+            (!known.contains(top)
+                && known.contains(sibling.as_str())
+                && !*is_elsewhere
+                    .entry(top.to_string())
+                    .or_insert_with(|| external.exists(top)))
+            .then(|| format!("{package}.{module}"))
+        };
+        let mut visit_import =
+            |module: Option<&str>,
+             level,
+             imported: Option<&str>,
+             owner: Owner,
+             known_to_flat_walk| {
+                let qualified = if level == 0 {
+                    let Some(module) = qualify(module) else {
+                        return;
+                    };
+                    module
+                } else if let Some(resolved) = names[file].resolve(module, level) {
+                    resolved
+                } else {
+                    return;
+                };
+                if !qualified
+                    .strip_prefix(package)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
                 {
                     return;
                 }
-                format!("{package}.{module}")
-            } else if let Some(resolved) = names[file].resolve(module, level) {
-                resolved
-            } else {
-                return;
-            };
-            if !qualified
-                .strip_prefix(package)
-                .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
-            {
-                return;
-            }
-            if level == 0
-                && let Some(module) = module
-            {
-                if known_to_flat_walk && !module.contains('.') {
-                    flat_modules.insert(qualified.clone());
+                if level == 0
+                    && let Some(module) = module
+                {
+                    if known_to_flat_walk && !module.contains('.') {
+                        flat_modules.insert(qualified.clone());
+                    }
+                    context
+                        .qualifications
+                        .insert(module.to_string(), qualified.clone());
+                    let targets = imports
+                        .qualifications
+                        .entry(file)
+                        .or_default()
+                        .entry(module.to_string())
+                        .or_default();
+                    if !targets.contains(&qualified) {
+                        targets.push(qualified.clone());
+                    }
                 }
-                context
-                    .qualifications
-                    .insert(module.to_string(), qualified.clone());
-                let targets = imports
-                    .qualifications
-                    .entry(file)
-                    .or_default()
-                    .entry(module.to_string())
-                    .or_default();
-                if !targets.contains(&qualified) {
-                    targets.push(qualified.clone());
-                }
-            }
 
-            // An explicit relative import can load another module of the same package. Keep the
-            // script's search directory for that module too.
-            if let Some(name) = imported.filter(|name| *name != "*") {
-                let child = join(&qualified, name);
-                if files_by_name.contains_key(&child)
-                    && !files_by_name
-                        .get(&qualified)
-                        .into_iter()
-                        .flatten()
-                        .any(|&file| {
+                // An explicit relative import can load another module of the same package. Keep the
+                // script's search directory for that module too.
+                if let Some(name) = imported.filter(|name| *name != "*") {
+                    let child = join(&qualified, name);
+                    if files_by_name.contains_key(&child)
+                        && !sibling_import_files(project, &qualified).any(|file| {
                             let facts = &facts[file];
                             facts.lazy.contains_key(name)
                                 || facts.references.bindings.primary.get(name).is_some_and(
@@ -1271,14 +1332,33 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
                                         && definition.class.is_none()
                                         && definition.name == name
                                 })
+                                || !facts.references.star_imports.is_empty()
+                                    && *wildcard_names
+                                        .entry((package, file, Name::new(name)))
+                                        .or_insert_with(|| {
+                                            has_star_imported_name(
+                                                project,
+                                                file,
+                                                name,
+                                                |file, binding| {
+                                                    let module = binding.module.as_deref();
+                                                    if binding.level == 0
+                                                        && let Some(qualified) = qualify(module)
+                                                    {
+                                                        return Some(qualified);
+                                                    }
+                                                    names[file].resolve(module, binding.level)
+                                                },
+                                            )
+                                        })
                         })
-                {
-                    // A from-import tries a submodule only if the package lacks the attribute.
-                    siblings.insert((owner, child));
+                    {
+                        // A from-import tries a submodule only if the package lacks the attribute.
+                        siblings.insert((owner, child));
+                    }
                 }
-            }
-            siblings.insert((owner, qualified));
-        };
+                siblings.insert((owner, qualified));
+            };
         let file_facts = &facts[file];
         let references = &file_facts.references;
         for (owner, module) in &references.module_imports {
@@ -1326,7 +1406,7 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
                 .map(|(end, _)| start + end)
                 .chain([sibling.len()]);
             for end in ends {
-                for &imported in files_by_name.get(&sibling[..end]).into_iter().flatten() {
+                for imported in sibling_import_files(project, &sibling[..end]) {
                     let loaded = *indices.entry((imported, package)).or_insert_with(|| {
                         let index = modules.len();
                         modules.push((imported, package));
