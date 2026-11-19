@@ -15,7 +15,7 @@ from pathlib import Path
 import shpyx
 import typer
 
-# Projects that use the frameworks that unref knows, and a few that use none of them.
+# The projects that unref runs on.
 _PROJECTS = {
     "black": "https://github.com/psf/black",
     "django": "https://github.com/django/django",
