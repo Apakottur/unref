@@ -903,14 +903,14 @@ wheels = [
 
 [[package]]
 name = "shpyx"
-version = "1.0.2"
+version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "psutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9b/c6/24b45e25561d9466e8000bc3dfa2e66185474cf65e89ba6d2d91f58e288f/shpyx-1.0.2.tar.gz", hash = "sha256:9d47da5699ed5a824179a6fa746a6c89fc36819fafd85c061e9bf897d52ae86b", size = 121512, upload-time = "2026-11-17T13:11:00.434Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5b/6d/4bb2e35d1153766bc30490e408359c3133114d02e251c520d9526819bf7f/shpyx-1.0.3.tar.gz", hash = "sha256:d800a49f4f54241914456cb17a4f0524a750dcc987aa137de433a5b96a38d3d3", size = 123082, upload-time = "2026-11-19T23:37:34.122Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d4/53/a9d17a807c699624760643c695dbf34fce58f68f82ba28c0fe49469b609b/shpyx-1.0.2-py3-none-any.whl", hash = "sha256:0565cba2cbfc2e92e75a491c02526db0421fbe3ecd5dd15399dffe0a6d19ced8", size = 11693, upload-time = "2026-11-17T13:10:59.519Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/8c/6330d065e9438b2c8501eeee43c903609dc2472b54927933d42f525cf176/shpyx-1.0.3-py3-none-any.whl", hash = "sha256:79003bcd187fe9205c16931f91690ae07594cd4ed1f334a9b0c2e4160c8e9263", size = 12457, upload-time = "2026-11-19T23:37:33.379Z" },
 ]
 
 [[package]]
@@ -1079,7 +1079,7 @@ dev = [
     { name = "prek", marker = "python_full_version >= '3.15'", specifier = "==0.5.11" },
     { name = "pytest", marker = "python_full_version >= '3.15'", specifier = "==9.2.0" },
     { name = "ruff", marker = "python_full_version >= '3.15'", specifier = "==0.17.5" },
-    { name = "shpyx", marker = "python_full_version >= '3.15'", specifier = "==1.0.2" },
+    { name = "shpyx", marker = "python_full_version >= '3.15'", specifier = "==1.0.3" },
     { name = "ty", marker = "python_full_version >= '3.15'", specifier = "==0.0.107" },
     { name = "typer", marker = "python_full_version >= '3.15'", specifier = "==0.29.2" },
 ]
