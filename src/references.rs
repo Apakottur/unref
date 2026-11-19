@@ -1154,6 +1154,10 @@ impl<'a> Walker<'_, '_> {
     /// When a name is imported more than once, as by an `import` in a `try` and a fallback in its
     /// `except`, the first import is the one that counts. Within one statement, the last one does.
     fn bind_imports(&mut self, statement: FxHashMap<String, Binding>) {
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "each name is bound once, whatever the order"
+        )]
         for (name, binding) in statement {
             self.bind(&name);
             let binder = self.binder;
@@ -1175,6 +1179,10 @@ impl<'a> Walker<'_, '_> {
         // name is declared `nonlocal`, or is not local in a scope that it was passed on to, is a
         // variable of an enclosing function.
         if let Target::Scope(scope) = target {
+            #[expect(
+                clippy::iter_over_hash_type,
+                reason = "the indexes are matched as a set"
+            )]
             for (name, indexes) in other {
                 if !self.scopes[inner].global_names.contains(&name) {
                     self.scopes[scope]

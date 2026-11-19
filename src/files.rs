@@ -196,6 +196,10 @@ fn lazy_imports(
     let Some(line) = line else {
         return lazy;
     };
+    #[expect(
+        clippy::iter_over_hash_type,
+        reason = "every import of a name is followed, and the result is a set"
+    )]
     for import in &references.imports {
         if import.owner == Some(line) && import.name != "*" {
             lazy.entry(import.name.clone()).or_default().push(Binding {

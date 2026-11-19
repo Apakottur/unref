@@ -106,6 +106,10 @@ impl ClassHierarchy {
     pub(crate) fn external_members(&self, module: usize, name: &str) -> Names {
         cached(&self.inherited, module, name, || {
             let mut found = FxHashSet::default();
+            #[expect(
+                clippy::iter_over_hash_type,
+                reason = "the members are collected into a set"
+            )]
             for ancestor in self.ancestors(module, name).iter() {
                 for (file, symbol) in self.locate(ancestor) {
                     // The members of the modules of the project are not collected.

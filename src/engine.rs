@@ -254,6 +254,10 @@ impl Project {
 /// is imported from. A member of a class of the project that is plain, as in `self.name`,
 /// `super().name`, `Class.name` or `Class().name`, is matched in the classes that it can be in, and
 /// any other attribute of an object by name only.
+#[expect(
+    clippy::iter_over_hash_type,
+    reason = "the uses are collected into sets"
+)]
 fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), Uses> {
     let mut uses: FxHashMap<(usize, Owner), Uses> = FxHashMap::default();
     for (file, file_facts) in project.facts.iter().enumerate() {
@@ -1191,6 +1195,10 @@ impl<'a> Graph<'a> {
     /// exactly: functions and classes defined in a function, and members found through a class.
     ///
     /// With `seen`, a use that is in it already is skipped, and the others are added to it.
+    #[expect(
+        clippy::iter_over_hash_type,
+        reason = "the definitions found are used as a set"
+    )]
     fn look_up(
         &self,
         uses: &Uses,

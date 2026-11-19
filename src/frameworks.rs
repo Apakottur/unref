@@ -944,6 +944,10 @@ impl<'a> FrameworkRules<'a> {
             return false;
         }
         for decorator in &definition.decorators {
+            #[expect(
+                clippy::iter_over_hash_type,
+                reason = "the loop only checks whether any name matches"
+            )]
             for name in self.hierarchy.resolve(module, decorator).iter() {
                 // A method can be that of an attribute of the instance, such as `cli.command`.
                 let registered = methods
@@ -1064,6 +1068,10 @@ fn annotated_parameters(
 ) -> FxHashSet<(usize, u32, String)> {
     let mut parameters = FxHashSet::default();
     for (module, (_, _, references)) in files.iter().enumerate() {
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "the parameters are collected into a set"
+        )]
         for ((function, name), annotation) in &references.annotated_parameters {
             if has_any(&hierarchy.resolve(module, annotation), classes) {
                 parameters.insert((module, *function, name.clone()));
@@ -1082,6 +1090,10 @@ fn local_instances(
 ) -> FxHashSet<(usize, u32, String)> {
     let mut instances = FxHashSet::default();
     for (module, (_, _, references)) in files.iter().enumerate() {
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "the instances are collected into a set"
+        )]
         for ((function, name), called) in &references.local_calls {
             if called
                 .iter()
@@ -1114,6 +1126,10 @@ fn django_modules(
         if !given.is_empty() && given.contains(&resolve(path)) {
             pending.push(module);
         }
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "the modules and URLs are collected into sets"
+        )]
         for (called, arguments) in &references.string_calls {
             let resolves_to = |names: &[&str]| has_any(&hierarchy.resolve(module, called), names);
             match arguments.as_slice() {
@@ -1135,6 +1151,10 @@ fn django_modules(
         if !settings.insert(module) {
             continue;
         }
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "the star imported modules are all followed"
+        )]
         for import in &files[module].2.imports {
             if import.name == "*"
                 && let Some(name) =
@@ -1146,6 +1166,10 @@ fn django_modules(
     }
 
     let mut root_urls = FxHashSet::default();
+    #[expect(
+        clippy::iter_over_hash_type,
+        reason = "the URLs are collected into a set"
+    )]
     for &module in &settings {
         for definition in files[module].1 {
             if definition.kind == Kind::Variable
