@@ -99,15 +99,18 @@ args = ["--config-file", "./linters/yamllint.yaml"]
 repo = "https://github.com/astral-sh/ruff-pre-commit"
 rev = "v0.17.5"
 
+# The test cases are checked by the hook after these, with a configuration of their own.
+# `linters/ruff.toml` excludes them as well, for Ruff when it is run without prek.
 [[repos.hooks]]
 id = "ruff-check"
+exclude = '^tests/cases/'
 args = ["--config", "./linters/ruff.toml"]
 
 [[repos.hooks]]
 id = "ruff-format"
+exclude = '^tests/cases/'
 args = ["--config", "./linters/ruff.toml"]
 
-# The test cases, which the configuration above excludes, with their own.
 [[repos.hooks]]
 id = "ruff-check"
 alias = "ruff-check-cases"
