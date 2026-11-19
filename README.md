@@ -19,7 +19,7 @@ An extremely fast Python dead code finder, written in Rust.
 - **Fast**: 20x faster than [vulture](https://github.com/jendrikseipp/vulture), it checks all of CPython's Python code in
   under a second.
 - **Just works**: built-in rules for pytest, Django, Flask, Pydantic, SQLAlchemy and
-  [more](https://unref.readthedocs.io/en/latest/configuration/#frameworks), so most projects need little or no
+  [more](https://unref.readthedocs.io/en/latest/frameworks/), so most projects need little or no
   configuration.
 - **Flexible**: works for applications and libraries alike, see
   [what counts as dead code](https://unref.readthedocs.io/en/latest/faq/#what-counts-as-dead-code).
