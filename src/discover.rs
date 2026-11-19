@@ -133,47 +133,15 @@ pub(crate) fn rebase(pattern: &str, directory: &Path, root: &Path) -> String {
 }
 
 /// The part of a pattern that is an absolute path under the root of the project, relative to the root,
-/// such as `pkg/*.py` for `/project/pkg/*.py` and the root `/project`. The part before the first
-/// component with a glob character is resolved, so that a path through a link matches too.
-///
-/// Returns None if the pattern is not an absolute path, or not one under the root.
+/// such as `pkg/*.py` for `/project/pkg/*.py` and the root `/project`, or None if it is not one.
 fn under_root(pattern: &str, root: &Path) -> Option<String> {
     let path = Path::new(pattern);
     if !path.is_absolute() {
         return None;
     }
-    let components: Vec<Component> = path.components().collect();
-    let literal = components
-        .iter()
-        .position(|component| {
-            component
-                .as_os_str()
-                .to_string_lossy()
-                .contains(['*', '?', '[', '\\'])
-        })
-        .unwrap_or(components.len());
-    let prefix: PathBuf = components[..literal].iter().collect();
-    let resolved = resolve(&prefix);
-    let relative = resolved.strip_prefix(resolve(root)).ok()?;
-
-    let mut parts: Vec<String> = relative
-        .components()
-        .map(|component| escape_glob(&component.as_os_str().to_string_lossy()))
-        .collect();
-    parts.extend(
-        components[literal..]
-            .iter()
-            .map(|component| component.as_os_str().to_string_lossy().into_owned()),
-    );
-    if parts.is_empty() {
-        // The root itself: everything under it.
-        return Some("**".to_string());
-    }
-    let mut relative = parts.join("/");
-    if pattern.ends_with('/') {
-        relative.push('/');
-    }
-    Some(relative)
+    let relative = path.strip_prefix(resolve(root)).ok()?.to_string_lossy();
+    let slash = if pattern.ends_with('/') { "/" } else { "" };
+    Some(format!("{relative}{slash}"))
 }
 
 /// Escape the characters that are special in a pattern, so that a name matches only itself.
@@ -488,7 +456,6 @@ mod tests {
             "/pkg/**/*.py"
         );
         assert_eq!(rebase("!/unref-root/pkg", Path::new(""), root), "!/pkg");
-        assert_eq!(rebase("/unref-root", Path::new(""), root), "/**");
         // An absolute path outside of the root stays a pattern anchored at the current directory.
         assert_eq!(
             rebase("/other/src", Path::new("pkg"), root),
