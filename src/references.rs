@@ -1463,12 +1463,20 @@ impl<'a> Walker<'_, '_> {
             .filter(|instance| !scope.bound.contains(instance))
             .zip(scope.class_name.clone());
         let mut passed = Vec::new();
+        let mut module_reads = Vec::new();
         for read in reads {
-            if let Some(binding) = self.scopes[inner].imports.get(read.root.as_str()) {
+            let name = read.root.as_str();
+            // An explicit global skips enclosing scopes but still resolves module imports.
+            let forward = if inner != 0 && scope.global_names.contains(name) {
+                &mut module_reads
+            } else {
+                &mut passed
+            };
+            if let Some(binding) = scope.imports.get(name) {
                 // A plain read of a name that is not local, at the module or declared `global`, is also
-                // a read of the name of the enclosing scope, without reading the object.
-                if read.attributes.is_empty() && !local_names.contains(read.root.as_str()) {
-                    passed.push(Read {
+                // a read of the name in the destination scope, without reading the object.
+                if read.attributes.is_empty() && !local_names.contains(name) {
+                    forward.push(Read {
                         owner: read.owner,
                         root: read.root.clone(),
                         attributes: Vec::new(),
@@ -1483,8 +1491,8 @@ impl<'a> Walker<'_, '_> {
                     reads_object: read.reads_object,
                     called: read.called,
                 });
-            } else if local_names.contains(read.root.as_str()) {
-                for &index in defined.get(read.root.as_str()).into_iter().flatten() {
+            } else if local_names.contains(name) {
+                for &index in defined.get(name).into_iter().flatten() {
                     self.references.local_reads.insert((read.owner, index));
                 }
                 let mut attributes = read.attributes.into_iter();
@@ -1506,9 +1514,10 @@ impl<'a> Walker<'_, '_> {
                     .attributes
                     .extend(names.map(|name| (read.owner, name)));
             } else {
-                passed.push(read);
+                forward.push(read);
             }
         }
+        self.scopes[0].reads.extend(module_reads);
         match target {
             Target::Scope(scope) => self.scopes[scope].reads.extend(passed),
             // One at a time, as `extend` would make room for the repeated reads too.
