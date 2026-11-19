@@ -58,6 +58,8 @@ pub(crate) struct ImportedRead {
     pub attributes: Vec<Name>,
     pub reads_object: bool,
     pub called: Option<Name>,
+    /// The binding used as the root of this read can be replaced in the importing scope.
+    pub ambiguous_receiver: bool,
 }
 
 /// The object that a member is read from, when the class that it is in is plain.
@@ -137,8 +139,10 @@ pub(crate) struct References {
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
     pub bindings: FxHashMap<String, Binding>,
-    /// Top-level import aliases that can be rebound to a different value.
+    /// Module import aliases that can be rebound, including by code declaring them global.
     pub ambiguous_imports: FxHashSet<String>,
+    /// Whether a star import can overwrite an alias at the top level of the module.
+    pub has_module_star_import: bool,
     /// The functions and classes that are local variables of a function, by their index in the
     /// definitions of the module. A read of their name elsewhere is not a reference to them.
     pub local_definitions: FxHashSet<usize>,
@@ -189,10 +193,26 @@ pub(crate) fn walk_module(
         }],
         scope: 0,
         binder: 0,
+        walrus_scope: 0,
+        rebound_imports: FxHashMap::default(),
+        nonlocal_writes: FxHashMap::default(),
         owner: None,
         in_signature: false,
     };
     walker.visit_body(&module.body);
+    walker.references.ambiguous_imports = walker.rebound_imports.remove(&0).unwrap_or_default();
+    let bindings = &walker.scopes[0].imports;
+    if !bindings.is_empty() {
+        walker.references.ambiguous_imports.extend(
+            walker
+                .definitions
+                .iter()
+                .filter(|definition| definition.owner.is_none() && definition.class.is_none())
+                .map(|definition| &definition.name)
+                .filter(|name| bindings.contains_key(*name))
+                .cloned(),
+        );
+    }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
@@ -307,6 +327,12 @@ struct Walker<'p, 'a> {
     /// default values and annotations of a function bind in a scope of their own that is never closed,
     /// since the names that they bind are not tracked.
     binder: usize,
+    /// The nearest module, class or function body where assignment expressions bind.
+    walrus_scope: usize,
+    /// Names that have another binding in a scope that imports them, keyed by scope.
+    rebound_imports: FxHashMap<usize, FxHashSet<String>>,
+    /// Nonlocal writes waiting for the enclosing scope that binds the name.
+    nonlocal_writes: FxHashMap<usize, FxHashSet<String>>,
     /// The function that the node is in, or None for code that runs when the module is imported.
     owner: Owner,
     /// Whether the node is in the annotation of a parameter or the return of a function.
@@ -464,6 +490,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                         binder = enclosing;
                     }
                     self.scopes[binder].bound.insert(name.id.to_string());
+                    self.record_import_rebinding(self.walrus_scope, name.id.as_str());
                 }
             }
             _ => walk_expr(self, expr),
@@ -854,9 +881,10 @@ impl<'a> Walker<'_, '_> {
         // The body runs only when the function is called. A lambda has no name, and is part of the code
         // that it is in.
         let (body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
-        let (scope, owner) = (self.scope, self.owner);
+        let (scope, owner, walrus_scope) = (self.scope, self.owner, self.walrus_scope);
         self.scope = self.push_scope(body_scope);
         self.binder = self.scope;
+        self.walrus_scope = self.scope;
         match body {
             FunctionBody::Lambda(expr) => self.visit_expr(expr),
             FunctionBody::Statements(statements) => {
@@ -868,6 +896,7 @@ impl<'a> Walker<'_, '_> {
         self.scope = scope;
         self.binder = binder;
         self.owner = owner;
+        self.walrus_scope = walrus_scope;
 
         let inner_scope = &mut self.scopes[inner];
         // A variable declared `global` or `nonlocal` is not local to the function.
@@ -891,7 +920,12 @@ impl<'a> Walker<'_, '_> {
                 .local_calls
                 .extend(calls.map(|(name, called)| ((line, name), called)));
         }
-        local_names.extend(names.iter().map(|name| (*name).to_string()));
+        for name in names {
+            if self.scopes[inner].imports.contains_key(name) {
+                self.record_import_rebinding(inner, name);
+            }
+            local_names.insert(name.to_string());
+        }
         let target = self.reads_target(scope);
         self.close(inner, &local_names, Target::Scope(target));
     }
@@ -933,7 +967,7 @@ impl<'a> Walker<'_, '_> {
         let index = self.definitions.len();
         self.definitions.push(definition);
 
-        let (scope, binder) = (self.scope, self.binder);
+        let (scope, binder, walrus_scope) = (self.scope, self.binder, self.walrus_scope);
         self.binder = self.push_scope(class_scope);
         self.scopes[self.binder].defined_in = Some(self.binder);
         for decorator in &class.decorator_list {
@@ -946,10 +980,12 @@ impl<'a> Walker<'_, '_> {
             self.visit_arguments(arguments);
         }
         self.scope = self.binder;
+        self.walrus_scope = self.scope;
         self.visit_body(&class.body);
         let inner = self.scope;
         self.scope = scope;
         self.binder = binder;
+        self.walrus_scope = walrus_scope;
 
         // The names that the class body imports are resolved in it, and its other reads are of names
         // that it had not bound yet, so they go on.
@@ -993,6 +1029,9 @@ impl<'a> Walker<'_, '_> {
         let module = import.module.as_ref().map(ToString::to_string);
         let mut bindings = FxHashMap::default();
         for alias in &import.names {
+            if self.owner.is_none() && alias.name.as_str() == "*" {
+                self.references.has_module_star_import = true;
+            }
             self.references.imports.insert(Import {
                 owner: self.owner,
                 module: module.clone(),
@@ -1379,10 +1418,36 @@ impl<'a> Walker<'_, '_> {
 
     /// Bind a name in the current scope.
     fn bind(&mut self, name: &str) {
-        if self.binder == 0 && self.scopes[0].imports.contains_key(name) {
-            self.references.ambiguous_imports.insert(name.to_string());
+        let binder = self.binder;
+        let scope = &mut self.scopes[binder];
+        scope.bound.insert(name.to_string());
+        if scope.imports.contains_key(name)
+            || scope.global_names.contains(name)
+            || scope.nonlocal_names.contains(name)
+        {
+            self.record_import_rebinding(binder, name);
         }
-        self.scopes[self.binder].bound.insert(name.to_string());
+    }
+
+    fn record_import_rebinding(&mut self, binder: usize, name: &str) {
+        let scope = &self.scopes[binder];
+        if scope.nonlocal_names.contains(name) {
+            self.nonlocal_writes
+                .entry(binder)
+                .or_default()
+                .insert(name.to_string());
+            return;
+        }
+        // A function can rebind an alias even if it is defined before the module imports it.
+        let scope = if scope.global_names.contains(name) {
+            0
+        } else {
+            binder
+        };
+        self.rebound_imports
+            .entry(scope)
+            .or_default()
+            .insert(name.to_string());
     }
 
     /// Bind the name of a function or class, given with its index in the definitions of the module, if
@@ -1407,27 +1472,22 @@ impl<'a> Walker<'_, '_> {
     fn bind_imports(&mut self, statement: FxHashMap<String, Binding>) {
         for (name, binding) in statement {
             let binder = self.binder;
-            let already_bound = if binder == 0 {
-                !self.scopes[0].bound.insert(name.clone())
-            } else {
-                self.bind(&name);
-                false
-            };
-            match self.scopes[binder].imports.entry(name) {
+            let scope = &mut self.scopes[binder];
+            let already_bound = !scope.bound.insert(name.clone());
+            let declared =
+                scope.global_names.contains(&name) || scope.nonlocal_names.contains(&name);
+            let rebound = match scope.imports.entry(name) {
                 Entry::Vacant(entry) => {
-                    if already_bound {
-                        self.references
-                            .ambiguous_imports
-                            .insert(entry.key().clone());
-                    }
+                    let rebound = (already_bound || declared).then(|| entry.key().clone());
                     entry.insert(binding);
+                    rebound
                 }
-                Entry::Occupied(entry) if binder == 0 && *entry.get() != binding => {
-                    self.references
-                        .ambiguous_imports
-                        .insert(entry.key().clone());
+                Entry::Occupied(entry) => {
+                    (declared || *entry.get() != binding).then(|| entry.key().clone())
                 }
-                Entry::Occupied(_) => {}
+            };
+            if let Some(name) = rebound {
+                self.record_import_rebinding(binder, &name);
             }
         }
     }
@@ -1460,6 +1520,20 @@ impl<'a> Walker<'_, '_> {
             .local_definitions
             .extend(defined.values().flatten().copied());
         let scope = &self.scopes[inner];
+        let mut rebound_imports = self.rebound_imports.remove(&inner).unwrap_or_default();
+        if let Some(nonlocals) = self.nonlocal_writes.remove(&inner)
+            && let Target::Scope(target) = target
+        {
+            for name in nonlocals {
+                if local_names.contains(name.as_str()) && !scope.nonlocal_names.contains(&name) {
+                    if scope.imports.contains_key(&name) {
+                        rebound_imports.insert(name);
+                    }
+                } else {
+                    self.nonlocal_writes.entry(target).or_default().insert(name);
+                }
+            }
+        }
         let own_class = scope
             .instance
             .clone()
@@ -1467,10 +1541,11 @@ impl<'a> Walker<'_, '_> {
             .zip(scope.class_name.clone());
         let mut passed = Vec::new();
         for read in reads {
-            if let Some(binding) = self.scopes[inner].imports.get(read.root.as_str()) {
+            let root = read.root.as_str();
+            if let Some(binding) = scope.imports.get(root) {
                 // A plain read of a name that is not local, at the module or declared `global`, is also
                 // a read of the name of the enclosing scope, without reading the object.
-                if read.attributes.is_empty() && !local_names.contains(read.root.as_str()) {
+                if read.attributes.is_empty() && !local_names.contains(root) {
                     passed.push(Read {
                         owner: read.owner,
                         root: read.root.clone(),
@@ -1485,9 +1560,17 @@ impl<'a> Walker<'_, '_> {
                     attributes: read.attributes,
                     reads_object: read.reads_object,
                     called: read.called,
+                    ambiguous_receiver: if inner == 0 {
+                        self.references.has_module_star_import
+                            || self.references.ambiguous_imports.contains(root)
+                    } else {
+                        scope.global_names.contains(root)
+                            || scope.nonlocal_names.contains(root)
+                            || rebound_imports.contains(root)
+                    },
                 });
-            } else if local_names.contains(read.root.as_str()) {
-                for &index in defined.get(read.root.as_str()).into_iter().flatten() {
+            } else if local_names.contains(root) {
+                for &index in defined.get(root).into_iter().flatten() {
                     self.references.local_reads.insert((read.owner, index));
                 }
                 let mut attributes = read.attributes.into_iter();

@@ -1,6 +1,6 @@
 //! The unused definitions of a Python project, which are those that nothing references.
 
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
@@ -305,7 +305,7 @@ fn find_uses(
             // Each attribute, and the one read from the result of the call, is read from the chain
             // before it.
             for (index, attribute) in read.attributes.iter().chain(&read.called).enumerate() {
-                owner_uses.add_member_of(classes, module, &parts[..=index], attribute);
+                owner_uses.add_member_of(classes, module, &parts[..=index], attribute, true);
             }
             if read.reads_object {
                 owner_uses.objects.insert((file, parts));
@@ -314,6 +314,7 @@ fn find_uses(
 
         for read in &references.imported_reads {
             let owner_uses = uses.entry((file, read.owner)).or_default();
+            let allow_renamed = !read.ambiguous_receiver;
             let Some(resolved) = resolve_import(
                 &project.names[file],
                 &read.binding,
@@ -331,7 +332,7 @@ fn find_uses(
                     .extend(imported_objects(&resolved, project));
             }
             if let Some(called) = &read.called {
-                owner_uses.add_member_of(classes, "", &resolved.0, called);
+                owner_uses.add_member_of(classes, "", &resolved.0, called, allow_renamed);
             }
             if read.attributes.is_empty() {
                 continue;
@@ -354,7 +355,13 @@ fn find_uses(
                 .max()
                 .unwrap_or(0);
             for index in first_of_object..parts.len() {
-                owner_uses.add_member_of(classes, "", &parts[..index], &parts[index]);
+                owner_uses.add_member_of(
+                    classes,
+                    "",
+                    &parts[..index],
+                    &parts[index],
+                    allow_renamed,
+                );
             }
         }
 
@@ -438,9 +445,16 @@ impl Uses {
     ///
     /// `module` is the module that the chain is written in, or empty for a chain that starts with
     /// the name of a module.
-    fn add_member_of(&mut self, classes: &Classes, module: &str, chain: &[Name], name: &Name) {
+    fn add_member_of(
+        &mut self,
+        classes: &Classes,
+        module: &str,
+        chain: &[Name],
+        name: &Name,
+        allow_renamed: bool,
+    ) {
         let written = join(module, &chain.join("."));
-        self.add_member(classes.read_from(&written, name), name);
+        self.add_member(classes.read_from(&written, name, allow_renamed), name);
     }
 
     /// Add a read of a member: the definitions that it can stand for, or its name if it is not known
@@ -469,6 +483,8 @@ struct Classes<'a> {
     /// The names of the classes, without their modules, so that a name that cannot be a class is not
     /// followed.
     names: FxHashSet<String>,
+    /// Classes and ancestors reached by a renamed import, keyed by the dotted receiver name.
+    renamed_imports: RefCell<FxHashMap<String, Vec<ClassId>>>,
     /// The base classes of each class in the project, directly or not.
     ancestors: Vec<Vec<ClassId>>,
     /// The classes of the project that inherit from each class, directly or not.
@@ -600,6 +616,7 @@ impl<'a> Classes<'a> {
             definitions,
             by_dotted,
             names,
+            renamed_imports: RefCell::default(),
             ancestors,
             lineages: std::iter::repeat_with(Default::default)
                 .take(descendants.len())
@@ -639,10 +656,17 @@ impl<'a> Classes<'a> {
     ///
     /// Returns None if the dotted name is not a class of the project, or if the class has no such
     /// member.
-    fn read_from(&self, written: &str, name: &str) -> Option<Vec<DefinitionId>> {
+    fn read_from(
+        &self,
+        written: &str,
+        name: &str,
+        allow_renamed: bool,
+    ) -> Option<Vec<DefinitionId>> {
         let (module, last) = written.rsplit_once('.').unwrap_or(("", written));
         if !self.names.contains(last) {
-            return self.read_from_renamed_import(module, last, name);
+            return allow_renamed
+                .then(|| self.read_from_renamed_import(written, module, last, name))
+                .flatten();
         }
         let classes: Vec<ClassId> = self
             .hierarchy
@@ -660,23 +684,37 @@ impl<'a> Classes<'a> {
     /// bindings in this case, with the same visited-binding check used for imported objects.
     fn read_from_renamed_import(
         &self,
+        written: &str,
         module: &str,
         alias: &str,
         name: &str,
     ) -> Option<Vec<DefinitionId>> {
         let files = self.project.files_by_name.get(module)?;
-        if !self.by_member.contains_key(name)
-            || !files.iter().any(|&file| {
-                self.project.facts[file]
-                    .references
-                    .bindings
-                    .get(alias)
-                    .is_some_and(|binding| binding.name.is_some())
-            })
-        {
+        if !self.by_member.contains_key(name) {
             return None;
         }
-        let resolved = (vec![Name::new(alias)], vec![(0, files.clone())]);
+        let mut renamed = self.renamed_imports.borrow_mut();
+        if let Some(classes) = renamed.get(written) {
+            return self.members(classes.iter().copied(), name);
+        }
+        if !files.iter().any(|&file| {
+            self.project.facts[file]
+                .references
+                .bindings
+                .get(alias)
+                .is_some_and(|binding| binding.name.is_some())
+        }) {
+            return None;
+        }
+        let classes = self.classes_of_renamed_import(files, alias);
+        let members = self.members(classes.iter().copied(), name);
+        renamed.insert(written.to_string(), classes);
+        members
+    }
+
+    /// Resolve the receiver once regardless of how many different members its callers read.
+    fn classes_of_renamed_import(&self, files: &[usize], alias: &str) -> Vec<ClassId> {
+        let resolved = (vec![Name::new(alias)], vec![(0, files.to_vec())]);
         let objects = imported_objects(&resolved, self.project);
         let mut classes = Vec::new();
         for (file, parts) in objects {
@@ -687,21 +725,9 @@ impl<'a> Classes<'a> {
             // A conflicting definition or star import can replace any binding along the chain.
             if references.bindings.contains_key(first.as_str())
                 && (references.ambiguous_imports.contains(first.as_str())
-                    || references
-                        .imports
-                        .iter()
-                        .any(|import| import.owner.is_none() && import.name == "*")
-                    || self
-                        .project
-                        .file_definitions(file)
-                        .iter()
-                        .any(|definition| {
-                            definition.owner.is_none()
-                                && definition.class.is_none()
-                                && definition.name == first.as_str()
-                        }))
+                    || references.has_module_star_import)
             {
-                return None;
+                return Vec::new();
             }
             if parts
                 .last()
@@ -711,12 +737,10 @@ impl<'a> Classes<'a> {
                 classes.extend(self.by_dotted.get(&written).into_iter().flatten().copied());
             }
         }
-        self.members(
-            classes
-                .into_iter()
-                .flat_map(|id| std::iter::once(id).chain(self.ancestors[id].iter().copied())),
-            name,
-        )
+        classes
+            .into_iter()
+            .flat_map(|id| std::iter::once(id).chain(self.ancestors[id].iter().copied()))
+            .collect()
     }
 
     /// Find the members that a name read from the first parameter of a method of a class can stand

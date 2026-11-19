@@ -43,3 +43,75 @@ class StarSource:
 class StarReplacement:
     def star_action(self):
         return 9
+
+
+class GlobalSource:
+    def global_action(self):
+        return 10
+
+
+class GlobalReplacement:
+    def global_action(self):
+        return 11
+
+
+class GlobalImportSource:
+    def imported_action(self):
+        return 12
+
+
+class GlobalImportReplacement:
+    def imported_action(self):
+        return 13
+
+
+class WalrusSource:
+    def walrus_action(self):
+        return 14
+
+
+class WalrusReplacement:
+    def walrus_action(self):
+        return 15
+
+
+class DefaultSource:
+    def default_action(self):
+        return 16
+
+
+class DefaultReplacement:
+    def default_action(self):
+        return 17
+
+
+class ModuleSource:
+    def module_action(self):
+        return 18
+
+
+class ModuleReplacement:
+    def module_action(self):
+        return 19
+
+
+class LocalSource:
+    def local_action(self):
+        return 20
+
+    def nonlocal_action(self):
+        return 22
+
+    def parameter_action(self):
+        return 24
+
+
+class LocalReplacement:
+    def local_action(self):
+        return 21
+
+    def nonlocal_action(self):
+        return 23
+
+    def parameter_action(self):
+        return 25
