@@ -18,6 +18,24 @@ def test_findings() -> None:
     assert result.stdout == f"{case}/main.py:1:7: unused-class 'Class'\n"
 
 
+@pytest.mark.parametrize("option", ["--exit-zero", "-e"])
+def test_exit_zero(option: str) -> None:
+    case = CASES_DIR / "function"
+
+    result = run([option, str(case)])
+
+    # The findings are still printed.
+    assert result.exit_code == 0
+    assert result.stdout == f"{case}/main.py:1:5: unused-function 'function'\n"
+
+
+def test_exit_zero_error() -> None:
+    # An error still exits with its own status.
+    result = run(["--exit-zero", "--jobs", "0", str(CASES_DIR / "function")])
+
+    assert result.exit_code == 2
+
+
 def test_file_path() -> None:
     # Only the given file is checked, not the other files next to it.
     case = CASES_DIR / "package" / "pkg"

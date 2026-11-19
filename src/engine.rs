@@ -96,7 +96,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         .filter(|framework| options.frameworks.get(framework).copied().unwrap_or(true))
         .collect();
 
-    let discovered: Vec<Arc<Path>> = discover(paths, &options.exclude, &options.root)
+    let discovered: Vec<Arc<Path>> = discover(paths, options)
         .into_iter()
         .map(Arc::from)
         .collect();
