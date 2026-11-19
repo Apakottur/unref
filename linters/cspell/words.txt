@@ -33,6 +33,7 @@ fastapi
 feff
 fnmatch
 fnmatchcase
+freqtrade
 getattr
 httpx
 ignorelist
@@ -57,6 +58,7 @@ modifyitems
 musllinux
 mypy
 mysite
+openlibrary
 pathlib
 pathspec
 peekable
@@ -109,3 +111,4 @@ venv
 wsgi
 Yossi
 zizmor
+zulip
