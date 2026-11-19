@@ -224,8 +224,8 @@ struct Scope {
     /// The reads of names in the scope, or in a scope nested in it, that are not local to the scopes
     /// in between.
     reads: Vec<Read>,
-    /// The scope that also binds the names that the scope binds. A comprehension binds its variables
-    /// in the function that it is in as well.
+    /// The scope containing a comprehension, when it is not a class body. Assignment expressions
+    /// follow this link to bind outside the comprehension.
     enclosing: Option<usize>,
     /// The scope that holds the variables of a module, or the attributes of a class, that were
     /// already found. A method shares the names of its class, so that an attribute is found once.
@@ -451,7 +451,14 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             Expr::Named(named) => {
                 // The target of a walrus is assigned, as by an assignment.
                 self.define_target(&named.target, false, None, None, None, None);
-                walk_expr(self, expr);
+                self.visit_expr(&named.value);
+                if let Expr::Name(name) = &*named.target {
+                    let mut binder = self.binder;
+                    while let Some(enclosing) = self.scopes[binder].enclosing {
+                        binder = enclosing;
+                    }
+                    self.scopes[binder].bound.insert(name.id.to_string());
+                }
             }
             _ => walk_expr(self, expr),
         }
@@ -738,8 +745,7 @@ impl<'a> Walker<'_, '_> {
         self.visit_expr(&first.iter);
         let (scope, binder) = (self.scope, self.binder);
         let mut inner = Scope::new(ScopeKind::Function);
-        // A walrus binds its name in the function that the comprehension is in as well. It cannot be
-        // used in a comprehension in a class body.
+        // A walrus in a comprehension binds outside it. Python disallows it in a class body.
         if self.scopes[binder].kind != ScopeKind::Class {
             inner.enclosing = Some(binder);
         }
@@ -1334,7 +1340,7 @@ impl<'a> Walker<'_, '_> {
     }
 
     /// Get the dotted names of what a local variable is assigned the result of calling, as they are
-    /// written: in the scope that it is read in, or the scopes that bind its names as well.
+    /// written, looking through enclosing scopes for a comprehension.
     fn variable_calls(&self, name: &str) -> Vec<String> {
         let mut scope = Some(self.scope);
         while let Some(index) = scope {
@@ -1356,13 +1362,9 @@ impl<'a> Walker<'_, '_> {
         }
     }
 
-    /// Bind a name in the current scope, and in the scopes that it binds names in as well.
+    /// Bind a name in the current scope.
     fn bind(&mut self, name: &str) {
-        let mut scope = Some(self.binder);
-        while let Some(index) = scope {
-            self.scopes[index].bound.insert(name.to_string());
-            scope = self.scopes[index].enclosing;
-        }
+        self.scopes[self.binder].bound.insert(name.to_string());
     }
 
     /// Bind the name of a function or class, given with its index in the definitions of the module, if
