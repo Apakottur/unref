@@ -19,42 +19,28 @@ jobs:
       pull-requests: write
       # Required to start CI on the pull request, as one opened with this token does not.
       actions: write
-    env:
-      BRANCH: update-version
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
       - name: Set the latest version
-        id: version
-        run: |
-          version=$(curl --fail --silent --show-error https://pypi.org/pypi/unref/json | jq --raw-output .info.version)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          bash .github/workflows/util/set_version.sh "$version"
-          git diff --stat
+        run: uv run --no-project scripts/set_version.py
 
       - name: Open or update the pull request
+        id: pr
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
+        with:
+          branch: update-version
+          commit-message: Point the docs and the benchmark at the latest release of unref
+          title: Point the docs and the benchmark at the latest release of unref
+          body: The docs and the benchmark name an older release than the latest on PyPI.
+
+      - name: Start CI
+        if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
         env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          if git diff --quiet; then
-            echo "Already at $VERSION."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch --create "$BRANCH"
-          git commit --all --message "Point the docs and the benchmark at unref $VERSION"
-          # An open pull request that already has the change is left as it is, so that CI does not run again daily.
-          if git fetch --quiet origin "$BRANCH" && git diff --quiet FETCH_HEAD HEAD; then
-            echo "The pull request is already up to date."
-            exit 0
-          fi
-          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
-          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[]')" ]; then
-            gh pr create --head "$BRANCH" --title "Point the docs and the benchmark at unref $VERSION" \
-              --body "The latest release on PyPI is $VERSION."
-          fi
-          gh workflow run ci.yml --ref "$BRANCH"
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref update-version
