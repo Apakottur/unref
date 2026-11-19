@@ -1,5 +1,4 @@
 # The test cases under `tests/cases`, which `ruff.toml` excludes, are checked only to keep them small.
-# See "Test cases" in CONTRIBUTING.md.
 
 # The cases use the syntax of the newest Python.
 target-version = "py315"
