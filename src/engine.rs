@@ -18,7 +18,7 @@ use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::ignores::{apply_ignore_comments, ignored_codes};
 use crate::models::{Finding, Framework, Override, fnmatch};
 use crate::modules::{ModuleName, import_root, module_name, resolve};
-use crate::references::{Binding, Owner, Receiver};
+use crate::references::{Binding, Owner, Receiver, WHOLE_READERS};
 use crate::symbols::ModuleSymbols;
 use crate::transitive::transitive;
 
@@ -167,7 +167,11 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     let enums = subclass_attributes(&project, &hierarchy, &ENUMS);
     let fields: FxHashSet<DefinitionId> = typed_dicts.values().flatten().copied().collect();
     let classes = Classes::new(&project, &hierarchy, &fields);
-    let uses = find_uses(&project, &classes);
+    let typed_dicts: FxHashMap<String, Vec<DefinitionId>> = typed_dicts
+        .into_iter()
+        .map(|((file, class), fields)| (join(&project.names[file].name, &class), fields))
+        .collect();
+    let uses = find_uses(&project, &classes, &typed_dicts);
 
     let file_definitions: Vec<ProjectFile> = (0..project.files.len())
         .map(|index| {
@@ -255,8 +259,15 @@ impl Project {
 /// A plain name refers to the module that it is read in, and an imported name to the module that it
 /// is imported from. A member of a class of the project that is plain, as in `self.name`,
 /// `super().name`, `Class.name` or `Class().name`, is matched in the classes that it can be in, and
-/// any other attribute of an object by name only.
-fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), Uses> {
+/// any other attribute of an object by name only. A TypedDict of the project that is read as a whole
+/// has all its fields used, and those of the TypedDicts that it inherits from.
+///
+/// `typed_dicts` are the fields of each TypedDict of the project, by its dotted name.
+fn find_uses(
+    project: &Project,
+    classes: &Classes,
+    typed_dicts: &FxHashMap<String, Vec<DefinitionId>>,
+) -> FxHashMap<(usize, Owner), Uses> {
     let mut uses: FxHashMap<(usize, Owner), Uses> = FxHashMap::default();
     for (file, file_facts) in project.facts.iter().enumerate() {
         let references = &file_facts.references;
@@ -359,6 +370,25 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
                 .or_default()
                 .keys
                 .insert(name.clone());
+        }
+        for read in &references.whole_reads {
+            let hierarchy = classes.hierarchy;
+            let reads_all = read.reader.as_ref().is_none_or(|reader| {
+                let resolved = hierarchy.resolve(file, reader);
+                WHOLE_READERS.iter().any(|name| resolved.contains(*name))
+            });
+            if !reads_all {
+                continue;
+            }
+            let fields = hierarchy
+                .resolve(file, &read.value)
+                .iter()
+                .flat_map(|dotted| typed_dicts.get(dotted).into_iter().flatten().copied())
+                .collect::<Vec<_>>();
+            uses.entry((file, read.owner))
+                .or_default()
+                .definitions
+                .extend(fields);
         }
         for (owner, index) in &references.local_reads {
             uses.entry((file, *owner))

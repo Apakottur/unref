@@ -80,8 +80,32 @@ pub(crate) struct Import {
     pub name: String,
 }
 
+/// A value that is read as a whole, which reads every key of a TypedDict.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct WholeRead {
+    pub owner: Owner,
+    /// The dotted name of what the value is the result of calling, as it is written, such as
+    /// `RetryEvent` for `event = RetryEvent(...)`.
+    pub value: String,
+    /// The dotted name of the function that the value is passed to, as it is written, such as
+    /// `json.dumps`, or None when it is read by `**`, a loop or a method of a mapping.
+    pub reader: Option<String>,
+}
+
 /// The methods of a mapping that read a key, given as their first argument.
 const KEY_METHODS: [&str; 3] = ["get", "pop", "setdefault"];
+/// The methods of a mapping that read every key.
+const WHOLE_METHODS: [&str; 3] = ["items", "keys", "values"];
+/// The functions that read every key of a mapping given as their first argument.
+pub(crate) const WHOLE_READERS: [&str; 7] = [
+    "dict",
+    "list",
+    "tuple",
+    "set",
+    "sorted",
+    "json.dump",
+    "json.dumps",
+];
 /// The functions and methods whose string arguments frameworks read: Django's `include`, which names a
 /// module of URLs, and `os.environ.setdefault`, which can set `DJANGO_SETTINGS_MODULE`.
 const STRING_CALLS: [&str; 2] = ["include", "setdefault"];
@@ -107,6 +131,10 @@ pub(crate) struct References {
     /// The string keys that are read from a mapping: `value["name"]`, `value.get("name")`,
     /// `"name" in value`, or a mapping pattern (`case {"name": ...}`).
     pub keys: FxHashSet<(Owner, String)>,
+    /// The values that are read as a whole: `dict(value)`, `json.dumps(value)`, `{**value}`,
+    /// `f(**value)`, `for key in value` or `value.items()`, when the value is the result of a call, or
+    /// a variable that is assigned one.
+    pub whole_reads: FxHashSet<WholeRead>,
     /// The names that are imported from another module. A star import has the name `*`.
     pub imports: FxHashSet<Import>,
     /// Whether the module defines `__all__`.
@@ -215,9 +243,11 @@ struct Scope {
     /// In a class body, the attributes, methods and classes that it defines so far, by their name,
     /// each with its index in the definitions of the module.
     members: FxHashMap<String, Vec<usize>>,
-    /// In a function, the local variables that are assigned the result of a call, each with the
-    /// dotted names of what they call as they are written.
+    /// In a function or the module, the variables that are assigned the result of a call, each with
+    /// the dotted names of what they call as they are written.
     calls: FxHashMap<String, Vec<String>>,
+    /// In a function or lambda, the names of its parameters.
+    parameters: FxHashSet<String>,
     /// In a class body, the nearest scope around it that is not a class body. The functions,
     /// lambdas and comprehensions in a class body do not see its names, and neither does a class
     /// body nested in it, so their reads go on to this scope, as do the reads of the class body that
@@ -242,6 +272,7 @@ impl Scope {
             class_name: None,
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
+            parameters: FxHashSet::default(),
             outer: None,
         }
     }
@@ -318,6 +349,11 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 None,
                 false,
             ),
+            Stmt::For(loop_) => {
+                // A loop over a mapping reads its keys.
+                self.add_whole_read(&loop_.iter, None);
+                walk_stmt(self, stmt);
+            }
             Stmt::TypeAlias(alias) => {
                 // Its value is evaluated when it is used, but what it reads is still read.
                 self.define_target(&alias.name, false, None, None, None, None);
@@ -384,6 +420,13 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 walk_expr(self, expr);
             }
             Expr::Call(call) => self.visit_call(call, None),
+            Expr::Dict(dict) => {
+                // `{**value}` reads every key of the value.
+                for item in dict.iter().filter(|item| item.key.is_none()) {
+                    self.add_whole_read(&item.value, None);
+                }
+                walk_expr(self, expr);
+            }
             Expr::Compare(compare) => {
                 // A read of a string key by a membership test (`"name" in value`).
                 let operands = compare.operands.iter();
@@ -548,6 +591,7 @@ impl<'a> Walker<'_, '_> {
         {
             self.add_key(first);
         }
+        self.add_whole_reads(call);
         self.add_string_call(call);
         let (base, attributes) = match &*call.func {
             Expr::Attribute(func) => attribute_chain(func),
@@ -620,6 +664,10 @@ impl<'a> Walker<'_, '_> {
         let Some(first) = generators.first() else {
             return;
         };
+        // A comprehension over a mapping reads its keys.
+        for generator in generators {
+            self.add_whole_read(&generator.iter, None);
+        }
         self.visit_expr(&first.iter);
         let (scope, binder) = (self.scope, self.binder);
         let mut inner = Scope::new(ScopeKind::Function);
@@ -726,7 +774,10 @@ impl<'a> Walker<'_, '_> {
 
         // The body runs only when the function is called. A lambda has no name, and is part of the code
         // that it is in.
-        let (body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
+        let (mut body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
+        body_scope
+            .parameters
+            .extend(names.iter().map(|name| (*name).to_string()));
         let (scope, owner) = (self.scope, self.owner);
         self.scope = self.push_scope(body_scope);
         self.binder = self.scope;
@@ -1001,7 +1052,7 @@ impl<'a> Walker<'_, '_> {
     ) {
         if let (Expr::Name(name), Some(call)) = (target, call) {
             let binder = self.binder;
-            if self.scopes[binder].kind == ScopeKind::Function {
+            if self.scopes[binder].kind != ScopeKind::Class {
                 self.scopes[binder]
                     .calls
                     .entry(name.id.to_string())
@@ -1127,6 +1178,72 @@ impl<'a> Walker<'_, '_> {
             })
             .collect();
         self.references.string_calls.insert((called, arguments));
+    }
+
+    /// Add the values that a call reads as a whole: `f(**value)`, `value.items()`, and the first
+    /// argument of a function that reads every key, such as `dict(value)` or `json.dumps(value)`.
+    fn add_whole_reads(&mut self, call: &ast::ExprCall) {
+        for keyword in &call.arguments.keywords {
+            if keyword.arg.is_none() {
+                self.add_whole_read(&keyword.value, None);
+            }
+        }
+        if let Expr::Attribute(func) = &*call.func
+            && WHOLE_METHODS.contains(&func.attr.as_str())
+            && call.arguments.is_empty()
+        {
+            self.add_whole_read(&func.value, None);
+        }
+        // The last name is checked first, as most calls are of other functions.
+        let last = match &*call.func {
+            Expr::Name(name) => name.id.as_str(),
+            Expr::Attribute(attribute) => attribute.attr.as_str(),
+            _ => return,
+        };
+        let is_reader = WHOLE_READERS
+            .iter()
+            .any(|reader| reader.rsplit('.').next() == Some(last));
+        if is_reader
+            && let Some(first) = call.arguments.args.first()
+            && let Some(reader) = dotted_name(&call.func, Unwrap::Call)
+        {
+            self.add_whole_read(first, Some(&reader));
+        }
+    }
+
+    /// Add a read of a value as a whole, if it is the result of a call, or a variable that is assigned
+    /// one in the function that it is read in or in the module.
+    fn add_whole_read(&mut self, value: &Expr, reader: Option<&str>) {
+        let values = match value {
+            Expr::Call(call) => dotted_name(&call.func, Unwrap::Call).into_iter().collect(),
+            Expr::Name(name) => self.variable_calls(name.id.as_str()),
+            _ => return,
+        };
+        let owner = self.owner;
+        self.references
+            .whole_reads
+            .extend(values.into_iter().map(|value| WholeRead {
+                owner,
+                value,
+                reader: reader.map(str::to_string),
+            }));
+    }
+
+    /// Get the dotted names of what a variable is assigned the result of calling, as they are
+    /// written: in the scope that it is read in, the scopes that bind its names as well, or the module.
+    fn variable_calls(&self, name: &str) -> Vec<String> {
+        let mut scope = Some(self.scope);
+        while let Some(index) = scope {
+            let found = &self.scopes[index];
+            if let Some(calls) = found.calls.get(name) {
+                return calls.clone();
+            }
+            if found.bound.contains(name) || found.parameters.contains(name) {
+                return Vec::new();
+            }
+            scope = found.enclosing;
+        }
+        self.scopes[0].calls.get(name).cloned().unwrap_or_default()
     }
 
     /// Add a read of a key, if it is a string literal.
