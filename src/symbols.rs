@@ -7,7 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::definitions::{Definition, Kind};
 use crate::modules::ModuleName;
-use crate::references::{Binding, ModuleBindings, References};
+use crate::references::{Binding, ModuleBindings, Owner, References};
 
 /// What a module defines, at its top level or not, and imports at its top level, as the base classes
 /// and decorators of its classes are followed through it, whether it is a module of the project or one outside it.
@@ -50,7 +50,9 @@ impl ModuleSymbols {
         let mut stars: Vec<String> = references
             .imports
             .iter()
-            .filter(|import| import.owner.is_none() && import.name == "*")
+            .filter(|import| {
+                matches!(import.owner, Owner::Module | Owner::Imported) && import.name == "*"
+            })
             .filter_map(|import| name.resolve(import.module.as_deref(), import.level))
             .collect();
         stars.sort();

@@ -15,6 +15,40 @@ use crate::symbols::ModuleSymbols;
 
 /// A set of dotted names that is cached and shared.
 pub(crate) type Names = Rc<FxHashSet<String>>;
+/// The absolute imports whose source depends on the script directory, by importing file and name.
+pub(crate) type ScriptImports = FxHashMap<usize, FxHashMap<String, Vec<(usize, String)>>>;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum ImportContext {
+    /// All possible sources, for declarations analyzed without a caller.
+    Any,
+    Ordinary,
+    Script(usize),
+}
+
+#[derive(Default)]
+pub(crate) struct Followed {
+    pub(crate) names: FxHashSet<String>,
+    pub(crate) depends_on_script: bool,
+}
+
+struct Follow {
+    context: ImportContext,
+    seen: FxHashSet<String>,
+    active_bindings: FxHashMap<(usize, *const Binding), usize>,
+    result: Followed,
+}
+
+impl Follow {
+    fn new(context: ImportContext) -> Self {
+        Self {
+            context,
+            seen: FxHashSet::default(),
+            active_bindings: FxHashMap::default(),
+            result: Followed::default(),
+        }
+    }
+}
 
 /// The classes of a project, with the base classes that they inherit from and their decorators.
 ///
@@ -35,8 +69,9 @@ pub(crate) struct ClassHierarchy {
     inherited: Cache,
     resolved_decorators: Cache,
     resolved: Cache,
-    followed: RefCell<FxHashMap<String, Names>>,
-    star_imported: RefCell<FxHashMap<String, Rc<StarImport>>>,
+    script_imports: ScriptImports,
+    followed: ImportCache<Followed>,
+    star_imported: ImportCache<StarImport>,
     located: RefCell<FxHashMap<String, Located>>,
 }
 
@@ -46,6 +81,7 @@ struct StarImport {
     names: FxHashSet<String>,
     /// The names in the modules that give the name out, which are followed further from there.
     sources: Vec<String>,
+    depends_on_script: bool,
 }
 
 impl ClassHierarchy {
@@ -55,6 +91,7 @@ impl ClassHierarchy {
         modules: Vec<Arc<ModuleSymbols>>,
         files_by_name: FxHashMap<String, Vec<usize>>,
         external: ExternalModules,
+        script_imports: ScriptImports,
     ) -> Self {
         let by_path = modules
             .iter()
@@ -71,6 +108,7 @@ impl ClassHierarchy {
             inherited: RefCell::default(),
             resolved_decorators: RefCell::default(),
             resolved: RefCell::default(),
+            script_imports,
             followed: RefCell::default(),
             star_imported: RefCell::default(),
             located: RefCell::default(),
@@ -154,9 +192,9 @@ impl ClassHierarchy {
     /// defines at its top level nor imports is each class or function of that name in its functions.
     pub(crate) fn resolve(&self, module: usize, written: &str) -> Names {
         cached(&self.resolved, module, written, || {
-            let mut found = FxHashSet::default();
-            self.resolve_written(module, "", written, &mut FxHashSet::default(), &mut found);
-            found
+            let mut walk = Follow::new(ImportContext::Any);
+            self.resolve_written(module, "", written, &mut walk);
+            walk.result.names
         })
     }
 
@@ -167,28 +205,55 @@ impl ClassHierarchy {
         if !scope.contains(LOCALS) {
             return self.resolve(module, written);
         }
-        let mut found = FxHashSet::default();
-        self.resolve_written(
-            module,
-            scope,
-            written,
-            &mut FxHashSet::default(),
-            &mut found,
-        );
-        Rc::new(found)
+        let mut walk = Follow::new(ImportContext::Any);
+        self.resolve_written(module, scope, written, &mut walk);
+        Rc::new(walk.result.names)
     }
 
-    /// Get the dotted names that a dotted name stands for: the name itself, the origin of an imported
-    /// name, and the base classes of a class, directly or not.
-    pub(crate) fn follow_name(&self, name: &str) -> Names {
-        if let Some(found) = self.followed.borrow().get(name) {
-            return found.clone();
+    /// Follow an imported name and the base classes, allowing the sources for the running script.
+    pub(crate) fn follow_name(&self, name: &str, scope: Option<usize>) -> Rc<Followed> {
+        let ordinary = self.follow_name_in_context(name, ImportContext::Ordinary);
+        if ordinary.depends_on_script
+            && let Some(scope) = scope
+        {
+            return self.follow_name_in_context(name, ImportContext::Script(scope));
         }
-        let mut found = FxHashSet::default();
-        self.follow(name, &mut FxHashSet::default(), &mut found);
-        let found = Rc::new(found);
+        ordinary
+    }
+
+    pub(crate) fn has_script_imports(&self) -> bool {
+        !self.script_imports.is_empty()
+    }
+
+    /// A class may have a different name when re-exported through an import or `__getattr__`.
+    pub(crate) fn can_reexport(&self, name: &str) -> bool {
+        self.has_script_imports()
+            && name.rsplit_once('.').is_some_and(|(module, symbol)| {
+                self.files_by_name.get(module).is_some_and(|files| {
+                    files
+                        .iter()
+                        .filter(|file| self.script_imports.contains_key(file))
+                        .any(|&file| {
+                            let symbols = self.module(file);
+                            symbols.bindings.contains_key(symbol)
+                                || symbols.lazy.contains_key(symbol)
+                                || !symbols.stars.is_empty()
+                        })
+                })
+            })
+    }
+
+    fn follow_name_in_context(&self, name: &str, context: ImportContext) -> Rc<Followed> {
+        if let Some(found) = import_cached(&self.followed, context, name) {
+            return found;
+        }
+        let mut walk = Follow::new(context);
+        self.follow(name, &mut walk);
+        let found = Rc::new(walk.result);
         self.followed
             .borrow_mut()
+            .entry(context)
+            .or_default()
             .insert(name.to_string(), found.clone());
         found
     }
@@ -199,14 +264,7 @@ impl ClassHierarchy {
     /// `scope` is the name in the module of the class or function that it is written for, or an empty
     /// string at the top level of the module. The functions that it is defined in are looked in first,
     /// from the nearest one.
-    fn resolve_written(
-        &self,
-        module: usize,
-        scope: &str,
-        written: &str,
-        seen: &mut FxHashSet<String>,
-        found: &mut FxHashSet<String>,
-    ) {
+    fn resolve_written(&self, module: usize, scope: &str, written: &str, walk: &mut Follow) {
         let symbols = self.module(module);
         let (first, rest) = written.split_once('.').unwrap_or((written, ""));
 
@@ -216,20 +274,18 @@ impl ClassHierarchy {
             if symbols.bases.contains_key(&local) {
                 // A class or function of a function that the scope is in.
                 let name = join(&symbols.name.name, &join(&local, rest));
-                self.follow(&name, seen, found);
+                self.follow(&name, walk);
                 return;
             }
             functions = function;
         }
         if symbols.bases.contains_key(first) {
             // A class or function of the module itself.
-            self.follow(&format!("{}.{written}", symbols.name.name), seen, found);
+            self.follow(&format!("{}.{written}", symbols.name.name), walk);
         } else if let Some(bindings) = symbols.bindings.get(first) {
             // A name that the module imports.
             for binding in bindings {
-                if let Some(imported) = imported(&symbols, binding) {
-                    self.follow(&join(&imported, rest), seen, found);
-                }
+                self.follow_binding(module, &symbols, binding, rest, walk);
             }
         } else if !scope.contains(LOCALS)
             && let Some(locals) = symbols.locals.get(first)
@@ -238,11 +294,11 @@ impl ClassHierarchy {
             // not known, is each class or function of that name that a function of the module defines.
             for local in locals {
                 let name = join(&symbols.name.name, &join(local, rest));
-                self.follow(&name, seen, found);
+                self.follow(&name, walk);
             }
         } else {
             // A builtin, or a name that the module does not define at its top level.
-            found.insert(written.to_string());
+            walk.result.names.insert(written.to_string());
         }
     }
 
@@ -251,42 +307,130 @@ impl ClassHierarchy {
     ///
     /// The names are added to one set as they are found, rather than returned and copied at each step
     /// of a long chain of imports.
-    fn follow(&self, name: &str, seen: &mut FxHashSet<String>, found: &mut FxHashSet<String>) {
-        if !seen.insert(name.to_string()) {
+    fn follow(&self, name: &str, walk: &mut Follow) {
+        if !walk.seen.insert(name.to_string()) {
             return;
         }
 
-        found.insert(name.to_string());
+        walk.result.names.insert(name.to_string());
         for (file, symbol) in self.locate(name) {
             let symbols = self.module(file);
             let (first, rest) = symbol.split_once('.').unwrap_or((&symbol, ""));
             if let Some(bases) = symbols.bases.get(&symbol) {
                 for base in bases {
-                    self.resolve_written(file, &symbol, base, seen, found);
+                    self.resolve_written(file, &symbol, base, walk);
                 }
             } else if let Some(bindings) = symbols.bindings.get(first) {
                 for binding in bindings {
-                    if let Some(imported) = imported(&symbols, binding) {
-                        self.follow(&join(&imported, rest), seen, found);
-                    }
+                    self.follow_binding(file, &symbols, binding, rest, walk);
                 }
             } else if !symbols.bases.contains_key(first) {
                 // A name that the module may star import.
-                for star_module in star_modules(&symbols, first) {
-                    let star = self.star_imported(&join(star_module, &symbol));
-                    found.extend(star.names.iter().cloned());
+                for star_module in self.star_modules(
+                    file,
+                    &symbols,
+                    first,
+                    walk.context,
+                    &mut walk.result.depends_on_script,
+                ) {
+                    let star = self.star_imported(&join(star_module, &symbol), walk.context);
+                    walk.result.depends_on_script |= star.depends_on_script;
+                    walk.result.names.extend(star.names.iter().cloned());
                     for source in &star.sources {
-                        self.follow(source, seen, found);
+                        self.follow(source, walk);
                     }
                 }
                 // A name that the `__getattr__` of the module imports, which it gives out.
                 for binding in symbols.lazy.get(first).into_iter().flatten() {
-                    if let Some(imported) = imported(&symbols, binding) {
-                        self.follow(&join(&imported, rest), seen, found);
-                    }
+                    self.follow_binding(file, &symbols, binding, rest, walk);
                 }
             }
         }
+    }
+
+    fn follow_binding(
+        &self,
+        file: usize,
+        symbols: &ModuleSymbols,
+        binding: &Binding,
+        rest: &str,
+        walk: &mut Follow,
+    ) {
+        let Some(source) = symbols
+            .name
+            .resolve(binding.module.as_deref(), binding.level)
+        else {
+            return;
+        };
+        // Each pass through an alias can prepend another namespace to the name, so seeing
+        // exact names is insufficient to detect a cycle. A revisit can still be useful
+        // when it consumes part of the remaining attribute chain.
+        let key = (file, std::ptr::from_ref(binding));
+        if walk
+            .active_bindings
+            .get(&key)
+            .is_some_and(|&length| length <= rest.len())
+        {
+            return;
+        }
+        let previous = walk.active_bindings.insert(key, rest.len());
+        for source in self.import_modules(
+            file,
+            &source,
+            walk.context,
+            &mut walk.result.depends_on_script,
+        ) {
+            let name = join(source, binding.name.as_deref().unwrap_or_default());
+            self.follow(&join(&name, rest), walk);
+        }
+        if let Some(previous) = previous {
+            walk.active_bindings.insert(key, previous);
+        } else {
+            walk.active_bindings.remove(&key);
+        }
+    }
+
+    fn import_modules<'a>(
+        &'a self,
+        file: usize,
+        source: &'a str,
+        context: ImportContext,
+        depends_on_script: &mut bool,
+    ) -> impl Iterator<Item = &'a str> + use<'a> {
+        let alternatives = self
+            .script_imports
+            .get(&file)
+            .and_then(|modules| modules.get(source));
+        *depends_on_script |= alternatives.is_some();
+        alternatives.is_none().then_some(source).into_iter().chain(
+            alternatives
+                .into_iter()
+                .flatten()
+                .filter_map(move |(scope, module)| {
+                    (context == ImportContext::Any || context == ImportContext::Script(*scope))
+                        .then_some(module.as_str())
+                }),
+        )
+    }
+
+    /// A star import binds the submodule itself under its name. That name comes from the
+    /// submodule rather than from a star import.
+    fn star_modules<'a>(
+        &'a self,
+        file: usize,
+        symbols: &'a ModuleSymbols,
+        first: &str,
+        context: ImportContext,
+        depends_on_script: &mut bool,
+    ) -> Vec<&'a str> {
+        let mut modules = Vec::new();
+        for star in &symbols.stars {
+            modules.extend(self.import_modules(file, star, context, depends_on_script));
+        }
+        if !modules.is_empty() && modules.contains(&join(&symbols.name.name, first).as_str()) {
+            modules.clear();
+        }
+        modules
     }
 
     /// Follow a name through the star imports of the modules, to the modules that give it out.
@@ -298,9 +442,9 @@ impl ClassHierarchy {
     ///
     /// The star imports of a package often import the package back, so they are followed through
     /// their cycles once for each name, rather than once for each class that reads the name.
-    fn star_imported(&self, name: &str) -> Rc<StarImport> {
-        if let Some(found) = self.star_imported.borrow().get(name) {
-            return found.clone();
+    fn star_imported(&self, name: &str, context: ImportContext) -> Rc<StarImport> {
+        if let Some(found) = import_cached(&self.star_imported, context, name) {
+            return found;
         }
 
         // The name that each name is first star imported by, which is on the shortest way to it. The
@@ -309,6 +453,7 @@ impl ClassHierarchy {
         importers.insert(name.to_string(), None);
         let mut pending = VecDeque::from([name.to_string()]);
         let mut sources = Vec::new();
+        let mut depends_on_script = false;
         while let Some(current) = pending.pop_front() {
             let located = self.locate(&current);
             if located.is_empty() {
@@ -327,7 +472,9 @@ impl ClassHierarchy {
                 {
                     gives_out = true;
                 } else if !symbols.bases.contains_key(first) {
-                    for star_module in star_modules(&symbols, first) {
+                    for star_module in
+                        self.star_modules(file, &symbols, first, context, &mut depends_on_script)
+                    {
                         // A star import of a module that is not found gives out no names. Its name
                         // would otherwise be looked for in the package above it, which can star import
                         // it again, with a longer name each time.
@@ -359,9 +506,15 @@ impl ClassHierarchy {
             }
         }
 
-        let found = Rc::new(StarImport { names, sources });
+        let found = Rc::new(StarImport {
+            names,
+            sources,
+            depends_on_script,
+        });
         self.star_imported
             .borrow_mut()
+            .entry(context)
+            .or_default()
             .insert(name.to_string(), found.clone());
         found
     }
@@ -442,6 +595,12 @@ type Located = Rc<[(usize, String)]>;
 /// A cache of sets of dotted names, by a module and a name in it.
 type Cache = RefCell<FxHashMap<(usize, String), Names>>;
 
+type ImportCache<T> = RefCell<FxHashMap<ImportContext, FxHashMap<String, Rc<T>>>>;
+
+fn import_cached<T>(cache: &ImportCache<T>, context: ImportContext, name: &str) -> Option<Rc<T>> {
+    cache.borrow().get(&context)?.get(name).cloned()
+}
+
 /// Get the names cached for a name of a module, or compute them and cache them.
 ///
 /// The cache is not borrowed while the names are computed, since computing them can read this cache
@@ -459,32 +618,6 @@ fn cached(
     let found = Rc::new(compute());
     cache.borrow_mut().insert(key, found.clone());
     found
-}
-
-/// Get the modules that a module star imports, to look up a name in them by its first part.
-///
-/// A star import of a submodule binds the submodule itself under its name, so that name is the
-/// submodule and not one that a star import gives out.
-fn star_modules<'a>(module: &'a ModuleSymbols, first: &str) -> &'a [String] {
-    if module
-        .stars
-        .binary_search(&format!("{}.{first}", module.name.name))
-        .is_ok()
-    {
-        return &[];
-    }
-    &module.stars
-}
-
-/// Get the dotted name that an imported name of a module stands for.
-fn imported(module: &ModuleSymbols, binding: &Binding) -> Option<String> {
-    let source = module
-        .name
-        .resolve(binding.module.as_deref(), binding.level)?;
-    Some(match &binding.name {
-        Some(name) => join(&source, name),
-        None => source,
-    })
 }
 
 /// Join two dotted names, either of which can be empty.

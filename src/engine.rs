@@ -9,7 +9,7 @@ use ruff_python_ast::name::Name;
 use ruff_python_stdlib::builtins::is_python_builtin;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::classes::{ClassHierarchy, join};
+use crate::classes::{ClassHierarchy, ScriptImports, join};
 use crate::config::Config;
 use crate::definitions::{Definition, Kind};
 use crate::discover::{discover, is_under};
@@ -67,6 +67,7 @@ struct SiblingContext {
 struct SiblingUses {
     file: usize,
     scope: usize,
+    has_qualified_imports: bool,
     uses: FxHashMap<Owner, Uses>,
     loads: FxHashMap<Owner, FxHashSet<usize>>,
 }
@@ -89,6 +90,19 @@ struct Uses {
     /// in its class body, and the members that a read through a class or its first parameter can
     /// stand for, that the code reads.
     definitions: FxHashSet<DefinitionId>,
+    /// Member references that have additional targets when a script supplies their imports.
+    scoped_members: FxHashSet<ScopedMember>,
+}
+
+#[derive(Eq, Hash, PartialEq)]
+enum ScopedMember {
+    Named(String, Name),
+    Own {
+        file: usize,
+        class: String,
+        name: Name,
+        is_super: bool,
+    },
 }
 
 /// The modules of the project, by the index of their file.
@@ -182,15 +196,6 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         roots,
         qualifications,
     } = import_siblings(&project, &mut external);
-    let original_imports: FxHashMap<_, _> = qualifications
-        .iter()
-        .map(|(&file, modules)| {
-            (
-                file,
-                qualify_sibling_symbols(&mut project.facts[file], modules),
-            )
-        })
-        .collect();
     let modules: Vec<Arc<ModuleSymbols>> = (0..project.files.len())
         .map(|index| {
             let file_facts = &project.facts[index];
@@ -203,7 +208,37 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             ))
         })
         .collect();
-    let hierarchy = ClassHierarchy::new(modules, project.files_by_name.clone(), external);
+    let mut script_imports = ScriptImports::default();
+    for context in &contexts {
+        for (original, qualified) in &context.qualifications {
+            script_imports
+                .entry(context.file)
+                .or_default()
+                .entry(original.clone())
+                .or_default()
+                .push((context.scope, qualified.clone()));
+        }
+    }
+    if !script_imports.is_empty() {
+        for context in &contexts {
+            script_imports.entry(context.file).or_default();
+        }
+    }
+    let hierarchy = ClassHierarchy::new(
+        modules,
+        project.files_by_name.clone(),
+        external,
+        script_imports,
+    );
+    let original_imports: FxHashMap<_, _> = qualifications
+        .iter()
+        .map(|(&file, modules)| {
+            (
+                file,
+                qualify_sibling_symbols(&mut project.facts[file], modules),
+            )
+        })
+        .collect();
     let typed_dicts = subclass_attributes(&project, &hierarchy, &TYPED_DICTS);
     let enums = subclass_attributes(&project, &hierarchy, &ENUMS);
     let fields: FxHashSet<DefinitionId> = typed_dicts.values().flatten().copied().collect();
@@ -252,13 +287,12 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     );
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
 
-    let implementations = classes.implementations(&project);
     let mut graph = Graph::new(
         &project,
+        &classes,
         &uses,
         &fields,
         enums,
-        implementations,
         &sibling_uses,
         roots,
     );
@@ -365,7 +399,7 @@ fn find_uses(
             // Each attribute, and the one read from the result of the call, is read from the chain
             // before it.
             for (index, attribute) in read.attributes.iter().chain(&read.called).enumerate() {
-                owner_uses.add_member_of(classes, module, &parts[..=index], attribute);
+                owner_uses.add_member_of(classes, module, &parts[..=index], attribute, None);
             }
             if read.reads_object {
                 owner_uses.objects.insert((file, parts));
@@ -384,7 +418,7 @@ fn find_uses(
             if !is_sibling(read.binding.module.as_deref(), read.binding.level) {
                 uses.entry((file, read.owner))
                     .or_default()
-                    .add_imported_read(project, classes, file, read);
+                    .add_imported_read(project, classes, file, read, None);
             }
         }
         for import in original_imports.get(&file).unwrap_or(&references.imports) {
@@ -408,10 +442,20 @@ fn find_uses(
         for (owner, receiver, name) in &references.members {
             let (Receiver::Own(class) | Receiver::Super(class)) = receiver;
             let is_super = matches!(receiver, Receiver::Super(_));
-            let found = classes.read_from_own(file, class, name, is_super);
-            uses.entry((file, *owner))
-                .or_default()
-                .add_member(found, name);
+            let (found, depends_on_script) =
+                classes.read_from_own(file, class, name, is_super, None);
+            let owner_uses = uses.entry((file, *owner)).or_default();
+            if found.is_some() || !depends_on_script {
+                owner_uses.add_member(found, name);
+            }
+            if depends_on_script {
+                owner_uses.scoped_members.insert(ScopedMember::Own {
+                    file,
+                    class: class.clone(),
+                    name: name.clone(),
+                    is_super,
+                });
+            }
         }
         for (owner, name) in &references.keys {
             uses.entry((file, *owner))
@@ -487,9 +531,13 @@ fn find_sibling_uses(
             if let Some(module) = qualified(read.binding.module.as_deref(), read.binding.level) {
                 let mut read = read.clone();
                 read.binding.module = Some(module.clone());
-                uses.entry(read.owner)
-                    .or_default()
-                    .add_imported_read(project, classes, file, &read);
+                uses.entry(read.owner).or_default().add_imported_read(
+                    project,
+                    classes,
+                    file,
+                    &read,
+                    Some(scope),
+                );
             }
         }
         for import in &original_imports[&file] {
@@ -505,6 +553,7 @@ fn find_sibling_uses(
     SiblingUses {
         file,
         scope,
+        has_qualified_imports: !qualifications.is_empty(),
         uses,
         loads,
     }
@@ -527,6 +576,7 @@ impl Uses {
         classes: &Classes,
         file: usize,
         read: &ImportedRead,
+        scope: Option<usize>,
     ) {
         let Some(resolved) = resolve_import(
             &project.names[file],
@@ -542,7 +592,7 @@ impl Uses {
             self.objects.extend(imported_objects(&resolved, project));
         }
         if let Some(called) = &read.called {
-            self.add_member_of(classes, "", &resolved.0, called);
+            self.add_member_of(classes, "", &resolved.0, called, scope);
         }
         if read.attributes.is_empty() {
             return;
@@ -565,7 +615,7 @@ impl Uses {
             .max()
             .unwrap_or(0);
         for index in first_of_object..parts.len() {
-            self.add_member_of(classes, "", &parts[..index], &parts[index]);
+            self.add_member_of(classes, "", &parts[..index], &parts[index], scope);
         }
     }
 
@@ -573,9 +623,23 @@ impl Uses {
     ///
     /// `module` is the module that the chain is written in, or empty for a chain that starts with
     /// the name of a module.
-    fn add_member_of(&mut self, classes: &Classes, module: &str, chain: &[Name], name: &Name) {
+    fn add_member_of(
+        &mut self,
+        classes: &Classes,
+        module: &str,
+        chain: &[Name],
+        name: &Name,
+        scope: Option<usize>,
+    ) {
         let written = join(module, &chain.join("."));
-        self.add_member(classes.read_from(&written, name), name);
+        let (found, depends_on_script) = classes.read_from(&written, name, scope);
+        if found.is_some() || !depends_on_script {
+            self.add_member(found, name);
+        }
+        if scope.is_none() && depends_on_script {
+            self.scoped_members
+                .insert(ScopedMember::Named(written, name.clone()));
+        }
     }
 
     /// Add a read of a member: the definitions that it can stand for, or its name if it is not known
@@ -600,6 +664,7 @@ struct Classes<'a> {
     definitions: Vec<DefinitionId>,
     /// The classes by their dotted names, such as `package.module.Class`.
     by_dotted: FxHashMap<String, Vec<ClassId>>,
+    dotted_names: Vec<String>,
     /// The names of the classes, without their modules, so that a name that cannot be a class is not
     /// followed.
     names: FxHashSet<String>,
@@ -612,6 +677,8 @@ struct Classes<'a> {
     /// The classes that a member read from the first parameter of a method of each class can be in,
     /// and from `super()` in it, found when first needed.
     lineages: Vec<[OnceCell<Vec<ClassId>>; 2]>,
+    /// Whether choosing the base classes used in a self or super read needs a script's imports.
+    scoped_lineages: Vec<OnceCell<bool>>,
     /// The members of the classes, by their name and then their class. A field of a `TypedDict` is
     /// read as a key instead.
     by_member: FxHashMap<String, FxHashMap<ClassId, Vec<DefinitionId>>>,
@@ -632,6 +699,7 @@ impl<'a> Classes<'a> {
         let mut ids = FxHashMap::default();
         let mut definitions = Vec::new();
         let mut by_dotted: FxHashMap<String, Vec<ClassId>> = FxHashMap::default();
+        let mut dotted_names = Vec::new();
         let mut names = FxHashSet::default();
         for (definition_id, (file, definition)) in project
             .definition_files
@@ -648,6 +716,9 @@ impl<'a> Classes<'a> {
                 ids.insert(key.clone(), id);
                 definitions.push(definition_id);
                 let dotted = join(&project.names[*file].name, &key.1);
+                if hierarchy.has_script_imports() {
+                    dotted_names.push(dotted.clone());
+                }
                 by_dotted.entry(dotted).or_default().push(id);
                 names.insert(definition.name.clone());
                 keys.push(key);
@@ -732,11 +803,19 @@ impl<'a> Classes<'a> {
             ids,
             definitions,
             by_dotted,
+            dotted_names,
             names,
             ancestors,
             lineages: std::iter::repeat_with(Default::default)
                 .take(descendants.len())
                 .collect(),
+            scoped_lineages: if hierarchy.has_script_imports() {
+                std::iter::repeat_with(OnceCell::new)
+                    .take(descendants.len())
+                    .collect()
+            } else {
+                Vec::new()
+            },
             descendants,
             metaclasses,
             by_member,
@@ -772,21 +851,22 @@ impl<'a> Classes<'a> {
     ///
     /// Returns None if the dotted name is not a class of the project, or if the class has no such
     /// member.
-    fn read_from(&self, written: &str, name: &str) -> Option<Vec<DefinitionId>> {
+    fn read_from(
+        &self,
+        written: &str,
+        name: &str,
+        scope: Option<usize>,
+    ) -> (Option<Vec<DefinitionId>>, bool) {
         let last = written.rsplit('.').next().unwrap_or(written);
-        if !self.names.contains(last) {
-            return None;
+        if !self.names.contains(last) && !self.hierarchy.can_reexport(written) {
+            return (None, false);
         }
-        let classes: Vec<ClassId> = self
-            .hierarchy
-            .follow_name(written)
+        let followed = self.hierarchy.follow_name(written, scope);
+        let classes = followed
+            .names
             .iter()
-            .flat_map(|dotted| self.by_dotted.get(dotted).into_iter().flatten().copied())
-            .collect();
-        if classes.is_empty() {
-            return None;
-        }
-        self.members(classes, name)
+            .flat_map(|dotted| self.by_dotted.get(dotted).into_iter().flatten().copied());
+        (self.members(classes, name), followed.depends_on_script)
     }
 
     /// Find the members that a name read from the first parameter of a method of a class can stand
@@ -804,10 +884,33 @@ impl<'a> Classes<'a> {
         class: &str,
         name: &str,
         skip_own: bool,
-    ) -> Option<Vec<DefinitionId>> {
-        let &id = self.ids.get(&(file, class.to_string()))?;
+        scope: Option<usize>,
+    ) -> (Option<Vec<DefinitionId>>, bool) {
+        let Some(&id) = self.ids.get(&(file, class.to_string())) else {
+            return (None, false);
+        };
         if self.metaclasses[id] || !self.by_member.contains_key(name) {
-            return None;
+            return (None, false);
+        }
+        if self
+            .scoped_lineages
+            .get(id)
+            .is_some_and(|depends_on_script| {
+                *depends_on_script.get_or_init(|| {
+                    std::iter::once(&id)
+                        .chain(&self.descendants[id])
+                        .any(|&class| {
+                            self.hierarchy
+                                .follow_name(&self.dotted_names[class], None)
+                                .depends_on_script
+                        })
+                })
+            })
+        {
+            return (
+                self.members(self.scoped_lineage(id, skip_own, scope), name),
+                true,
+            );
         }
         let lineage = self.lineages[id][usize::from(skip_own)].get_or_init(|| {
             let mut lineage: FxHashSet<ClassId> = FxHashSet::default();
@@ -823,7 +926,35 @@ impl<'a> Classes<'a> {
             }
             lineage.into_iter().collect()
         });
-        self.members(lineage.iter().copied(), name)
+        (self.members(lineage.iter().copied(), name), false)
+    }
+
+    fn scoped_lineage(
+        &self,
+        id: ClassId,
+        skip_own: bool,
+        scope: Option<usize>,
+    ) -> FxHashSet<ClassId> {
+        let mut lineage = FxHashSet::default();
+        let mut instances = Vec::new();
+        for &instance in std::iter::once(&id).chain(&self.descendants[id]) {
+            let followed = self
+                .hierarchy
+                .follow_name(&self.dotted_names[instance], scope);
+            if instance == id || followed.names.contains(&self.dotted_names[id]) {
+                instances.push(instance);
+                lineage.insert(instance);
+                for dotted in &followed.names {
+                    lineage.extend(self.by_dotted.get(dotted).into_iter().flatten().copied());
+                }
+            }
+        }
+        if skip_own {
+            for instance in instances {
+                lineage.remove(&instance);
+            }
+        }
+        lineage
     }
 
     /// Find the implementations of each abstract method: the members of its name in the classes that
@@ -1141,8 +1272,8 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
         };
         let file_facts = &facts[file];
         let references = &file_facts.references;
-        for (owner, module) in &references.dotted_imports {
-            visit_import(Some(module), 0, None, *owner);
+        for (owner, module) in &references.module_imports {
+            visit_import(Some(module.as_str()), 0, None, *owner);
         }
         for import in &references.imports {
             visit_import(
@@ -1152,23 +1283,13 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
                 import.owner,
             );
         }
-        for (binding, owner) in references
-            .imported_reads
-            .iter()
-            .map(|read| (&read.binding, read.owner))
-            .chain(
-                references
-                    .bindings
-                    .primary
-                    .values()
-                    .map(|binding| (binding, None)),
-            )
-        {
+        for read in &references.imported_reads {
+            let binding = &read.binding;
             visit_import(
                 binding.module.as_deref(),
                 binding.level,
                 binding.name.as_deref(),
-                owner,
+                read.owner,
             );
         }
 
@@ -1536,6 +1657,7 @@ fn findings(
 /// So a function that is unused uses nothing.
 struct Graph<'a> {
     project: &'a Project,
+    classes: &'a Classes<'a>,
     uses: &'a FxHashMap<(usize, Owner), Uses>,
     sibling_uses: &'a [SiblingUses],
     contexts_by_file: FxHashMap<usize, Vec<usize>>,
@@ -1567,6 +1689,7 @@ struct Graph<'a> {
 #[derive(Default)]
 struct ContextReachability {
     active: bool,
+    imported: bool,
     waiting: Vec<u32>,
 }
 
@@ -1595,10 +1718,10 @@ struct Seen {
 impl<'a> Graph<'a> {
     fn new(
         project: &'a Project,
+        classes: &'a Classes<'a>,
         uses: &'a FxHashMap<(usize, Owner), Uses>,
         fields: &FxHashSet<DefinitionId>,
         enums: FxHashMap<(usize, String), Vec<DefinitionId>>,
-        implementations: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
         sibling_uses: &'a [SiblingUses],
         script_roots: usize,
     ) -> Self {
@@ -1655,15 +1778,44 @@ impl<'a> Graph<'a> {
 
         let mut contexts_by_file: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
         let mut contexts_by_scope = FxHashMap::default();
-        for (index, context) in sibling_uses.iter().enumerate() {
+        // A scope without sibling imports can use the ordinary traversal. In particular, scripts
+        // that share a library should only walk it once when their import directories add nothing.
+        let qualified_scopes: FxHashSet<usize> = sibling_uses
+            .iter()
+            .filter(|context| context.has_qualified_imports)
+            .map(|context| context.scope)
+            .collect();
+        let mut scoped_script_files = FxHashSet::default();
+        let mut scoped_entries = Vec::new();
+        for (index, context) in sibling_uses
+            .iter()
+            .enumerate()
+            .filter(|(_, context)| qualified_scopes.contains(&context.scope))
+        {
             contexts_by_file
                 .entry(context.file)
                 .or_default()
                 .push(index);
             contexts_by_scope.insert((context.file, context.scope), index);
+            if index < script_roots {
+                scoped_script_files.insert(context.file);
+                scoped_entries.push(index);
+            }
+        }
+        let mut pending = Vec::new();
+        // Every checked module contributes its top-level code.
+        for (file, facts) in project.facts.iter().enumerate() {
+            pending.push(PendingUses::File(file, Owner::Module, None));
+            if facts.is_script {
+                pending.push(PendingUses::File(file, Owner::Imported, None));
+                if !scoped_script_files.contains(&file) {
+                    pending.push(PendingUses::File(file, Owner::Script, None));
+                }
+            }
         }
         let mut graph = Self {
             project,
+            classes,
             uses,
             sibling_uses,
             contexts_by_file,
@@ -1677,19 +1829,17 @@ impl<'a> Graph<'a> {
             by_attribute,
             by_key,
             public,
-            implementations,
+            implementations: classes.implementations(project),
             waiting: FxHashMap::default(),
             used: vec![false; project.definitions.len()],
             ordinary_used: vec![false; project.definitions.len()],
             ordinary_seen: Seen::default(),
             scripts: FxHashMap::default(),
-            // The code of every module runs.
-            pending: (0..project.files.len())
-                .map(|file| PendingUses::File(file, None, None))
-                .collect(),
+            pending,
         };
-        for script in 0..script_roots {
+        for script in scoped_entries {
             graph.activate_context(script);
+            graph.visit_context_owner(script, Owner::Script);
         }
         graph
     }
@@ -1701,18 +1851,23 @@ impl<'a> Graph<'a> {
             return;
         }
         state.active = true;
-        let SiblingUses { file, scope, .. } = self.sibling_uses[context];
-        self.pending
-            .push(PendingUses::File(file, None, Some(scope)));
-        self.pending.push(PendingUses::Sibling(context, None));
         self.pending.extend(
             state
                 .waiting
                 .drain(..)
-                .map(|line| PendingUses::Sibling(context, Some(line))),
+                .map(|line| PendingUses::Sibling(context, Owner::Function(line))),
         );
+        self.visit_context_owner(context, Owner::Module);
+        let SiblingUses { file, scope, .. } = self.sibling_uses[context];
         let roots = self.root_functions.get(&file).cloned().unwrap_or_default();
         self.add(roots.into_iter().map(|id| (Some(scope), id)));
+    }
+
+    fn visit_context_owner(&mut self, context: usize, owner: Owner) {
+        let SiblingUses { file, scope, .. } = self.sibling_uses[context];
+        self.pending
+            .push(PendingUses::File(file, owner, Some(scope)));
+        self.pending.push(PendingUses::Sibling(context, owner));
     }
 
     /// Use more definitions, and get all the definitions that are used so far: the roots of every call,
@@ -1747,6 +1902,11 @@ impl<'a> Graph<'a> {
                     let sibling = &self.sibling_uses[context];
                     for &loaded in sibling.loads.get(&owner).into_iter().flatten() {
                         self.activate_context(loaded);
+                        if self.project.facts[self.sibling_uses[loaded].file].is_script
+                            && !std::mem::replace(&mut self.contexts[loaded].imported, true)
+                        {
+                            self.visit_context_owner(loaded, Owner::Imported);
+                        }
                     }
                     (Some(sibling.scope), sibling.uses.get(&owner))
                 }
@@ -1756,7 +1916,7 @@ impl<'a> Graph<'a> {
             };
             let mut seen = std::mem::take(self.seen(scope));
             let mut found: Vec<DefinitionId> = Vec::new();
-            self.look_up(uses, Some(&mut seen), &mut found);
+            self.look_up(uses, scope, Some(&mut seen), &mut found);
             *self.seen(scope) = seen;
             self.add(found.into_iter().map(|id| (scope, id)));
         }
@@ -1786,15 +1946,19 @@ impl<'a> Graph<'a> {
         }
         let implementations = self.implementations.get(&id).into_iter().flatten();
         reached.extend(implementations.map(|&(_, method)| method));
-        let owner = Some(definition.line);
+        let owner = Owner::Function(definition.line);
         if let Some(uses) = self.uses.get(&(*file, owner)) {
-            self.look_up(uses, None, &mut reached);
+            self.look_up(uses, None, None, &mut reached);
         }
         for &context in self.contexts_by_file.get(file).into_iter().flatten() {
-            if self.contexts[context].active
-                && let Some(uses) = self.sibling_uses[context].uses.get(&owner)
-            {
-                self.look_up(uses, None, &mut reached);
+            if self.contexts[context].active {
+                let sibling = &self.sibling_uses[context];
+                if let Some(uses) = self.uses.get(&(*file, owner)) {
+                    self.look_up_scoped_members(uses, sibling.scope, &mut reached);
+                }
+                if let Some(uses) = sibling.uses.get(&owner) {
+                    self.look_up(uses, Some(sibling.scope), None, &mut reached);
+                }
             }
         }
         reached
@@ -1809,6 +1973,7 @@ impl<'a> Graph<'a> {
     fn look_up(
         &self,
         uses: &Uses,
+        scope: Option<usize>,
         mut seen: Option<&mut Seen>,
         found: &mut impl Extend<DefinitionId>,
     ) {
@@ -1856,6 +2021,33 @@ impl<'a> Graph<'a> {
             }
         }
         found.extend(uses.definitions.iter().copied());
+        if let Some(scope) = scope {
+            self.look_up_scoped_members(uses, scope, found);
+        }
+    }
+
+    fn look_up_scoped_members(
+        &self,
+        uses: &Uses,
+        scope: usize,
+        found: &mut impl Extend<DefinitionId>,
+    ) {
+        for member in &uses.scoped_members {
+            let (definitions, _) = match member {
+                ScopedMember::Named(written, name) => {
+                    self.classes.read_from(written, name, Some(scope))
+                }
+                ScopedMember::Own {
+                    file,
+                    class,
+                    name,
+                    is_super,
+                } => self
+                    .classes
+                    .read_from_own(*file, class, name, *is_super, Some(scope)),
+            };
+            found.extend(definitions.into_iter().flatten());
+        }
     }
 
     /// Find the members of the enums that an object read uses as a whole.
@@ -1893,15 +2085,14 @@ impl<'a> Graph<'a> {
                 &self.project.definitions[id],
             );
             if definition.kind.is_function() {
-                self.pending
-                    .push(PendingUses::File(*file, Some(definition.line), scope));
+                let owner = Owner::Function(definition.line);
+                self.pending.push(PendingUses::File(*file, owner, scope));
                 if let Some(scope) = scope
                     && let Some(&context) = self.contexts_by_scope.get(&(*file, scope))
                 {
                     let state = &mut self.contexts[context];
                     if state.active {
-                        self.pending
-                            .push(PendingUses::Sibling(context, Some(definition.line)));
+                        self.pending.push(PendingUses::Sibling(context, owner));
                     } else {
                         state.waiting.push(definition.line);
                     }

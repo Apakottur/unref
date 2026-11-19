@@ -48,9 +48,18 @@ impl ModuleBindings {
     }
 }
 
-/// The code that a reference or a definition is in: the line of the name of the function that it is
-/// in, or None for code that runs when the module is imported.
-pub(crate) type Owner = Option<u32>;
+/// The code that a reference is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Owner {
+    /// Module-level code outside a main guard.
+    Module,
+    /// The true branch of a module-level main guard.
+    Script,
+    /// The fallback clauses of a module-level main guard.
+    Imported,
+    /// A function body, by the line of the function's name.
+    Function(u32),
+}
 
 /// A read of a name, or of a chain of attributes that starts with one (`package.module.name`).
 ///
@@ -125,7 +134,7 @@ const STRING_CALLS: [&str; 2] = ["include", "setdefault"];
 
 /// What a Python module refers to.
 ///
-/// Each reference is made from an owner: the function that it is in, or the module itself.
+/// Each reference is made from the function or part of the module that contains it.
 #[derive(Debug, Default)]
 pub(crate) struct References {
     /// The reads of the names of the module itself, without the local variables and parameters. A name
@@ -150,8 +159,8 @@ pub(crate) struct References {
     pub whole_reads: FxHashSet<WholeRead>,
     /// The names that are imported from another module. A star import has the name `*`.
     pub imports: FxHashSet<Import>,
-    /// The full paths and owners of dotted `import` statements.
-    pub dotted_imports: Vec<(Owner, String)>,
+    /// The full paths and owners of `import` statements.
+    pub module_imports: Vec<(Owner, Name)>,
     /// Whether the module defines `__all__`.
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
@@ -206,14 +215,45 @@ pub(crate) fn walk_module(
         }],
         scope: 0,
         binder: 0,
-        owner: None,
+        owner: Owner::Module,
         in_signature: false,
     };
-    walker.visit_body(&module.body);
+    for stmt in &module.body {
+        if let Stmt::If(branch) = stmt
+            && is_main_guard(&branch.test)
+        {
+            walker.visit_expr(&branch.test);
+            walker.owner = Owner::Script;
+            walker.visit_body(&branch.body);
+            walker.owner = Owner::Imported;
+            for clause in &branch.elif_else_clauses {
+                walker.visit_elif_else_clause(clause);
+            }
+            walker.owner = Owner::Module;
+        } else {
+            walker.visit_stmt(stmt);
+        }
+    }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings.primary = std::mem::take(&mut walker.scopes[0].imports);
     (walker.definitions, walker.references)
+}
+
+/// Whether a test checks `__name__ == "__main__"`, in either order.
+pub(crate) fn is_main_guard(test: &Expr) -> bool {
+    let Expr::Compare(compare) = test else {
+        return false;
+    };
+    let [CmpOp::Eq] = &*compare.ops else {
+        return false;
+    };
+    let [left, right] = &*compare.operands else {
+        return false;
+    };
+    let is_name = |expr: &Expr| matches!(expr, Expr::Name(name) if name.id == "__name__");
+    let is_main = |expr: &Expr| matches!(expr, Expr::StringLiteral(literal) if literal.value.to_str() == "__main__");
+    (is_name(left) && is_main(right)) || (is_main(left) && is_name(right))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,7 +364,7 @@ struct Walker<'p, 'a> {
     /// default values and annotations of a function bind in a scope of their own that is never closed,
     /// since the names that they bind are not tracked.
     binder: usize,
-    /// The function that the node is in, or None for code that runs when the module is imported.
+    /// The function or part of the module that contains the node.
     owner: Owner,
     /// Whether the node is in the annotation of a parameter or the return of a function.
     in_signature: bool,
@@ -871,7 +911,7 @@ impl<'a> Walker<'_, '_> {
         match body {
             FunctionBody::Lambda(expr) => self.visit_expr(expr),
             FunctionBody::Statements(statements) => {
-                self.owner = Some(line);
+                self.owner = Owner::Function(line);
                 self.visit_body(statements);
             }
         }
@@ -973,12 +1013,11 @@ impl<'a> Walker<'_, '_> {
 
     /// Bind the names that an `import` statement imports.
     fn visit_import(&mut self, import: &ast::StmtImport) {
-        self.references.dotted_imports.extend(
+        self.references.module_imports.extend(
             import
                 .names
                 .iter()
-                .filter(|alias| alias.name.as_str().contains('.'))
-                .map(|alias| (self.owner, alias.name.to_string())),
+                .map(|alias| (self.owner, alias.name.id.clone())),
         );
         let bindings = import.names.iter().map(|alias| match &alias.asname {
             // `import package.module` binds `package`.
@@ -1249,7 +1288,10 @@ impl<'a> Walker<'_, '_> {
             decorators: Vec::new(),
             class: None,
             function: None,
-            owner: self.owner,
+            owner: match self.owner {
+                Owner::Function(line) => Some(line),
+                _ => None,
+            },
             bases: Vec::new(),
             other_bases: false,
             unpacked: false,

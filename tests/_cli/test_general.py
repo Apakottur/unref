@@ -112,6 +112,84 @@ def test_default_path(tmp_path: Path) -> None:
         ),
         pytest.param(
             {
+                "pkg/z_run.py": 'import sub.worker\nif __name__ == "__main__": print(7)\n',
+                "pkg/sub/run.py": 'from worker import API\nif __name__ == "__main__": print(API().execute())\n',
+                "pkg/sub/worker.py": "from tasks import Service as API\n",
+                "pkg/tasks.py": "class Service:\n    def execute(self): return -1\n",
+                "pkg/sub/tasks.py": "class Service:\n    def execute(self): return 9\n",
+            },
+            f"{Path('pkg/tasks.py')}:2:9: unused-method 'execute'\n",
+            id="reexported-class-preserves-script-context",
+        ),
+        pytest.param(
+            {
+                "pkg/z_run.py": 'import sub.worker\nif __name__ == "__main__": print(7)\n',
+                "pkg/sub/run.py": (
+                    'from worker import Service\nif __name__ == "__main__": print(Service().launch())\n'
+                ),
+                "pkg/sub/worker.py": (
+                    "from tasks import Service as ImportedService\n"
+                    "class Service(ImportedService):\n    def launch(self): return self.execute()\n"
+                ),
+                "pkg/tasks.py": "class Service:\n    def execute(self): return -1\n",
+                "pkg/sub/tasks.py": "class Service:\n    def execute(self): return 9\n",
+            },
+            f"{Path('pkg/tasks.py')}:2:9: unused-method 'execute'\n",
+            id="inherited-method-preserves-script-context",
+        ),
+        pytest.param(
+            {
+                "pkg/load.py": 'import sub.worker\nif __name__ == "__main__": print(7)\n',
+                "pkg/z_run.py": (
+                    'if __name__ == "__main__":\n    from pkg.sub.worker import execute\n    print(execute())\n'
+                ),
+                "pkg/sub/worker.py": "def execute():\n    from tasks import value\n    return value()\n",
+                "pkg/tasks.py": "def value(): return 7\n",
+            },
+            "",
+            id="ordinary-script-shares-qualified-import-directory",
+        ),
+        pytest.param(
+            {
+                "pkg/z_run.py": 'import sub.run\nif __name__ == "__main__": print(7)\n',
+                "pkg/sub/run.py": (
+                    "def execute():\n    from tasks import value\n    return value()\n"
+                    'if __name__ == "__main__": print(execute())\n'
+                ),
+                "pkg/tasks.py": "def value(): return -1\n",
+                "pkg/sub/tasks.py": "def value(): return 9\n",
+            },
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'value'\n",
+            id="importing-entry-script-skips-main-guard",
+        ),
+        pytest.param(
+            {
+                "pkg/z_run.py": 'import sub.run\nif __name__ == "__main__": print(7)\n',
+                "pkg/sub/run.py": 'if __name__ == "__main__":\n    import extra as side_effect\n',
+                "pkg/extra.py": "from tasks import value\nprint(value())\n",
+                "pkg/sub/extra.py": "from tasks import value\nprint(value())\n",
+                "pkg/tasks.py": "def value(): return -1\n",
+                "pkg/sub/tasks.py": "def value(): return 9\n",
+            },
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'value'\n",
+            id="main-guard-import-loads-only-in-entry-script",
+        ),
+        pytest.param(
+            {
+                "pkg/z_run.py": 'import sub.run\nif __name__ == "__main__": print(7)\n',
+                "pkg/sub/run.py": (
+                    'if "__main__" == __name__:\n    from tasks import main_value\n    print(main_value())\n'
+                    "else:\n    from tasks import imported_value\n    print(imported_value())\n"
+                ),
+                "pkg/tasks.py": "def main_value(): return -1\ndef imported_value(): return 7\n",
+                "pkg/sub/tasks.py": "def main_value(): return 9\ndef imported_value(): return -1\n",
+            },
+            f"{Path('pkg/sub/tasks.py')}:2:5: unused-function 'imported_value'\n"
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'main_value'\n",
+            id="entry-and-import-select-different-guard-branches",
+        ),
+        pytest.param(
+            {
                 "pkg/run.py": 'from sub import entry\nif __name__ == "__main__": print(entry())\n',
                 "pkg/sub/__init__.py": "def entry(): return 7\n",
                 "pkg/sub/entry.py": "from tasks import only_if_loaded\nprint(only_if_loaded())\n",

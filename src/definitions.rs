@@ -6,7 +6,6 @@ use std::sync::Arc;
 use ruff_python_ast::{Decorator, Expr};
 
 use crate::models::Rule;
-use crate::references::Owner;
 
 /// What is defined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -61,7 +60,7 @@ pub(crate) struct Definition {
     pub function: Option<String>,
     /// The function that the definition is in, by the line of its name, or None if it is not in a
     /// function. A class in a function is in it, and so are the methods of the class.
-    pub owner: Owner,
+    pub owner: Option<u32>,
     /// For a class, the dotted names of its base classes as they are written, without their type
     /// arguments. A base class that is not a dotted name is left out.
     pub bases: Vec<String>,
