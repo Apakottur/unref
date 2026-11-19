@@ -21,7 +21,7 @@ A definition counts as used when something references it:
 
 | Definition                 | Used when                                                                                                           |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Function, class, variable  | Read in its module, imported from it, read as `module.name`, or listed in its `__all__`.                            |
+| Function, class, variable  | Read in its module, imported from it, read as `module.name`, listed in its `__all__`, or looked up in its module as `globals()["name"]`. |
 | Method, attribute          | Read through its class or a related one (`self.name`, `super().name`, `Class.name`), as `value.name` of any other object, matched by name, or read by its name in its class body. |
 | `TypedDict` field          | Read as a key anywhere in the project, matched by name: `value["name"]`, `value.get("name")` or `"name" in value`. Or a value of its TypedDict, made by a call or set to one, is read whole: `{**value}`, `f(**value)`, a loop, `value.items()`, or passed to a function from outside the project, such as `dict(value)` or `json.dumps(value)`. |
 | Enum member                | Read as `Color.RED`, or the enum is read whole: `Color(value)`, `list(Color)`, or as the type of a class attribute. |
@@ -29,6 +29,9 @@ A definition counts as used when something references it:
 | `visit_*` method           | Always, in a subclass of `ast.NodeVisitor`, whose `visit` calls it by the name of the node.                         |
 
 A base class from outside the project is read from the [environment of the project](configuration.md#python).
+
+`getattr(value, "name")` and `hasattr(value, "name")` read `value.name`. A name that is only known when
+the code runs, such as `getattr(value, name)` or `eval("name")`, is not read.
 
 A reference from inside an unused function does not count, so a function that only an unused function
 calls is unused too. By default only the top of each such chain is printed, see
