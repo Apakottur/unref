@@ -196,7 +196,7 @@ struct Scope {
     functions_and_classes: FxHashMap<String, Vec<usize>>,
     /// The reads of names in the scope, or in a scope nested in it, that are not local to the scopes
     /// in between.
-    reads: FxHashSet<Read>,
+    reads: Vec<Read>,
     /// The scope that also binds the names that the scope binds. A comprehension binds its variables
     /// in the function that it is in as well.
     enclosing: Option<usize>,
@@ -231,7 +231,7 @@ impl Scope {
             nonlocal_names: FxHashSet::default(),
             imports: FxHashMap::default(),
             functions_and_classes: FxHashMap::default(),
-            reads: FxHashSet::default(),
+            reads: Vec::new(),
             enclosing: None,
             defined_in: None,
             defined: FxHashSet::default(),
@@ -522,7 +522,7 @@ impl<'a> Walker<'_, '_> {
             called,
         };
         let scope = self.scope;
-        self.scopes[scope].reads.insert(read);
+        self.scopes[scope].reads.push(read);
     }
 
     /// Add the names that are read as attributes of an object whose class is not known.
@@ -1085,13 +1085,22 @@ impl<'a> Walker<'_, '_> {
     /// Add a call of a function or method whose string arguments frameworks read, with its leading
     /// positional arguments that are string literals.
     fn add_string_call(&mut self, call: &ast::ExprCall) {
-        let Some(called) = dotted_name(&call.func, Unwrap::Call) else {
-            return;
+        // The last name is checked first, as most calls are of other functions.
+        let mut func = &*call.func;
+        while let Expr::Call(inner) = func {
+            func = &inner.func;
+        }
+        let last = match func {
+            Expr::Name(name) => name.id.as_str(),
+            Expr::Attribute(attribute) => attribute.attr.as_str(),
+            _ => return,
         };
-        let last = called.rsplit('.').next().unwrap_or_default();
         if !STRING_CALLS.contains(&last) {
             return;
         }
+        let Some(called) = dotted_name(&call.func, Unwrap::Call) else {
+            return;
+        };
         let arguments = call
             .arguments
             .args
@@ -1231,7 +1240,12 @@ impl<'a> Walker<'_, '_> {
         }
         match target {
             Target::Scope(scope) => self.scopes[scope].reads.extend(passed),
-            Target::Module => self.references.reads.extend(passed),
+            // One at a time, as `extend` would make room for the repeated reads too.
+            Target::Module => {
+                for read in passed {
+                    self.references.reads.insert(read);
+                }
+            }
         }
     }
 }
