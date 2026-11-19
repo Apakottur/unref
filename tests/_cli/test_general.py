@@ -151,6 +151,63 @@ def test_default_path(tmp_path: Path) -> None:
         ),
         pytest.param(
             {
+                "pkg/z_run.py": ('from sub.worker import execute\nif __name__ == "__main__": print(execute())\n'),
+                "pkg/sub/worker.py": "from pkg.sub.helper import target\ndef execute(): return target()\n",
+                "pkg/sub/helper.py": "def target():\n    from tasks import value\n    return value()\n",
+                "pkg/tasks.py": "def value(): return 7\n",
+            },
+            "",
+            id="fully-qualified-module-keeps-script-directory",
+        ),
+        pytest.param(
+            {
+                "pkg/z_run.py": 'import sub.run\nif __name__ == "__main__": print(7)\n',
+                "pkg/sub/run.py": (
+                    'if __name__ == "__main__":\n    import tasks as source\n'
+                    "else:\n    import helpers as source\n"
+                    "print(source.value())\n"
+                ),
+                "pkg/tasks.py": "def value(): return -1\n",
+                "pkg/sub/tasks.py": "def value(): return 9\n",
+                "pkg/helpers.py": "def value(): return 8\n",
+                "pkg/sub/helpers.py": "def value(): return -1\n",
+            },
+            f"{Path('pkg/sub/helpers.py')}:1:5: unused-function 'value'\n"
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'value'\n",
+            id="main-guard-selects-module-alias",
+        ),
+        pytest.param(
+            {
+                "pkg/z_run.py": 'import sub.run\nif __name__ == "__main__": print(7)\n',
+                "pkg/sub/run.py": (
+                    'if __name__ == "__main__":\n    import tasks as source\n'
+                    "else:\n    import helpers as source\n"
+                    "def execute(): return source.value()\n"
+                    "print(execute())\n"
+                ),
+                "pkg/tasks.py": "def value(): return -1\n",
+                "pkg/sub/tasks.py": "def value(): return 9\n",
+                "pkg/helpers.py": "def value(): return 8\n",
+                "pkg/sub/helpers.py": "def value(): return -1\n",
+            },
+            f"{Path('pkg/sub/helpers.py')}:1:5: unused-function 'value'\n"
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'value'\n",
+            id="function-read-selects-main-guard-alias",
+        ),
+        pytest.param(
+            {
+                "pkg/run.py": (
+                    'if __name__ == "__main__":\n    from base import Base\n'
+                    "    class Thing(Base): pass\n    print(Thing().value())\n"
+                ),
+                "pkg/base.py": "class Base:\n    def value(self): return 7\n",
+                "pkg/other.py": "class Other:\n    def value(self): return -1\nOther()\n",
+            },
+            f"{Path('pkg/other.py')}:2:9: unused-method 'value'\n",
+            id="class-in-main-guard-resolves-imported-base",
+        ),
+        pytest.param(
+            {
                 "pkg/z_run.py": 'import sub.run\nif __name__ == "__main__": print(7)\n',
                 "pkg/sub/run.py": (
                     "def execute():\n    from tasks import value\n    return value()\n"

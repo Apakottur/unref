@@ -59,6 +59,9 @@ pub(crate) enum Owner {
     Imported,
     /// A function body, by the line of the function's name.
     Function(u32),
+    /// Reads in a function that depend on which branch of the main guard ran.
+    ScriptFunction(u32),
+    ImportedFunction(u32),
 }
 
 /// A read of a name, or of a chain of attributes that starts with one (`package.module.name`).
@@ -216,6 +219,8 @@ pub(crate) fn walk_module(
         scope: 0,
         binder: 0,
         owner: Owner::Module,
+        script_imports: FxHashMap::default(),
+        imported_imports: FxHashMap::default(),
         in_signature: false,
     };
     for stmt in &module.body {
@@ -237,6 +242,21 @@ pub(crate) fn walk_module(
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings.primary = std::mem::take(&mut walker.scopes[0].imports);
+    walker
+        .references
+        .bindings
+        .primary
+        .extend(walker.imported_imports);
+    // The class hierarchy also needs bindings for class declarations in the script branch.
+    // When importing the module, prefer the binding from the import branch.
+    for (name, binding) in walker.script_imports {
+        walker
+            .references
+            .bindings
+            .primary
+            .entry(name)
+            .or_insert(binding);
+    }
     (walker.definitions, walker.references)
 }
 
@@ -366,6 +386,9 @@ struct Walker<'p, 'a> {
     binder: usize,
     /// The function or part of the module that contains the node.
     owner: Owner,
+    /// Imports bound in the two execution modes of a module with a main guard.
+    script_imports: FxHashMap<String, Binding>,
+    imported_imports: FxHashMap<String, Binding>,
     /// Whether the node is in the annotation of a parameter or the return of a function.
     in_signature: bool,
 }
@@ -1468,9 +1491,50 @@ impl<'a> Walker<'_, '_> {
     fn bind_imports(&mut self, statement: FxHashMap<String, Binding>) {
         for (name, binding) in statement {
             self.bind(&name);
-            let binder = self.binder;
-            self.scopes[binder].imports.entry(name).or_insert(binding);
+            let imports = match (self.binder, self.owner) {
+                (0, Owner::Script) => &mut self.script_imports,
+                (0, Owner::Imported) => &mut self.imported_imports,
+                (binder, _) => &mut self.scopes[binder].imports,
+            };
+            imports.entry(name).or_insert(binding);
         }
+    }
+
+    /// Keep alternate bindings of the same name separate even for reads after the guard.
+    fn read_guard_imports(&mut self, read: &Read) -> bool {
+        let name = read.root.as_str();
+        let script = self.script_imports.get(name);
+        let imported = self.imported_imports.get(name);
+        if script.is_none() && imported.is_none() {
+            return false;
+        }
+        let common = self.scopes[0].imports.get(name);
+        let (script_owner, imported_owner) = match read.owner {
+            Owner::Function(line) => (Owner::ScriptFunction(line), Owner::ImportedFunction(line)),
+            _ => (Owner::Script, Owner::Imported),
+        };
+        for (owner, binding) in [(script_owner, script), (imported_owner, imported)] {
+            if read.owner == Owner::Script && owner != Owner::Script
+                || read.owner == Owner::Imported && owner != Owner::Imported
+            {
+                continue;
+            }
+            if let Some(binding) = binding.or(common) {
+                self.references.imported_reads.insert(ImportedRead {
+                    owner,
+                    binding: binding.clone(),
+                    attributes: read.attributes.clone(),
+                    reads_object: read.reads_object,
+                    called: read.called.clone(),
+                });
+            } else {
+                self.references.reads.insert(Read {
+                    owner,
+                    ..read.clone()
+                });
+            }
+        }
+        true
     }
 
     /// End a scope: drop the reads of its local variables, resolve the reads of the names that it
@@ -1508,6 +1572,9 @@ impl<'a> Walker<'_, '_> {
             .zip(scope.class_name.clone());
         let mut passed = Vec::new();
         for read in reads {
+            if inner == 0 && self.read_guard_imports(&read) {
+                continue;
+            }
             if let Some(binding) = self.scopes[inner].imports.get(read.root.as_str()) {
                 // A plain read of a name that is not local, at the module or declared `global`, is also
                 // a read of the name of the enclosing scope, without reading the object.
