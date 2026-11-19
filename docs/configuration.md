@@ -273,14 +273,18 @@ show-transitive = true
 | `--python`        | The [`python`](#python) option. Overrides the configuration.         |
 | `--output-format` | The [`output-format`](#output-format) option. Overrides the configuration. |
 | `--show-transitive`, `--no-show-transitive` | The [`show-transitive`](#show-transitive) option. Overrides the configuration. |
-| `--exclude`       | Patterns that replace the [`exclude`](#exclude) option, relative to the current directory. Repeat it or separate the patterns with commas. |
-| `--extend-exclude` | Patterns added to the [`exclude`](#exclude) option, relative to the current directory. |
+| `--exclude`       | Patterns that replace the [`exclude`](#exclude) option. Repeat it or separate the patterns with commas. |
+| `--extend-exclude` | Patterns added to the [`exclude`](#exclude) option. |
 | `--force-exclude`, `--no-force-exclude` | The [`force-exclude`](#force-exclude) option. Overrides the configuration. |
 | `--respect-gitignore`, `--no-respect-gitignore` | The [`respect-gitignore`](#respect-gitignore) option. Overrides the configuration. |
 | `--show-files`    | Print the files that would be checked, and exit.                     |
 | `--exit-zero`, `-e` | Exit with status 0 even if something is found.                     |
 | `--jobs`, `-j`    | Number of threads. Defaults to one for each CPU.                     |
 | `--version`       | Print the version and exit.                                          |
+
+The patterns of `--exclude` and `--extend-exclude` are anchored at the current directory, as those of
+`exclude` are at the project root: `generated` matches only `./generated`, and `**/generated` matches
+one at any depth. Absolute paths work too.
 
 ## Entry points
 

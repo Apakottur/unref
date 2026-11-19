@@ -85,7 +85,7 @@ struct Cli {
     show_files: bool,
 
     /// Files and directories to leave out, in place of the `exclude` option. Relative to the current
-    /// directory.
+    /// directory: `gen` is only `./gen`, `**/gen` is one at any depth.
     #[arg(
         long,
         value_name = "FILE_PATTERN",
@@ -95,7 +95,7 @@ struct Cli {
     exclude: Option<Vec<String>>,
 
     /// Files and directories to leave out, on top of the `exclude` option. Relative to the current
-    /// directory.
+    /// directory: `gen` is only `./gen`, `**/gen` is one at any depth.
     #[arg(
         long,
         value_name = "FILE_PATTERN",
@@ -159,13 +159,13 @@ fn run(cli: Cli) -> ExitCode {
     if let Some(exclude) = &cli.exclude {
         options.exclude = exclude
             .iter()
-            .map(|pattern| rebase(pattern, &directory))
+            .map(|pattern| rebase(pattern, &directory, &options.root))
             .collect();
     }
     options.exclude.extend(
         cli.extend_exclude
             .iter()
-            .map(|pattern| rebase(pattern, &directory)),
+            .map(|pattern| rebase(pattern, &directory, &options.root)),
     );
     options.force_exclude = flag(
         cli.force_exclude,

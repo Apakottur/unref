@@ -80,6 +80,52 @@ def test_exclude_relative_to_current_directory() -> None:
     assert result.stdout == _files("../main.py")
 
 
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [
+        # As with the `exclude` option, a pattern is anchored: a name matches only the one at the top.
+        pytest.param(
+            "module.py",
+            ["generated/deep/module.py", "generated/module.py", "main.py", "pkg/generated/module.py", "single.py"],
+            id="anchored",
+        ),
+        pytest.param("**/module.py", ["main.py", "single.py"], id="any-depth"),
+    ],
+)
+def test_exclude_anchored(pattern: str, expected: list[str]) -> None:
+    result = run(["--show-files", "--exclude", pattern], cwd=_EXCLUDE)
+
+    assert result.exit_code == 0
+    assert result.stdout == _files(*expected)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "cwd", "expected"),
+    [
+        pytest.param(
+            "{root}/pkg",
+            _EXCLUDE,
+            ["generated/deep/module.py", "generated/module.py", "main.py", "single.py"],
+            id="from-root",
+        ),
+        pytest.param(
+            "{root}/pkg/generated/",
+            _EXCLUDE / "pkg",
+            ["../generated/deep/module.py", "../generated/module.py", "../main.py", "../single.py"],
+            id="from-subdirectory",
+        ),
+        pytest.param("{root}/**/module.py", _EXCLUDE, ["main.py", "single.py"], id="glob"),
+        pytest.param("{root}", _EXCLUDE, [], id="root"),
+    ],
+)
+def test_exclude_absolute_path(pattern: str, cwd: Path, expected: list[str]) -> None:
+    # An absolute path under the project root is taken as that path, wherever it is given from.
+    result = run(["--show-files", "--exclude", pattern.format(root=_EXCLUDE.resolve())], cwd=cwd)
+
+    assert result.exit_code == 0
+    assert result.stdout == _files(*expected)
+
+
 def test_exclude_references_do_not_count() -> None:
     result = run(["--exclude", "single.py"], cwd=_EXCLUDE)
 

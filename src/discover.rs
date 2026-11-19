@@ -105,14 +105,18 @@ fn is_given_excluded(path: &Path, excluded: &Exclude, gitignore: bool) -> bool {
         })
 }
 
-/// Rebase a pattern that is relative to the current directory onto the root of the project, of which
-/// the current directory is `directory`, relative to the root. The result is anchored, so that `src`
-/// from `pkg` is `/pkg/src`, and `**/src` from `pkg` is `/pkg/**/src`.
-pub(crate) fn rebase(pattern: &str, directory: &Path) -> String {
+/// Rebase a pattern that is relative to the current directory onto `root`, the root of the project, of
+/// which the current directory is `directory`, relative to the root. The result is anchored, so that
+/// `src` from `pkg` is `/pkg/src`, and `**/src` from `pkg` is `/pkg/**/src`. An absolute path under the
+/// root is made relative to it, so that `/project/pkg/src` is `/pkg/src` for the root `/project`.
+pub(crate) fn rebase(pattern: &str, directory: &Path, root: &Path) -> String {
     let (negation, body) = match pattern.strip_prefix('!') {
         Some(body) => ("!", body),
         None => ("", pattern),
     };
+    if let Some(relative) = under_root(body, root) {
+        return format!("{negation}/{relative}");
+    }
     let body = body.strip_prefix("./").unwrap_or(body);
     let body = body.strip_prefix('/').unwrap_or(body);
     let prefix: String = directory
@@ -126,6 +130,50 @@ pub(crate) fn rebase(pattern: &str, directory: &Path) -> String {
         return pattern.to_string();
     }
     format!("{negation}{prefix}/{body}")
+}
+
+/// The part of a pattern that is an absolute path under the root of the project, relative to the root,
+/// such as `pkg/*.py` for `/project/pkg/*.py` and the root `/project`. The part before the first
+/// component with a glob character is resolved, so that a path through a link matches too.
+///
+/// Returns None if the pattern is not an absolute path, or not one under the root.
+fn under_root(pattern: &str, root: &Path) -> Option<String> {
+    let path = Path::new(pattern);
+    if !path.is_absolute() {
+        return None;
+    }
+    let components: Vec<Component> = path.components().collect();
+    let literal = components
+        .iter()
+        .position(|component| {
+            component
+                .as_os_str()
+                .to_string_lossy()
+                .contains(['*', '?', '[', '\\'])
+        })
+        .unwrap_or(components.len());
+    let prefix: PathBuf = components[..literal].iter().collect();
+    let resolved = resolve(&prefix);
+    let relative = resolved.strip_prefix(resolve(root)).ok()?;
+
+    let mut parts: Vec<String> = relative
+        .components()
+        .map(|component| escape_glob(&component.as_os_str().to_string_lossy()))
+        .collect();
+    parts.extend(
+        components[literal..]
+            .iter()
+            .map(|component| component.as_os_str().to_string_lossy().into_owned()),
+    );
+    if parts.is_empty() {
+        // The root itself: everything under it.
+        return Some("**".to_string());
+    }
+    let mut relative = parts.join("/");
+    if pattern.ends_with('/') {
+        relative.push('/');
+    }
+    Some(relative)
 }
 
 /// Escape the characters that are special in a pattern, so that a name matches only itself.
@@ -414,13 +462,38 @@ mod tests {
 
     #[test]
     fn rebases() {
-        assert_eq!(rebase("src", Path::new("")), "src");
-        assert_eq!(rebase("src", Path::new("pkg")), "/pkg/src");
-        assert_eq!(rebase("./src/", Path::new("a/b")), "/a/b/src/");
-        assert_eq!(rebase("/src", Path::new("pkg")), "/pkg/src");
-        assert_eq!(rebase("**/src", Path::new("pkg")), "/pkg/**/src");
-        assert_eq!(rebase("!src", Path::new("pkg")), "!/pkg/src");
-        assert_eq!(rebase("src", Path::new("[a]*")), "/\\[a\\]\\*/src");
+        let root = Path::new("/unref-root");
+        assert_eq!(rebase("src", Path::new(""), root), "src");
+        assert_eq!(rebase("src", Path::new("pkg"), root), "/pkg/src");
+        assert_eq!(rebase("./src/", Path::new("a/b"), root), "/a/b/src/");
+        assert_eq!(rebase("/src", Path::new("pkg"), root), "/pkg/src");
+        assert_eq!(rebase("**/src", Path::new("pkg"), root), "/pkg/**/src");
+        assert_eq!(rebase("!src", Path::new("pkg"), root), "!/pkg/src");
+        assert_eq!(rebase("src", Path::new("[a]*"), root), "/\\[a\\]\\*/src");
+    }
+
+    #[test]
+    fn rebases_absolute_paths() {
+        let root = Path::new("/unref-root");
+        assert_eq!(
+            rebase("/unref-root/pkg/src", Path::new("pkg"), root),
+            "/pkg/src"
+        );
+        assert_eq!(
+            rebase("/unref-root/pkg/src/", Path::new(""), root),
+            "/pkg/src/"
+        );
+        assert_eq!(
+            rebase("/unref-root/pkg/**/*.py", Path::new(""), root),
+            "/pkg/**/*.py"
+        );
+        assert_eq!(rebase("!/unref-root/pkg", Path::new(""), root), "!/pkg");
+        assert_eq!(rebase("/unref-root", Path::new(""), root), "/**");
+        // An absolute path outside of the root stays a pattern anchored at the current directory.
+        assert_eq!(
+            rebase("/other/src", Path::new("pkg"), root),
+            "/pkg/other/src"
+        );
     }
 
     #[test]
