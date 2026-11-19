@@ -110,6 +110,7 @@ args = ["--config", "./linters/ruff.toml"]
 # The test cases, which the configuration above excludes, with their own.
 [[repos.hooks]]
 id = "ruff-check"
+alias = "ruff-check-cases"
 name = "ruff check (test cases)"
 files = '^tests/cases/'
 args = ["--config", "./linters/ruff_cases.toml"]
