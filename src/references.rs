@@ -237,6 +237,8 @@ struct Scope {
     instance: Option<String>,
     /// In a class or a method, the name of the class in the module.
     class_name: Option<String>,
+    /// In a function or a method, its name in the module.
+    function_name: Option<String>,
     /// In a class body, the attributes, methods and classes that it defines so far, by their name,
     /// each with its index in the definitions of the module.
     members: FxHashMap<String, Vec<usize>>,
@@ -265,6 +267,7 @@ impl Scope {
             defined: FxHashMap::default(),
             instance: None,
             class_name: None,
+            function_name: None,
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
             outer: None,
@@ -890,10 +893,13 @@ impl<'a> Walker<'_, '_> {
     /// The functions in it do not see them.
     fn visit_class(&mut self, class: &'a ast::StmtClassDef) {
         let binder = &self.scopes[self.binder];
-        let enclosing_class = if binder.kind == ScopeKind::Class {
-            binder.class_name.clone()
+        let (enclosing_class, function) = if binder.kind == ScopeKind::Class {
+            (binder.class_name.clone(), None)
+        } else if binder.global_names.contains(class.name.as_str()) {
+            // A class that a function declares `global` is a class of the module.
+            (None, None)
         } else {
-            None
+            (None, binder.function_name.clone())
         };
         let written_bases = class
             .arguments
@@ -908,6 +914,7 @@ impl<'a> Walker<'_, '_> {
         let definition = Definition {
             decorators: decorator_names(&class.decorator_list),
             class: enclosing_class,
+            function,
             bases,
             other_bases,
             ..self.definition(Kind::Class, &class.name, class.name.start())
@@ -1077,6 +1084,7 @@ impl<'a> Walker<'_, '_> {
         let mut kind = Kind::Function;
         let mut scope = Scope::new(ScopeKind::Function);
         let mut class = None;
+        let mut enclosing_function = None;
         if enclosing.kind == ScopeKind::Class {
             kind = Kind::Method;
             let parameters = &function.parameters;
@@ -1094,12 +1102,16 @@ impl<'a> Walker<'_, '_> {
             scope.defined_in = enclosing.defined_in;
             scope.class_name.clone_from(&enclosing.class_name);
             class.clone_from(&enclosing.class_name);
+        } else if !enclosing.global_names.contains(function.name.as_str()) {
+            enclosing_function.clone_from(&enclosing.function_name);
         }
         let definition = Definition {
             decorators: decorator_names(&function.decorator_list),
             class,
+            function: enclosing_function,
             ..self.definition(kind, &function.name, function.name.start())
         };
+        scope.function_name = Some(definition.qualified_name());
         let line = definition.line;
         self.definitions.push(definition);
         (scope, line)
@@ -1210,6 +1222,7 @@ impl<'a> Walker<'_, '_> {
             name: name.to_string(),
             decorators: Vec::new(),
             class: None,
+            function: None,
             owner: self.owner,
             bases: Vec::new(),
             other_bases: false,

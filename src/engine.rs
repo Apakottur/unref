@@ -527,10 +527,11 @@ impl<'a> Classes<'a> {
                 continue;
             }
             // The loop above gave an id to every class.
-            let id = ids[&(*file, definition.qualified_name())];
-            unknown_bases[id] = definition.other_bases;
+            let name = definition.qualified_name();
+            let id = ids[&(*file, name.clone())];
+            unknown_bases[id] |= definition.other_bases;
             for base in &definition.bases {
-                let names = hierarchy.resolve(*file, base);
+                let names = hierarchy.resolve_in(*file, &name, base);
                 protocols[id] |= PROTOCOLS.iter().any(|protocol| names.contains(*protocol));
                 unknown_bases[id] |= is_unknown_class(project, &by_dotted, *file, base, &names);
             }
@@ -767,10 +768,11 @@ fn is_unknown_class(
         if name == written && !written.contains('.') {
             // A name that the module neither imports nor defines as a class or function, such as a
             // builtin or a variable of the module.
-            return project
-                .file_definitions(file)
-                .iter()
-                .any(|definition| definition.class.is_none() && definition.name == written);
+            return project.file_definitions(file).iter().any(|definition| {
+                definition.class.is_none()
+                    && definition.owner.is_none()
+                    && definition.name == written
+            });
         }
         project.holds(name)
     })

@@ -1,0 +1,3 @@
+[[tool.unref.overrides]]
+base-classes = ["http.server.BaseHTTPRequestHandler"]
+used-names = ["do_*"]
