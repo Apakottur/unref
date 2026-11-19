@@ -34,4 +34,4 @@ def external_second():
     return Sink()
 
 
-print(external_first(), plain_second(), plain_first(), external_second())
+external_first(), plain_second(), plain_first(), external_second()

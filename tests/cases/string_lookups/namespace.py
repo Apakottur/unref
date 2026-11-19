@@ -12,7 +12,7 @@ def handler():
     return 8
 
 
-print(
+(
     globals()["BY_GLOBALS"],
     globals().get("BY_GET"),
     "BY_MEMBERSHIP" in globals(),
@@ -37,7 +37,7 @@ globals()["WRITTEN"] = 11
 
 # A name built when the code runs is not known.
 COMPUTED = 12  # expect: 1 [unused-variable]
-print(globals()["computed".upper()])
+globals()["computed".upper()]
 
 # Inside a function, `vars()` and `locals()` hold its local variables, not the variables of the module.
 BY_LOCAL_VARS = 13  # expect: 1 [unused-variable]
@@ -52,4 +52,4 @@ read_locals()
 
 # Code in a string is not read.
 BY_EVAL = 15  # expect: 1 [unused-variable]
-print(eval("BY_EVAL"))
+eval("BY_EVAL")

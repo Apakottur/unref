@@ -18,4 +18,4 @@ def factorial(value):
     return value * factorial(value - 1) if value else 1
 
 
-print(factorial(3))
+factorial(3)

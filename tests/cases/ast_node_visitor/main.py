@@ -9,7 +9,7 @@ def is_call(node):
 # `ast.NodeVisitor.visit` calls the method named after the class of the node, `visit_` and the name.
 class Calls(ast.NodeVisitor):
     def visit_Call(self, node):
-        print(is_call(node))
+        is_call(node)
         self.generic_visit(node)
 
     # Other methods are reported as usual.
@@ -19,7 +19,7 @@ class Calls(ast.NodeVisitor):
 
 class Names(NodeVisitor):
     def visit_Name(self, node):
-        print(node.id)
+        node.id
 
 
 # `NodeTransformer` is a `NodeVisitor`.
@@ -31,13 +31,13 @@ class Constants(NodeTransformer):
 # A subclass of a visitor of the project.
 class MoreCalls(Calls):
     def visit_Attribute(self, node):
-        print(node.attr)
+        node.attr
 
 
 # Not a visitor: a method named like one is reported.
 class Plain:
     def visit_Call(self, node):  # expect: 9 [unused-method]
-        print(node)
+        node
 
 
 tree = ast.parse("x")

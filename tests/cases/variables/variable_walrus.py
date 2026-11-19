@@ -11,7 +11,7 @@ class Holder:
 
 
 # The target of a walrus in a comprehension is not collected.
-print([(kept := value) for value in range(3)])
+[(kept := value) for value in range(3)]
 
 
 def local():
@@ -20,4 +20,4 @@ def local():
         pass
 
 
-print(used, Holder, local)
+used, Holder, local

@@ -109,4 +109,4 @@ def site_name():
     return ""
 
 
-print(views.Items, views.Page)
+views.Items, views.Page

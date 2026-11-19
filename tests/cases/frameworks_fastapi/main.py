@@ -52,4 +52,4 @@ def not_a_route():  # expect: 5 [unused-function]
 
 
 
-print(routers.Health)
+routers.Health

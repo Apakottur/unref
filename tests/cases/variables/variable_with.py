@@ -23,4 +23,4 @@ def local():
         pass
 
 
-print(used, Holder, local)
+used, Holder, local

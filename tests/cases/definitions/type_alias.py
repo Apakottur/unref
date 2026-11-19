@@ -23,4 +23,4 @@ def local():
     return 1
 
 
-print(Used, Generic, generic, local)
+Used, Generic, generic, local

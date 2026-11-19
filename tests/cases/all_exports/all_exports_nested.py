@@ -25,4 +25,4 @@ def function():
     __all__: list[str] = ["in_function_annotated"]
 
 
-print(Holder, function)
+Holder, function

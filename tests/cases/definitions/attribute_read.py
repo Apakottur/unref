@@ -8,4 +8,4 @@ class Class:
 
 
 instance = Class()
-print(Class.on_class, instance.on_instance)
+Class.on_class, instance.on_instance

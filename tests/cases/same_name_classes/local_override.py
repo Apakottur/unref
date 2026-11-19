@@ -18,4 +18,4 @@ def second():
     return Handler
 
 
-print(first(), second())
+first(), second()

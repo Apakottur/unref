@@ -101,11 +101,20 @@ rev = "v0.17.5"
 
 [[repos.hooks]]
 id = "ruff-check"
+exclude = '^tests/cases/'
 args = ["--config", "./linters/ruff.toml"]
 
 [[repos.hooks]]
 id = "ruff-format"
+exclude = '^tests/cases/'
 args = ["--config", "./linters/ruff.toml"]
+
+[[repos.hooks]]
+id = "ruff-check"
+alias = "ruff-check-test-cases"
+name = "ruff check (test cases)"
+files = '^tests/cases/'
+args = ["--config", "./linters/ruff_test_cases.toml"]
 
 ########
 # RUST #

@@ -2,7 +2,7 @@
 NAMES = ["function"]
 other = ["function"]  # expect: 1 [unused-variable]
 
-print(NAMES)
+NAMES
 
 
 def function():  # expect: 5 [unused-function]

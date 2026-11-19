@@ -38,4 +38,4 @@ class FromDotted(DottedBase):
         return record
 
 
-print(Handler, FromCompiled, FromTagged, FromStable, FromDotted)
+Handler, FromCompiled, FromTagged, FromStable, FromDotted

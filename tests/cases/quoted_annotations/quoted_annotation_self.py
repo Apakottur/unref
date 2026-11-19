@@ -5,7 +5,7 @@ class Node:
         self.parent = parent
 
     def link(self, edge: "Edge") -> "Node":
-        print(edge, self.parent)
+        edge, self.parent
         return self
 
 
@@ -20,4 +20,4 @@ class Tree:  # expect: 7 [unused-class]
         return tree
 
 
-print(Node(None).link)
+Node(None).link

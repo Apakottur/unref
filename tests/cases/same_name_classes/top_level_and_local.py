@@ -13,4 +13,4 @@ def make():
     return Item
 
 
-print(Item, make())
+Item, make()

@@ -21,4 +21,4 @@ class Config:
     VALUE = 2  # expect: 5 [unused-attribute]
 
 
-print(VALUE, Config)
+VALUE, Config
