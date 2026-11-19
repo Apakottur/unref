@@ -12,7 +12,7 @@ body:
     id: description
     attributes:
       label: Description
-      description: What happened, and what you expected instead.
+      description: One or two sentences on what goes wrong.
     validations:
       required: true
 
@@ -44,11 +44,22 @@ body:
       required: true
 
   - type: textarea
-    id: output
+    id: expected
     attributes:
-      label: Output
+      label: Expected output
+      description: What the command should print.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output
       description: What the command printed.
       render: text
+    validations:
+      required: true
 
   - type: input
     id: version
