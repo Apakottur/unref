@@ -39,7 +39,8 @@ def _set(path: str, pattern: str, version: str) -> None:
         text = stream.read()
     text, count = re.subn(pattern, rf"\g<1>{version}", text, count=1)
     if count != 1:
-        raise SystemExit(f"No version of unref found in {path}.")
+        print(f"No version of unref found in {path}.")
+        raise typer.Exit(1)
     with file.open("w", newline="") as stream:
         stream.write(text)
 
