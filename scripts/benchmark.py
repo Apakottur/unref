@@ -4,8 +4,7 @@ Time unref on the CPython codebase.
 
 Run with `uv run scripts/benchmark.py COMMAND`. Each command downloads the source of CPython and times on it:
 
-- `tools`: unref and other dead code finders, drawn as a bar chart in `assets/benchmark.svg`. uv builds unref without
-  LTO, so first rebuild it with `CARGO_PROFILE_LOCAL_LTO=fat uv sync --reinstall-package unref`.
+- `tools`: the releases of unref and other dead code finders on PyPI, drawn as a bar chart in `assets/benchmark.svg`.
 - `compare BASE HEAD REPORT`: two unref binaries, written as a Markdown report that the CI posts on each PR.
 """
 
@@ -27,6 +26,7 @@ import typer
 
 _CPYTHON_TAG = "v3.15.0"
 _TOOLS = {
+    "unref": ("unref==0.3.0", []),
     "vulture": ("vulture==2.16", ["."]),
     "deadcode": ("deadcode==2.6.3", ["."]),
     "skylos": ("skylos==5.6.0", [".", "--no-upload", "--no-cache"]),
@@ -136,19 +136,11 @@ def _chart(results: dict[str, float]) -> str:
 def tools() -> None:
     """Time unref and other dead code finders, and draw the chart."""
     with _cpython() as cpython, tempfile.TemporaryDirectory() as environments:
-        commands = {"unref": [str(Path(sys.executable).parent / "unref")]}
-        for name, (requirement, arguments) in _TOOLS.items():
-            commands[name] = [str(_install(name, requirement, Path(environments) / name)), *arguments]
-
         results = {}
-        for name, command in commands.items():
-            print(f"Timing {name}...")
+        for name, (requirement, arguments) in _TOOLS.items():
+            command = [str(_install(name, requirement, Path(environments) / name)), *arguments]
             [results[name]] = _time([command], cpython, _RUNS)
-
-    print(f"\n| Tool | Time to check CPython {_CPYTHON_TAG} |")
-    print("| --- | --- |")
-    for name, seconds in results.items():
-        print(f"| {name} | {_label(seconds)} |")
+            print(f"{name}: {_label(results[name])}")
 
     _CHART.parent.mkdir(exist_ok=True)
     _CHART.write_text(_chart(results))
