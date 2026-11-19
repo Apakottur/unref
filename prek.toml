@@ -138,6 +138,16 @@ additional_dependencies = ["cli:cargo-shear:1.14.1"]
 files = '(^|/)Cargo\.(toml|lock)$|\.rs$'
 pass_filenames = false
 
+# Security advisories, licenses and sources of the dependencies, from deny.toml.
+[[repos.hooks]]
+id = "cargo-deny"
+name = "cargo deny"
+entry = "cargo-deny --locked check"
+language = "rust"
+additional_dependencies = ["cli:cargo-deny:0.22.0"]
+files = '(^|/)(Cargo\.(toml|lock)|deny\.toml)$'
+pass_filenames = false
+
 #########
 # UNREF #
 #########

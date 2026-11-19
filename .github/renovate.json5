@@ -1,0 +1,93 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended"],
+  // Once a week, as ruff's, in batches rather than one pull request per dependency.
+  schedule: ["before 4am on Wednesday"],
+  // A release that is a few days old has had time to be yanked or reported as malicious.
+  minimumReleaseAge: "7 days",
+  // Cargo.lock and uv.lock also update their transitive dependencies.
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ["before 4am on Wednesday"],
+  },
+  // GitHub Actions stay pinned to commits, with the version in a comment.
+  enabledManagers: ["cargo", "pep621", "github-actions", "custom.regex"],
+  packageRules: [
+    {
+      // Runners stay on ubuntu-latest.
+      matchManagers: ["github-actions"],
+      matchDatasources: ["github-runners"],
+      enabled: false,
+    },
+    {
+      groupName: "GitHub Actions",
+      matchManagers: ["github-actions"],
+    },
+    {
+      groupName: "prek hooks",
+      matchDepTypes: ["prek"],
+    },
+    {
+      // Patch and minor releases of the other dependencies, in one pull request per ecosystem.
+      groupName: "Rust dependencies",
+      matchManagers: ["cargo"],
+      matchUpdateTypes: ["minor", "patch"],
+    },
+    {
+      groupName: "Python dependencies",
+      matchManagers: ["pep621"],
+      matchUpdateTypes: ["minor", "patch"],
+    },
+    {
+      // The crates of ruff, its Python package and its hooks share a version. It comes after the groups above, which it overrides.
+      groupName: "ruff",
+      matchPackageNames: ["/^ruff(_|$)/", "astral-sh/ruff", "astral-sh/ruff-pre-commit", "https://github.com/astral-sh/ruff"],
+    },
+    {
+      // The minimum Rust version stays two releases, of six weeks each, behind the newest.
+      matchDepNames: ["rust-version"],
+      commitMessageTopic: "the minimum Rust version",
+      minimumReleaseAge: "85 days",
+    },
+    {
+      matchDepNames: ["rust-toolchain"],
+      commitMessageTopic: "the Rust toolchain",
+    },
+  ],
+  customManagers: [
+    {
+      // The repositories of prek.toml, which the pre-commit manager does not read.
+      customType: "regex",
+      managerFilePatterns: ["/^prek\\.toml$/"],
+      matchStrings: ['repo = "https://github\\.com/(?<depName>[^"]+?)(\\.git)?"\\s+rev = "(?<currentValue>[^"]+)"'],
+      datasourceTemplate: "github-tags",
+      depTypeTemplate: "prek",
+    },
+    {
+      // The tools that prek builds from crates.io, such as cargo-shear and cargo-deny.
+      customType: "regex",
+      managerFilePatterns: ["/^prek\\.toml$/"],
+      matchStrings: ['"cli:(?<depName>[^:"]+):(?<currentValue>[^"]+)"'],
+      datasourceTemplate: "crate",
+      depTypeTemplate: "prek",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^rust-toolchain\\.toml$/"],
+      matchStrings: ['channel = "(?<currentValue>\\d+\\.\\d+\\.\\d+)"'],
+      depNameTemplate: "rust-toolchain",
+      packageNameTemplate: "rust-lang/rust",
+      datasourceTemplate: "github-releases",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^Cargo\\.toml$/"],
+      matchStrings: ['rust-version = "(?<currentValue>\\d+\\.\\d+)"'],
+      depNameTemplate: "rust-version",
+      packageNameTemplate: "rust-lang/rust",
+      datasourceTemplate: "github-releases",
+      // Keeps the version as major.minor.
+      extractVersionTemplate: "^(?<version>\\d+\\.\\d+)",
+    },
+  ],
+}
