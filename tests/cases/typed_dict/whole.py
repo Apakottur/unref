@@ -75,19 +75,19 @@ def keywords(keyword: int) -> int:
 
 
 def take(value: object) -> None:
-    value is None
+    value
 
 
 class Client:
     def send(self, value: object) -> None:
-        value is None
+        value
 
 
 def read(client: Client) -> None:
     event = RetryEvent(attempt=1, delay_ms=250)
     json.dumps(dict(event))
     spread = Spread(spread=1)
-    {**spread} == {}
+    {**spread}
     keywords(**Keywords(keyword=1))
     looped = Looped(looped=1)
     for key in looped:

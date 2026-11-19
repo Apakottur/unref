@@ -22,4 +22,6 @@ extend-exclude = [
 select = [
   "T20", # `print`: use a name as a bare expression instead
   "PIE790", # Unnecessary `pass`
+  "B015", # Pointless comparison
+  "RET504", # Unnecessary assignment before `return`
 ]
