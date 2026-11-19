@@ -59,6 +59,56 @@ def test_default_path(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("files", "unused"),
+    [
+        pytest.param(
+            {
+                "pkg/z_run.py": 'from sub.worker import execute\nif __name__ == "__main__": print(execute())\n',
+                "pkg/sub/run.py": 'from worker import execute\nif __name__ == "__main__": print(execute())\n',
+                "pkg/sub/worker.py": "from tasks import value\ndef execute(): return value()\n",
+                "pkg/tasks.py": "def value(): return 7\n",
+                "pkg/sub/tasks.py": "def value(): return 9\n",
+            },
+            "",
+            id="two-script-directories",
+        ),
+        pytest.param(
+            {
+                "pkg/run.py": 'from sub import entry\nif __name__ == "__main__": print(entry())\n',
+                "pkg/sub/__init__.py": "def entry(): return 7\n",
+                "pkg/sub/entry.py": "from tasks import only_if_loaded\nprint(only_if_loaded())\n",
+                "pkg/tasks.py": "def only_if_loaded(): return -1\n",
+            },
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'only_if_loaded'\n",
+            id="attribute-shadows-submodule",
+        ),
+        pytest.param(
+            {
+                "pkg/run.py": 'from sub import execute\nif __name__ == "__main__": print(execute())\n',
+                "pkg/sub/__init__.py": "from .worker import execute\n",
+                "pkg/sub/worker.py": "from tasks import value\ndef execute(): return value()\n",
+                "pkg/tasks.py": "def value(): return 7\n",
+            },
+            "",
+            id="relative-reexport",
+        ),
+    ],
+)
+def test_script_sibling_contexts(tmp_path: Path, files: dict[str, str], unused: str) -> None:
+    (tmp_path / "pkg/sub").mkdir(parents=True)
+    (tmp_path / "pkg/__init__.py").touch()
+    (tmp_path / "pkg/sub/__init__.py").touch()
+    for name, source in files.items():
+        (tmp_path / name).write_text(source)
+
+    result = run(["."], cwd=tmp_path)
+
+    assert result.stdout == unused
+    assert result.exit_code == int(bool(unused))
+    assert result.stderr == ""
+
+
 def test_gitignored_given_directory() -> None:
     # A directory that git ignores is still checked when it is given directly, as with ruff and ty.
     result = run(["main.py", "generated"], cwd=CASES_DIR / "gitignore")

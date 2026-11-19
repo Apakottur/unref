@@ -224,10 +224,12 @@ impl ClassHierarchy {
         if symbols.bases.contains_key(first) {
             // A class or function of the module itself.
             self.follow(&format!("{}.{written}", symbols.name.name), seen, found);
-        } else if let Some(binding) = symbols.bindings.get(first) {
+        } else if let Some(bindings) = symbols.bindings.get(first) {
             // A name that the module imports.
-            if let Some(imported) = imported(&symbols, binding) {
-                self.follow(&join(&imported, rest), seen, found);
+            for binding in bindings {
+                if let Some(imported) = imported(&symbols, binding) {
+                    self.follow(&join(&imported, rest), seen, found);
+                }
             }
         } else if !scope.contains(LOCALS)
             && let Some(locals) = symbols.locals.get(first)
@@ -262,9 +264,11 @@ impl ClassHierarchy {
                 for base in bases {
                     self.resolve_written(file, &symbol, base, seen, found);
                 }
-            } else if let Some(binding) = symbols.bindings.get(first) {
-                if let Some(imported) = imported(&symbols, binding) {
-                    self.follow(&join(&imported, rest), seen, found);
+            } else if let Some(bindings) = symbols.bindings.get(first) {
+                for binding in bindings {
+                    if let Some(imported) = imported(&symbols, binding) {
+                        self.follow(&join(&imported, rest), seen, found);
+                    }
                 }
             } else if !symbols.bases.contains_key(first) {
                 // A name that the module may star import.

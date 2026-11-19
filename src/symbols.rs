@@ -7,7 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::definitions::{Definition, Kind};
 use crate::modules::ModuleName;
-use crate::references::{Binding, References};
+use crate::references::{Binding, ModuleBindings, References};
 
 /// What a module defines, at its top level or not, and imports at its top level, as the base classes
 /// and decorators of its classes are followed through it, whether it is a module of the project or one outside it.
@@ -18,7 +18,7 @@ pub(crate) struct ModuleSymbols {
     /// The name that the module is imported by.
     pub name: ModuleName,
     /// The names that the module imports at its top level.
-    pub bindings: FxHashMap<String, Binding>,
+    pub bindings: ModuleBindings,
     /// The modules that the module star imports at its top level, by their dotted names, sorted.
     pub stars: Vec<String>,
     /// The names that the module gives out from its `__getattr__`, each with the imports of it.

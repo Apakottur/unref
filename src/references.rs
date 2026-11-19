@@ -30,6 +30,24 @@ pub(crate) struct Binding {
     pub name: Option<String>,
 }
 
+/// A module's import bindings and any other sources reached from different script directories.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ModuleBindings {
+    pub primary: FxHashMap<String, Binding>,
+    pub alternatives: FxHashMap<String, Vec<Binding>>,
+}
+
+impl ModuleBindings {
+    pub(crate) fn contains_key(&self, name: &str) -> bool {
+        self.primary.contains_key(name)
+    }
+
+    pub(crate) fn get(&self, name: &str) -> Option<impl Iterator<Item = &Binding>> {
+        let first = self.primary.get(name)?;
+        Some(std::iter::once(first).chain(self.alternatives.get(name).into_iter().flatten()))
+    }
+}
+
 /// The code that a reference or a definition is in: the line of the name of the function that it is
 /// in, or None for code that runs when the module is imported.
 pub(crate) type Owner = Option<u32>;
@@ -137,7 +155,7 @@ pub(crate) struct References {
     /// Whether the module defines `__all__`.
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
-    pub bindings: FxHashMap<String, Binding>,
+    pub bindings: ModuleBindings,
     /// The functions and classes that are local variables of a function, by their index in the
     /// definitions of the module. A read of their name elsewhere is not a reference to them.
     pub local_definitions: FxHashSet<usize>,
@@ -194,7 +212,7 @@ pub(crate) fn walk_module(
     walker.visit_body(&module.body);
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
-    walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
+    walker.references.bindings.primary = std::mem::take(&mut walker.scopes[0].imports);
     (walker.definitions, walker.references)
 }
 
