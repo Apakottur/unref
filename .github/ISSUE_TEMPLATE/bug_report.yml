@@ -21,7 +21,7 @@ body:
     attributes:
       label: Files
       description: The Python files, each with its path.
-      value: |
+      placeholder: |
         `main.py`:
         ```python
 

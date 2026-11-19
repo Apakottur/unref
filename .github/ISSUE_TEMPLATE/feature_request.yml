@@ -15,7 +15,7 @@ body:
     attributes:
       label: Example
       description: A few short files that use the feature, each with its path, and what `unref` should report.
-      value: |
+      placeholder: |
         `main.py`:
         ```python
 
