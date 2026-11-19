@@ -50,6 +50,14 @@ rev = "v1.7.12"
 [[repos.hooks]]
 id = "actionlint"
 
+# Security issues in the workflows. Its configuration is in `.github/zizmor.yml`.
+[[repos]]
+repo = "https://github.com/zizmorcore/zizmor-pre-commit"
+rev = "v1.32.0"
+
+[[repos.hooks]]
+id = "zizmor"
+
 ########
 # TOML #
 ########

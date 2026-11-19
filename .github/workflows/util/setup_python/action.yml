@@ -40,6 +40,7 @@ runs:
 
     # Put the project virtual environment on PATH for subsequent steps, so tools can be
     # invoked directly (e.g. `pytest`).
+    # zizmor flags writes to GITHUB_PATH, but this path is the project's own venv.
     - name: Activate Python venv
       shell: bash
-      run: echo "$(pwd)/.venv/bin" >> "$GITHUB_PATH"
+      run: echo "$(pwd)/.venv/bin" >> "$GITHUB_PATH" # zizmor: ignore[github-env]

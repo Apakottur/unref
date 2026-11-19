@@ -106,3 +106,4 @@ vararg
 venv
 wsgi
 Yossi
+zizmor
