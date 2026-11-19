@@ -22,6 +22,8 @@ top level. Its paths are relative to the current directory, as in Ruff.
 | `used-names`         | Names of the definitions that count as used.                      |
 | `used-decorators`    | Decorators that make the definitions they decorate count as used. |
 | `exclude`            | Files and directories that are not part of the project.           |
+| `force-exclude`      | Leave out excluded paths even when they are given directly.       |
+| `respect-gitignore`  | Leave out the files that git ignores.                             |
 | `python`             | Python environment or interpreter that the project runs in.       |
 | `dummy-variable-rgx` | Names of the variables that are unused on purpose.                |
 | `frameworks`         | Frameworks whose built-in rules apply.                            |
@@ -61,7 +63,30 @@ exclude = ["generated", "scripts/legacy.py", "**/fixtures/"]
 
 As with ty, common directories such as `.git`, `.venv`, `dist` and `node_modules` are always left out
 first, and so are the files that git ignores. `!pattern` brings one back: `exclude = ["!**/dist/"]`. A
-path given to `unref` directly is always checked.
+path given to `unref` directly is checked unless [`force-exclude`](#force-exclude) is set.
+
+An excluded file's references do not count either: a definition that only an excluded file uses is
+reported as unused. `--show-files` prints the files that are checked.
+
+### `force-exclude`
+
+Leave out the files and directories given to `unref` directly when they are excluded or git ignores
+them, as [Ruff's option](https://docs.astral.sh/ruff/settings/#force-exclude). Defaults to `false`.
+
+```toml
+[tool.unref]
+force-exclude = true
+```
+
+### `respect-gitignore`
+
+Leave out the files and directories that git ignores, as
+[Ruff's option](https://docs.astral.sh/ruff/settings/#respect-gitignore). Defaults to `true`.
+
+```toml
+[tool.unref]
+respect-gitignore = false
+```
 
 ### `python`
 
@@ -248,6 +273,12 @@ show-transitive = true
 | `--python`        | The [`python`](#python) option. Overrides the configuration.         |
 | `--output-format` | The [`output-format`](#output-format) option. Overrides the configuration. |
 | `--show-transitive`, `--no-show-transitive` | The [`show-transitive`](#show-transitive) option. Overrides the configuration. |
+| `--exclude`       | Patterns that replace the [`exclude`](#exclude) option, relative to the current directory. Repeat it or separate the patterns with commas. |
+| `--extend-exclude` | Patterns added to the [`exclude`](#exclude) option, relative to the current directory. |
+| `--force-exclude`, `--no-force-exclude` | The [`force-exclude`](#force-exclude) option. Overrides the configuration. |
+| `--respect-gitignore`, `--no-respect-gitignore` | The [`respect-gitignore`](#respect-gitignore) option. Overrides the configuration. |
+| `--show-files`    | Print the files that would be checked, and exit.                     |
+| `--exit-zero`, `-e` | Exit with status 0 even if something is found.                     |
 | `--jobs`, `-j`    | Number of threads. Defaults to one for each CPU.                     |
 | `--version`       | Print the version and exit.                                          |
 

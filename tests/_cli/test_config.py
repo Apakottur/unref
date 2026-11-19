@@ -117,10 +117,9 @@ _OVERRIDE_WRONG_TYPE = "Option '{option}' in an override in the configuration fi
             'output-format = ["github"]',
             _WRONG_TYPE.format(option="output-format", expected="one of 'concise', 'github'"),
         ),
-        _invalid(
-            "show-transitive-string",
-            'show-transitive = "yes"',
-            _WRONG_TYPE.format(option="show-transitive", expected="a boolean"),
+        *(
+            _invalid(f"{option}-string", f'{option} = "yes"', _WRONG_TYPE.format(option=option, expected="a boolean"))
+            for option in ["show-transitive", "force-exclude", "respect-gitignore"]
         ),
         _invalid(
             "frameworks-list", 'frameworks = ["pytest"]', _WRONG_TYPE.format(option="frameworks", expected="a table")

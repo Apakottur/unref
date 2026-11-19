@@ -16,8 +16,9 @@ src/project/utils.py:40:5: unused-function 'parse_date'
 uvx unref src scripts
 ```
 
-`unref` exits with a non-zero status if anything is found. See the [rules](rules.md) for what it reports
-and how to ignore a finding, and the [command line](configuration.md#command-line) for its options.
+`unref` exits with a non-zero status if anything is found, unless `--exit-zero` is given. See the
+[rules](rules.md) for what it reports and how to ignore a finding, and the
+[command line](configuration.md#command-line) for its options.
 
 ## pre-commit and prek
 
