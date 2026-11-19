@@ -744,7 +744,14 @@ impl<'a> FrameworkRules<'a> {
             return definition.name == PYDANTIC_V1_CONFIG && self.is_model(module, class);
         }
 
-        // An attribute.
+        // An attribute, which a decorator applied by hand can register as it does a method.
+        if definition
+            .wrapped_by
+            .as_ref()
+            .is_some_and(|decorator| self.resolves_to(module, decorator, &PYDANTIC_DECORATORS))
+        {
+            return true;
+        }
         let (model, last) = class.rsplit_once('.').unwrap_or(("", class));
         if last == PYDANTIC_V1_CONFIG && !model.is_empty() && self.is_model(module, model) {
             return true;

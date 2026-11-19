@@ -8,6 +8,10 @@ from pydantic.main import BaseModel as MainBaseModel
 from pydantic_settings import BaseSettings
 
 
+def to_int(value):
+    return int(value)
+
+
 # Pydantic reads the fields of a model and its configuration.
 class User(BaseModel):
     model_config = {"frozen": True}
@@ -46,6 +50,11 @@ class User(BaseModel):
     @property
     def label(self):
         return self.name
+
+    # A decorator applied by hand registers the function that is assigned.
+    _check_age = field_validator("age", mode="before")(to_int)
+    # A decorator that is not applied registers nothing.
+    _not_applied = field_validator("age")  # expect: 5 [unused-attribute]
 
     # Other methods are still reported.
     def helper(self):  # expect: 9 [unused-method]
