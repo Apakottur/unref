@@ -9,14 +9,6 @@ body:
         and the command.
 
   - type: textarea
-    id: description
-    attributes:
-      label: Description
-      description: One or two sentences on what goes wrong.
-    validations:
-      required: true
-
-  - type: textarea
     id: files
     attributes:
       label: Files
