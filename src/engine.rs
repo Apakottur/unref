@@ -40,6 +40,7 @@ const NODE_VISITOR_PREFIX: &str = "visit_";
 /// `Protocol`, as `typing` and `typing_extensions` give it out, whose members a class has without
 /// inheriting from it.
 const PROTOCOLS: [&str; 2] = ["typing.Protocol", "typing_extensions.Protocol"];
+const ABSTRACT_METHOD: &str = "abc.abstractmethod";
 
 /// A definition of the project, by its index among the definitions of every file in order.
 type DefinitionId = usize;
@@ -202,7 +203,8 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     );
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
 
-    let mut graph = Graph::new(&project, &uses, &fields, enums);
+    let implementations = classes.implementations(&project);
+    let mut graph = Graph::new(&project, &uses, &fields, enums, implementations);
 
     // An ignore comment is needed for a definition that is unused without it. Such a definition is
     // then used, and so is what it uses.
@@ -438,6 +440,8 @@ struct Classes<'a> {
     hierarchy: &'a ClassHierarchy,
     /// Each class by its file and its name in the module.
     ids: FxHashMap<(usize, String), ClassId>,
+    /// The definition of each class.
+    definitions: Vec<DefinitionId>,
     /// The classes by their dotted names, such as `package.module.Class`.
     by_dotted: FxHashMap<String, Vec<ClassId>>,
     /// The names of the classes, without their modules, so that a name that cannot be a class is not
@@ -470,9 +474,15 @@ impl<'a> Classes<'a> {
     ) -> Self {
         let mut keys: Vec<(usize, String)> = Vec::new();
         let mut ids = FxHashMap::default();
+        let mut definitions = Vec::new();
         let mut by_dotted: FxHashMap<String, Vec<ClassId>> = FxHashMap::default();
         let mut names = FxHashSet::default();
-        for (file, definition) in project.definition_files.iter().zip(&project.definitions) {
+        for (definition_id, (file, definition)) in project
+            .definition_files
+            .iter()
+            .zip(&project.definitions)
+            .enumerate()
+        {
             if definition.kind == Kind::Class {
                 let key = (*file, definition.qualified_name());
                 if ids.contains_key(&key) {
@@ -480,6 +490,7 @@ impl<'a> Classes<'a> {
                 }
                 let id = keys.len();
                 ids.insert(key.clone(), id);
+                definitions.push(definition_id);
                 let dotted = join(&project.names[*file].name, &key.1);
                 by_dotted.entry(dotted).or_default().push(id);
                 names.insert(definition.name.clone());
@@ -562,6 +573,7 @@ impl<'a> Classes<'a> {
         Self {
             hierarchy,
             ids,
+            definitions,
             by_dotted,
             names,
             ancestors,
@@ -655,6 +667,54 @@ impl<'a> Classes<'a> {
             lineage.into_iter().collect()
         });
         self.members(lineage.iter().copied(), name)
+    }
+
+    /// Find the implementations of each abstract method: the members of its name in the classes that
+    /// inherit from its class, each with the definition of its class.
+    fn implementations(
+        &self,
+        project: &Project,
+    ) -> FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>> {
+        let mut implementations = FxHashMap::default();
+        for (id, (file, definition)) in project
+            .definition_files
+            .iter()
+            .zip(&project.definitions)
+            .enumerate()
+        {
+            let Some(class_name) = &definition.class else {
+                continue;
+            };
+            if !definition.kind.is_function() || definition.decorators.is_empty() {
+                continue;
+            }
+            let (Some(&class), Some(by_class)) = (
+                self.ids.get(&(*file, class_name.clone())),
+                self.by_member.get(&definition.name),
+            ) else {
+                continue;
+            };
+            let found: Vec<(DefinitionId, DefinitionId)> = self.descendants[class]
+                .iter()
+                .flat_map(|&subclass| {
+                    by_class
+                        .get(&subclass)
+                        .into_iter()
+                        .flatten()
+                        .map(move |&member| (self.definitions[subclass], member))
+                })
+                .collect();
+            if !found.is_empty()
+                && definition.decorators.iter().any(|decorator| {
+                    self.hierarchy
+                        .resolve(*file, decorator)
+                        .contains(ABSTRACT_METHOD)
+                })
+            {
+                implementations.insert(id, found);
+            }
+        }
+        implementations
     }
 }
 
@@ -1208,6 +1268,11 @@ struct Graph<'a> {
     by_attribute: FxHashMap<String, Vec<DefinitionId>>,
     by_key: FxHashMap<String, Vec<DefinitionId>>,
     public: FxHashMap<usize, Vec<DefinitionId>>,
+    /// The implementations of each abstract method, each with the definition of its class. An
+    /// implementation is used once both the abstract method and its class are.
+    implementations: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
+    /// The implementations of used abstract methods, by the class that is not used yet.
+    waiting: FxHashMap<DefinitionId, Vec<DefinitionId>>,
     /// What is used so far, and what is left to follow. An owner is left to follow once: a module at
     /// the start, and a function when it is first used, as no two functions of a file have their name
     /// on the same line.
@@ -1232,6 +1297,7 @@ impl<'a> Graph<'a> {
         uses: &'a FxHashMap<(usize, Owner), Uses>,
         fields: &FxHashSet<DefinitionId>,
         enums: FxHashMap<(usize, String), Vec<DefinitionId>>,
+        implementations: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
     ) -> Self {
         let mut by_name: FxHashMap<(usize, Name), Vec<DefinitionId>> = FxHashMap::default();
         let mut by_attribute: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
@@ -1297,6 +1363,8 @@ impl<'a> Graph<'a> {
             by_attribute,
             by_key,
             public,
+            implementations,
+            waiting: FxHashMap::default(),
             used: vec![false; project.definitions.len()],
             // The code of every module runs.
             pending: (0..project.files.len()).map(|file| (file, None)).collect(),
@@ -1418,19 +1486,30 @@ impl<'a> Graph<'a> {
         found
     }
 
-    /// Mark definitions as used, and queue the code of the functions among them.
+    /// Mark definitions as used, with the implementations of abstract methods that they make used, and
+    /// queue the code of the functions among them.
     fn add(&mut self, definitions: impl IntoIterator<Item = DefinitionId>) {
-        for id in definitions {
-            if !self.used[id] {
-                self.used[id] = true;
-                let (file, definition) = (
-                    &self.project.definition_files[id],
-                    &self.project.definitions[id],
-                );
-                if definition.kind.is_function() {
-                    self.pending.push((*file, Some(definition.line)));
+        let mut queue: Vec<DefinitionId> = definitions.into_iter().collect();
+        while let Some(id) = queue.pop() {
+            if self.used[id] {
+                continue;
+            }
+            self.used[id] = true;
+            let (file, definition) = (
+                &self.project.definition_files[id],
+                &self.project.definitions[id],
+            );
+            if definition.kind.is_function() {
+                self.pending.push((*file, Some(definition.line)));
+            }
+            for &(class, method) in self.implementations.get(&id).into_iter().flatten() {
+                if self.used[class] {
+                    queue.push(method);
+                } else {
+                    self.waiting.entry(class).or_default().push(method);
                 }
             }
+            queue.extend(self.waiting.remove(&id).into_iter().flatten());
         }
     }
 }
