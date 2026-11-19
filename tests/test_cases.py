@@ -109,6 +109,6 @@ def _actual_findings(
     ids=lambda case: case.name,
 )
 @pytest.mark.parametrize("show_transitive", [False, True], ids=["default", "show-transitive"])
-def test_case(case: Path, show_transitive: bool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:  # noqa: FBT001
+def test_case(case: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, show_transitive: bool) -> None:
     expected = _expected_findings(case, show_transitive=show_transitive)
     assert _actual_findings(case, monkeypatch, tmp_path, show_transitive=show_transitive) == expected

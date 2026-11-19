@@ -265,7 +265,7 @@ _OVERRIDE_WRONG_TYPE = "Option '{option}' in an override in the configuration fi
         ),
     ],
 )
-def test_config_invalid(tmp_path: Path, name: str, content: str, error: str, partial: bool) -> None:  # noqa: FBT001
+def test_config_invalid(tmp_path: Path, name: str, content: str, error: str, *, partial: bool) -> None:
     config = write_config(tmp_path, f"{content}\n", name)
 
     # The run is in the directory of the file, so that nothing else would be checked if it were valid.

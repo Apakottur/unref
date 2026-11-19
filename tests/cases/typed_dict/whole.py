@@ -46,8 +46,8 @@ class Logged(TypedDict):
     logged: int
 
 
-class Printed(TypedDict):
-    printed: int
+class Stringified(TypedDict):
+    stringified: int
 
 
 # Passing the value to a function of the project or to a method of another object reads no key.
@@ -97,9 +97,8 @@ def read(client: Client) -> None:
     Items(item=1).items()
     dumps(obj=Dumped(dumped=1))
     logging.info("%s", Logged(logged=1))
-    printed = Printed(printed=1)
-    # `print` is from outside the project.
-    print(printed)  # noqa: T201
+    stringified = Stringified(stringified=1)
+    str(stringified)
     take(Passed(passed=1))
     helpers.send(Passed(imported=1))
     client.send(Passed(sent=1))
