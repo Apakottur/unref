@@ -284,8 +284,8 @@ struct Scope {
     /// The reads of names in the scope, or in a scope nested in it, that are not local to the scopes
     /// in between.
     reads: Vec<Read>,
-    /// The scope that also binds the names that the scope binds. A comprehension binds its variables
-    /// in the function that it is in as well.
+    /// The scope containing a comprehension, when it is not a class body. Assignment expressions
+    /// follow this link to bind outside the comprehension.
     enclosing: Option<usize>,
     /// The scope that holds the variables of a module, or the attributes of a class, that were
     /// already found. A method shares the names of its class, so that an attribute is found once.
@@ -305,6 +305,8 @@ struct Scope {
     /// In a function, the local variables that are assigned the result of a call, each with the
     /// dotted names of what they call as they are written.
     calls: FxHashMap<String, Vec<String>>,
+    /// The scope a comprehension reads from when a name is not local to it.
+    comprehension_parent: Option<usize>,
     /// In a class body, the nearest scope around it that is not a class body. The functions,
     /// lambdas and comprehensions in a class body do not see its names, and neither does a class
     /// body nested in it, so their reads go on to this scope, as do the reads of the class body that
@@ -330,6 +332,7 @@ impl Scope {
             function_name: None,
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
+            comprehension_parent: None,
             outer: None,
         }
     }
@@ -514,7 +517,14 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             Expr::Named(named) => {
                 // The target of a walrus is assigned, as by an assignment.
                 self.define_target(&named.target, false, None, None, None, None);
-                walk_expr(self, expr);
+                self.visit_expr(&named.value);
+                if let Expr::Name(name) = &*named.target {
+                    let mut binder = self.binder;
+                    while let Some(enclosing) = self.scopes[binder].enclosing {
+                        binder = enclosing;
+                    }
+                    self.scopes[binder].bound.insert(name.id.to_string());
+                }
             }
             _ => walk_expr(self, expr),
         }
@@ -793,23 +803,26 @@ impl<'a> Walker<'_, '_> {
         let Some(first) = generators.first() else {
             return;
         };
-        // A comprehension over a mapping reads its keys.
-        for generator in generators {
-            let values = self.value_calls(&generator.iter);
-            self.add_whole_read(values, None);
-        }
+        // The first iterable is read outside the comprehension.
+        let values = self.value_calls(&first.iter);
+        self.add_whole_read(values, None);
         self.visit_expr(&first.iter);
         let (scope, binder) = (self.scope, self.binder);
+        let target = self.reads_target(scope);
         let mut inner = Scope::new(ScopeKind::Function);
-        // A walrus binds its name in the function that the comprehension is in as well. It cannot be
-        // used in a comprehension in a class body.
+        // A walrus in a comprehension binds outside it. Python disallows it in a class body.
         if self.scopes[binder].kind != ScopeKind::Class {
             inner.enclosing = Some(binder);
         }
+        inner.comprehension_parent = Some(target);
         self.scope = self.push_scope(inner);
         self.binder = self.scope;
         for (index, generator) in generators.iter().enumerate() {
             if index > 0 {
+                // A comprehension over a mapping reads its keys in the current scope,
+                // after the earlier iteration targets have been bound.
+                let values = self.value_calls(&generator.iter);
+                self.add_whole_read(values, None);
                 self.visit_expr(&generator.iter);
             }
             self.visit_expr(&generator.target);
@@ -824,7 +837,6 @@ impl<'a> Walker<'_, '_> {
         self.scope = scope;
         self.binder = binder;
         let local_names = self.scopes[inner].bound.clone();
-        let target = self.reads_target(scope);
         self.close(inner, &local_names, Target::Scope(target));
     }
 
@@ -1415,7 +1427,7 @@ impl<'a> Walker<'_, '_> {
     }
 
     /// Get the dotted names of what a local variable is assigned the result of calling, as they are
-    /// written: in the scope that it is read in, or the scopes that bind its names as well.
+    /// written, looking through enclosing scopes for a comprehension.
     fn variable_calls(&self, name: &str) -> Vec<String> {
         let mut scope = Some(self.scope);
         while let Some(index) = scope {
@@ -1423,7 +1435,7 @@ impl<'a> Walker<'_, '_> {
             if found.bound.contains(name) {
                 return found.calls.get(name).cloned().unwrap_or_default();
             }
-            scope = found.enclosing;
+            scope = found.comprehension_parent;
         }
         Vec::new()
     }
@@ -1437,13 +1449,9 @@ impl<'a> Walker<'_, '_> {
         }
     }
 
-    /// Bind a name in the current scope, and in the scopes that it binds names in as well.
+    /// Bind a name in the current scope.
     fn bind(&mut self, name: &str) {
-        let mut scope = Some(self.binder);
-        while let Some(index) = scope {
-            self.scopes[index].bound.insert(name.to_string());
-            scope = self.scopes[index].enclosing;
-        }
+        self.scopes[self.binder].bound.insert(name.to_string());
     }
 
     /// Bind the name of a function or class, given with its index in the definitions of the module, if

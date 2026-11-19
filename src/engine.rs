@@ -588,8 +588,20 @@ impl Uses {
                 .extend(read.attributes.iter().chain(&read.called).cloned());
             return;
         };
-        if read.reads_object {
-            self.objects.extend(imported_objects(&resolved, project));
+        if read.reads_object || !read.attributes.is_empty() {
+            let objects = imported_objects(&resolved, project);
+            if !read.attributes.is_empty() {
+                // An imported module can be reached through a re-export. Its attributes
+                // are names of the original module, just as they are for a direct import.
+                self.names.extend(
+                    objects
+                        .iter()
+                        .map(|(file, parts)| (*file, parts[0].clone())),
+                );
+            }
+            if read.reads_object {
+                self.objects.extend(objects);
+            }
         }
         if let Some(called) = &read.called {
             self.add_member_of(classes, "", &resolved.0, called, scope);
@@ -597,16 +609,7 @@ impl Uses {
         if read.attributes.is_empty() {
             return;
         }
-        // An attribute of an imported name is resolved: `package.module.name` is `name` in
-        // `package.module`.
         let (parts, starts) = &resolved;
-        for (index, modules) in starts {
-            self.names.extend(
-                modules
-                    .iter()
-                    .map(|&module| (module, parts[*index].clone())),
-            );
-        }
         // What follows the last name that a module of the project holds is read from an object.
         let first_of_object = starts
             .iter()

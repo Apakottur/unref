@@ -128,7 +128,6 @@ language = "system"
 types = ["rust"]
 pass_filenames = false
 
-# Dependencies that the code does not use, as ruff checks them.
 [[repos.hooks]]
 id = "cargo-shear"
 name = "cargo shear"
@@ -136,6 +135,15 @@ entry = "cargo-shear --deny-warnings"
 language = "rust"
 additional_dependencies = ["cli:cargo-shear:1.14.1"]
 files = '(^|/)Cargo\.(toml|lock)$|\.rs$'
+pass_filenames = false
+
+[[repos.hooks]]
+id = "cargo-deny"
+name = "cargo deny"
+entry = "cargo-deny --locked check"
+language = "rust"
+additional_dependencies = ["cli:cargo-deny:0.22.0"]
+files = '(^|/)(Cargo\.(toml|lock)|deny\.toml)$'
 pass_filenames = false
 
 #########
