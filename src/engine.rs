@@ -458,6 +458,7 @@ impl Uses {
 /// The classes of the project, with their members, so that a member read from an object whose class
 /// is plain is matched in the classes that the object can be an instance of.
 struct Classes<'a> {
+    project: &'a Project,
     hierarchy: &'a ClassHierarchy,
     /// Each class by its file and its name in the module.
     ids: FxHashMap<(usize, String), ClassId>,
@@ -489,7 +490,7 @@ struct Classes<'a> {
 
 impl<'a> Classes<'a> {
     fn new(
-        project: &Project,
+        project: &'a Project,
         hierarchy: &'a ClassHierarchy,
         fields: &FxHashSet<DefinitionId>,
     ) -> Self {
@@ -593,6 +594,7 @@ impl<'a> Classes<'a> {
             }
         }
         Self {
+            project,
             hierarchy,
             ids,
             definitions,
@@ -638,9 +640,9 @@ impl<'a> Classes<'a> {
     /// Returns None if the dotted name is not a class of the project, or if the class has no such
     /// member.
     fn read_from(&self, written: &str, name: &str) -> Option<Vec<DefinitionId>> {
-        let last = written.rsplit('.').next().unwrap_or(written);
+        let (module, last) = written.rsplit_once('.').unwrap_or(("", written));
         if !self.names.contains(last) {
-            return None;
+            return self.read_from_renamed_import(module, last, name);
         }
         let classes: Vec<ClassId> = self
             .hierarchy
@@ -652,6 +654,69 @@ impl<'a> Classes<'a> {
             return None;
         }
         self.members(classes, name)
+    }
+
+    /// A re-export can give a class a name that no class declares. Follow explicit project
+    /// bindings in this case, with the same visited-binding check used for imported objects.
+    fn read_from_renamed_import(
+        &self,
+        module: &str,
+        alias: &str,
+        name: &str,
+    ) -> Option<Vec<DefinitionId>> {
+        let files = self.project.files_by_name.get(module)?;
+        if !self.by_member.contains_key(name)
+            || !files.iter().any(|&file| {
+                self.project.facts[file]
+                    .references
+                    .bindings
+                    .get(alias)
+                    .is_some_and(|binding| binding.name.is_some())
+            })
+        {
+            return None;
+        }
+        let resolved = (vec![Name::new(alias)], vec![(0, files.clone())]);
+        let objects = imported_objects(&resolved, self.project);
+        let mut classes = Vec::new();
+        for (file, parts) in objects {
+            let Some(first) = parts.first() else {
+                continue;
+            };
+            let references = &self.project.facts[file].references;
+            // A conflicting definition or star import can replace any binding along the chain.
+            if references.bindings.contains_key(first.as_str())
+                && (references.ambiguous_imports.contains(first.as_str())
+                    || references
+                        .imports
+                        .iter()
+                        .any(|import| import.owner.is_none() && import.name == "*")
+                    || self
+                        .project
+                        .file_definitions(file)
+                        .iter()
+                        .any(|definition| {
+                            definition.owner.is_none()
+                                && definition.class.is_none()
+                                && definition.name == first.as_str()
+                        }))
+            {
+                return None;
+            }
+            if parts
+                .last()
+                .is_some_and(|last| self.names.contains(last.as_str()))
+            {
+                let written = join(&self.project.names[file].name, &parts.join("."));
+                classes.extend(self.by_dotted.get(&written).into_iter().flatten().copied());
+            }
+        }
+        self.members(
+            classes
+                .into_iter()
+                .flat_map(|id| std::iter::once(id).chain(self.ancestors[id].iter().copied())),
+            name,
+        )
     }
 
     /// Find the members that a name read from the first parameter of a method of a class can stand

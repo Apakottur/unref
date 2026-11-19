@@ -1,5 +1,6 @@
 //! What a Python module defines and refers to, found by walking its syntax tree once.
 
+use std::collections::hash_map::Entry;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -136,6 +137,8 @@ pub(crate) struct References {
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
     pub bindings: FxHashMap<String, Binding>,
+    /// Top-level import aliases that can be rebound to a different value.
+    pub ambiguous_imports: FxHashSet<String>,
     /// The functions and classes that are local variables of a function, by their index in the
     /// definitions of the module. A read of their name elsewhere is not a reference to them.
     pub local_definitions: FxHashSet<usize>,
@@ -1376,6 +1379,9 @@ impl<'a> Walker<'_, '_> {
 
     /// Bind a name in the current scope.
     fn bind(&mut self, name: &str) {
+        if self.binder == 0 && self.scopes[0].imports.contains_key(name) {
+            self.references.ambiguous_imports.insert(name.to_string());
+        }
         self.scopes[self.binder].bound.insert(name.to_string());
     }
 
@@ -1400,9 +1406,29 @@ impl<'a> Walker<'_, '_> {
     /// `except`, the first import is the one that counts. Within one statement, the last one does.
     fn bind_imports(&mut self, statement: FxHashMap<String, Binding>) {
         for (name, binding) in statement {
-            self.bind(&name);
             let binder = self.binder;
-            self.scopes[binder].imports.entry(name).or_insert(binding);
+            let already_bound = if binder == 0 {
+                !self.scopes[0].bound.insert(name.clone())
+            } else {
+                self.bind(&name);
+                false
+            };
+            match self.scopes[binder].imports.entry(name) {
+                Entry::Vacant(entry) => {
+                    if already_bound {
+                        self.references
+                            .ambiguous_imports
+                            .insert(entry.key().clone());
+                    }
+                    entry.insert(binding);
+                }
+                Entry::Occupied(entry) if binder == 0 && *entry.get() != binding => {
+                    self.references
+                        .ambiguous_imports
+                        .insert(entry.key().clone());
+                }
+                Entry::Occupied(_) => {}
+            }
         }
     }
 
