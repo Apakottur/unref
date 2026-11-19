@@ -75,6 +75,43 @@ def test_default_path(tmp_path: Path) -> None:
         ),
         pytest.param(
             {
+                "pkg/z_run.py": 'import sub.worker\nif __name__ == "__main__": print(7)\n',
+                "pkg/sub/run.py": 'from worker import execute\nif __name__ == "__main__": print(execute())\n',
+                "pkg/sub/worker.py": "def execute():\n    from tasks import value\n    return value()\n",
+                "pkg/tasks.py": "def value(): return -1\n",
+                "pkg/sub/tasks.py": "def value(): return 9\n",
+            },
+            f"{Path('pkg/tasks.py')}:1:5: unused-function 'value'\n",
+            id="only-calling-script-reaches-local-import",
+        ),
+        pytest.param(
+            {
+                "pkg/z_run.py": 'from sub.worker import execute\nif __name__ == "__main__": print(execute())\n',
+                "pkg/sub/run.py": 'import worker\nif __name__ == "__main__": print(9)\n',
+                "pkg/sub/worker.py": (
+                    "def execute(): return resolve()\ndef resolve():\n    from tasks import value\n    return value()\n"
+                ),
+                "pkg/tasks.py": "def value(): return 7\n",
+                "pkg/sub/tasks.py": "def value(): return -1\n",
+            },
+            f"{Path('pkg/sub/tasks.py')}:1:5: unused-function 'value'\n",
+            id="ordinary-call-preserves-script-context",
+        ),
+        pytest.param(
+            {
+                "pkg/z_run.py": 'from sub.worker import execute\nif __name__ == "__main__": print(execute())\n',
+                "pkg/sub/run.py": 'from worker import execute\nif __name__ == "__main__": print(execute())\n',
+                "pkg/sub/worker.py": (
+                    "def execute(): return resolve()\ndef resolve():\n    from tasks import value\n    return value()\n"
+                ),
+                "pkg/tasks.py": "def value(): return 7\n",
+                "pkg/sub/tasks.py": "def value(): return 9\n",
+            },
+            "",
+            id="function-can-be-reached-in-both-script-contexts",
+        ),
+        pytest.param(
+            {
                 "pkg/run.py": 'from sub import entry\nif __name__ == "__main__": print(entry())\n',
                 "pkg/sub/__init__.py": "def entry(): return 7\n",
                 "pkg/sub/entry.py": "from tasks import only_if_loaded\nprint(only_if_loaded())\n",
@@ -87,7 +124,7 @@ def test_default_path(tmp_path: Path) -> None:
             {
                 "pkg/run.py": 'from sub import execute\nif __name__ == "__main__": print(execute())\n',
                 "pkg/sub/__init__.py": "from .worker import execute\n",
-                "pkg/sub/worker.py": "from tasks import value\ndef execute(): return value()\n",
+                "pkg/sub/worker.py": "def execute():\n    from tasks import value\n    return value()\n",
                 "pkg/tasks.py": "def value(): return 7\n",
             },
             "",

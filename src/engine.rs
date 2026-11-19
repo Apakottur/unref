@@ -57,6 +57,8 @@ struct SiblingImports {
 /// A module under one script's import directory.
 struct SiblingContext {
     file: usize,
+    /// Scripts with the same import directory share a scope.
+    scope: usize,
     qualifications: FxHashMap<String, String>,
     loads: FxHashMap<Owner, FxHashSet<usize>>,
 }
@@ -64,6 +66,7 @@ struct SiblingContext {
 /// References and module loads that apply when a script context and owner are both reachable.
 struct SiblingUses {
     file: usize,
+    scope: usize,
     uses: FxHashMap<Owner, Uses>,
     loads: FxHashMap<Owner, FxHashSet<usize>>,
 }
@@ -466,6 +469,7 @@ fn find_sibling_uses(
 ) -> SiblingUses {
     let SiblingContext {
         file,
+        scope,
         qualifications,
         loads,
     } = context;
@@ -498,7 +502,12 @@ fn find_sibling_uses(
             }
         }
     }
-    SiblingUses { file, uses, loads }
+    SiblingUses {
+        file,
+        scope,
+        uses,
+        loads,
+    }
 }
 
 impl Uses {
@@ -1040,9 +1049,12 @@ fn import_siblings(project: &Project, external: &mut ExternalModules) -> Sibling
         .collect();
     let mut indices: FxHashMap<_, _> = modules.iter().copied().zip(0..).collect();
     let mut is_elsewhere: FxHashMap<String, bool> = FxHashMap::default();
+    let mut scopes = FxHashMap::default();
     while let Some(&(file, package)) = modules.get(imports.contexts.len()) {
+        let next_scope = scopes.len();
         let mut context = SiblingContext {
             file,
+            scope: *scopes.entry(package).or_insert(next_scope),
             qualifications: FxHashMap::default(),
             loads: FxHashMap::default(),
         };
@@ -1526,9 +1538,10 @@ struct Graph<'a> {
     project: &'a Project,
     uses: &'a FxHashMap<(usize, Owner), Uses>,
     sibling_uses: &'a [SiblingUses],
-    sibling_contexts: FxHashMap<usize, Vec<usize>>,
-    active_contexts: Vec<bool>,
-    reached_functions: FxHashMap<usize, Vec<u32>>,
+    contexts_by_file: FxHashMap<usize, Vec<usize>>,
+    contexts_by_scope: FxHashMap<(usize, usize), usize>,
+    contexts: Vec<ContextReachability>,
+    root_functions: FxHashMap<usize, Vec<DefinitionId>>,
     /// The members of each enum of the project, by its file and its name in the module, with their
     /// names.
     enums: FxHashMap<(usize, String), (Vec<DefinitionId>, FxHashSet<String>)>,
@@ -1539,18 +1552,33 @@ struct Graph<'a> {
     /// The implementations of each abstract method, each with the definition of its class. An
     /// implementation is used once both the abstract method and its class are.
     implementations: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
-    /// The implementations of used abstract methods, by the class that is not used yet.
-    waiting: FxHashMap<DefinitionId, Vec<DefinitionId>>,
-    /// What is used so far, and what is left to follow. An owner is left to follow once: a module at
-    /// the start, and a function when it is first used, as no two functions of a file have their name
-    /// on the same line.
+    /// The implementations of used abstract methods with the scopes that reached them, by the
+    /// class that is not used yet.
+    waiting: FxHashMap<DefinitionId, Vec<(Option<usize>, DefinitionId)>>,
+    /// A definition reached in any scope is used. Each function body is visited in every scope
+    /// that reaches it so its imports can resolve with that scope's search directory.
     used: Vec<bool>,
+    ordinary_used: Vec<bool>,
+    ordinary_seen: Seen,
+    scripts: FxHashMap<usize, ScriptReachability>,
     pending: Vec<PendingUses>,
+}
+
+#[derive(Default)]
+struct ContextReachability {
+    active: bool,
+    waiting: Vec<u32>,
+}
+
+#[derive(Default)]
+struct ScriptReachability {
+    used: FxHashSet<DefinitionId>,
     seen: Seen,
 }
 
 enum PendingUses {
-    File(usize, Owner),
+    /// Ordinary references, with the caller's script scope when there is one.
+    File(usize, Owner, Option<usize>),
     Sibling(usize, Owner),
 }
 
@@ -1625,20 +1653,25 @@ impl<'a> Graph<'a> {
             })
             .collect();
 
-        let mut sibling_contexts: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+        let mut contexts_by_file: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+        let mut contexts_by_scope = FxHashMap::default();
         for (index, context) in sibling_uses.iter().enumerate() {
-            sibling_contexts
+            contexts_by_file
                 .entry(context.file)
                 .or_default()
                 .push(index);
+            contexts_by_scope.insert((context.file, context.scope), index);
         }
         let mut graph = Self {
             project,
             uses,
             sibling_uses,
-            sibling_contexts,
-            active_contexts: vec![false; sibling_uses.len()],
-            reached_functions: FxHashMap::default(),
+            contexts_by_file,
+            contexts_by_scope,
+            contexts: (0..sibling_uses.len())
+                .map(|_| ContextReachability::default())
+                .collect(),
+            root_functions: FxHashMap::default(),
             enums,
             by_name,
             by_attribute,
@@ -1647,11 +1680,13 @@ impl<'a> Graph<'a> {
             implementations,
             waiting: FxHashMap::default(),
             used: vec![false; project.definitions.len()],
+            ordinary_used: vec![false; project.definitions.len()],
+            ordinary_seen: Seen::default(),
+            scripts: FxHashMap::default(),
             // The code of every module runs.
             pending: (0..project.files.len())
-                .map(|file| PendingUses::File(file, None))
+                .map(|file| PendingUses::File(file, None, None))
                 .collect(),
-            seen: Seen::default(),
         };
         for script in 0..script_roots {
             graph.activate_context(script);
@@ -1659,21 +1694,25 @@ impl<'a> Graph<'a> {
         graph
     }
 
-    /// Visit the module and any already-used functions under the newly loaded script context.
+    /// Visit the module and any functions already reached in this script scope.
     fn activate_context(&mut self, context: usize) {
-        if self.active_contexts[context] {
+        let state = &mut self.contexts[context];
+        if state.active {
             return;
         }
-        self.active_contexts[context] = true;
+        state.active = true;
+        let SiblingUses { file, scope, .. } = self.sibling_uses[context];
+        self.pending
+            .push(PendingUses::File(file, None, Some(scope)));
         self.pending.push(PendingUses::Sibling(context, None));
-        let file = self.sibling_uses[context].file;
         self.pending.extend(
-            self.reached_functions
-                .get(&file)
-                .into_iter()
-                .flatten()
-                .map(|&line| PendingUses::Sibling(context, Some(line))),
+            state
+                .waiting
+                .drain(..)
+                .map(|line| PendingUses::Sibling(context, Some(line))),
         );
+        let roots = self.root_functions.get(&file).cloned().unwrap_or_default();
+        self.add(roots.into_iter().map(|id| (Some(scope), id)));
     }
 
     /// Use more definitions, and get all the definitions that are used so far: the roots of every call,
@@ -1683,39 +1722,52 @@ impl<'a> Graph<'a> {
     /// The first call also uses what the code of the modules uses. Each later call goes on from where
     /// the one before stopped.
     fn use_definitions(&mut self, roots: impl IntoIterator<Item = DefinitionId>) -> Vec<bool> {
-        self.add(roots);
+        let mut initial = Vec::new();
+        for id in roots {
+            initial.push((None, id));
+            let file = self.project.definition_files[id];
+            if self.project.definitions[id].kind.is_function()
+                && let Some(contexts) = self.contexts_by_file.get(&file)
+            {
+                // Configured and implicit roots have no caller. They can run in any scope
+                // that loads their module.
+                self.root_functions.entry(file).or_default().push(id);
+                initial.extend(contexts.iter().filter_map(|&context| {
+                    self.contexts[context]
+                        .active
+                        .then_some((Some(self.sibling_uses[context].scope), id))
+                }));
+            }
+        }
+        self.add(initial);
         while let Some(pending) = self.pending.pop() {
-            let uses = match pending {
-                PendingUses::File(file, owner) => {
-                    if let Some(line) = owner
-                        && let Some(contexts) = self.sibling_contexts.get(&file)
-                    {
-                        self.reached_functions.entry(file).or_default().push(line);
-                        self.pending.extend(contexts.iter().filter_map(|&context| {
-                            self.active_contexts[context]
-                                .then_some(PendingUses::Sibling(context, owner))
-                        }));
-                    }
-                    self.uses.get(&(file, owner))
-                }
+            let (scope, uses) = match pending {
+                PendingUses::File(file, owner, scope) => (scope, self.uses.get(&(file, owner))),
                 PendingUses::Sibling(context, owner) => {
                     let sibling = &self.sibling_uses[context];
                     for &loaded in sibling.loads.get(&owner).into_iter().flatten() {
                         self.activate_context(loaded);
                     }
-                    sibling.uses.get(&owner)
+                    (Some(sibling.scope), sibling.uses.get(&owner))
                 }
             };
             let Some(uses) = uses else {
                 continue;
             };
-            let mut seen = std::mem::take(&mut self.seen);
+            let mut seen = std::mem::take(self.seen(scope));
             let mut found: Vec<DefinitionId> = Vec::new();
             self.look_up(uses, Some(&mut seen), &mut found);
-            self.seen = seen;
-            self.add(found);
+            *self.seen(scope) = seen;
+            self.add(found.into_iter().map(|id| (scope, id)));
         }
         self.used.clone()
+    }
+
+    fn seen(&mut self, scope: Option<usize>) -> &mut Seen {
+        match scope {
+            Some(scope) => &mut self.scripts.entry(scope).or_default().seen,
+            None => &mut self.ordinary_seen,
+        }
     }
 
     /// Find the definitions that the code of a function uses directly, as if it were used. A definition
@@ -1738,8 +1790,8 @@ impl<'a> Graph<'a> {
         if let Some(uses) = self.uses.get(&(*file, owner)) {
             self.look_up(uses, None, &mut reached);
         }
-        for &context in self.sibling_contexts.get(file).into_iter().flatten() {
-            if self.active_contexts[context]
+        for &context in self.contexts_by_file.get(file).into_iter().flatten() {
+            if self.contexts[context].active
                 && let Some(uses) = self.sibling_uses[context].uses.get(&owner)
             {
                 self.look_up(uses, None, &mut reached);
@@ -1825,10 +1877,14 @@ impl<'a> Graph<'a> {
 
     /// Mark definitions as used, with the implementations of abstract methods that they make used, and
     /// queue the code of the functions among them.
-    fn add(&mut self, definitions: impl IntoIterator<Item = DefinitionId>) {
-        let mut queue: Vec<DefinitionId> = definitions.into_iter().collect();
-        while let Some(id) = queue.pop() {
-            if self.used[id] {
+    fn add(&mut self, definitions: impl IntoIterator<Item = (Option<usize>, DefinitionId)>) {
+        let mut queue: Vec<_> = definitions.into_iter().collect();
+        while let Some((scope, id)) = queue.pop() {
+            let first_use = match scope {
+                Some(scope) => self.scripts.entry(scope).or_default().used.insert(id),
+                None => !std::mem::replace(&mut self.ordinary_used[id], true),
+            };
+            if !first_use {
                 continue;
             }
             self.used[id] = true;
@@ -1838,13 +1894,24 @@ impl<'a> Graph<'a> {
             );
             if definition.kind.is_function() {
                 self.pending
-                    .push(PendingUses::File(*file, Some(definition.line)));
+                    .push(PendingUses::File(*file, Some(definition.line), scope));
+                if let Some(scope) = scope
+                    && let Some(&context) = self.contexts_by_scope.get(&(*file, scope))
+                {
+                    let state = &mut self.contexts[context];
+                    if state.active {
+                        self.pending
+                            .push(PendingUses::Sibling(context, Some(definition.line)));
+                    } else {
+                        state.waiting.push(definition.line);
+                    }
+                }
             }
             for &(class, method) in self.implementations.get(&id).into_iter().flatten() {
                 if self.used[class] {
-                    queue.push(method);
+                    queue.push((scope, method));
                 } else {
-                    self.waiting.entry(class).or_default().push(method);
+                    self.waiting.entry(class).or_default().push((scope, method));
                 }
             }
             queue.extend(self.waiting.remove(&id).into_iter().flatten());
