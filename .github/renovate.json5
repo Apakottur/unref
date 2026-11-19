@@ -1,6 +1,8 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["config:recommended"],
+  // No Dependency Dashboard issue. The pull requests and the Mend web portal show the updates.
+  dependencyDashboard: { enabled: false },
   // Once a week, as ruff's, in batches rather than one pull request per dependency.
   schedule: ["before 4am on Wednesday"],
   // A release that is a few days old has had time to be yanked or reported as malicious.
