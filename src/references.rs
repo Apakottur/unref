@@ -229,8 +229,9 @@ struct Scope {
     /// The scope that holds the variables of a module, or the attributes of a class, that were
     /// already found. A method shares the names of its class, so that an attribute is found once.
     defined_in: Option<usize>,
-    /// The variables or attributes that were already found, when the scope holds them.
-    defined: FxHashSet<String>,
+    /// The variables or attributes that were already found, when the scope holds them, each with its
+    /// index in the definitions of the module.
+    defined: FxHashMap<String, usize>,
     /// In a method, the name of its first parameter, usually `self` or `cls`.
     instance: Option<String>,
     /// In a class or a method, the name of the class in the module.
@@ -260,7 +261,7 @@ impl Scope {
             reads: Vec::new(),
             enclosing: None,
             defined_in: None,
-            defined: FxHashSet::default(),
+            defined: FxHashMap::default(),
             instance: None,
             class_name: None,
             members: FxHashMap::default(),
@@ -1164,17 +1165,24 @@ impl<'a> Walker<'_, '_> {
         let Some(defined_in) = scope.defined_in else {
             return;
         };
-        if !self.scopes[defined_in].defined.insert(name.to_string()) {
-            return;
-        }
+        let next = self.definitions.len();
+        let index = *self.scopes[defined_in]
+            .defined
+            .entry(name.to_string())
+            .or_insert(next);
         if in_class_body {
-            let index = self.definitions.len();
+            // A method may have found the attribute first: the class body still binds it.
             let binder = self.binder;
-            self.scopes[binder]
+            let members = self.scopes[binder]
                 .members
                 .entry(name.to_string())
-                .or_default()
-                .push(index);
+                .or_default();
+            if !members.contains(&index) {
+                members.push(index);
+            }
+        }
+        if index != next {
+            return;
         }
         self.definitions.push(Definition {
             class: class_name,
