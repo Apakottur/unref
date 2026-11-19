@@ -14,7 +14,7 @@ fix = true
 # Output format, can be used to print more detailed errors.
 output-format = "concise"
 
-# The test cases are small projects that are unused and odd on purpose. `ruff_cases.toml` checks them,
+# The test cases are small projects that are unused and odd on purpose. `ruff_test_cases.toml` checks them,
 # and `prek.toml` excludes them from the hooks of this configuration as well.
 extend-exclude = ["tests/cases"]
 
