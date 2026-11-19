@@ -139,7 +139,14 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         &names,
         options.python.as_deref(),
     ));
-    import_siblings(&mut facts, &names, &files_by_name, &mut external);
+    import_siblings(
+        &mut facts,
+        &names,
+        &import_paths,
+        &roots,
+        &files_by_name,
+        &mut external,
+    );
 
     let mut definitions = Vec::new();
     let mut definition_files = Vec::new();
@@ -918,16 +925,17 @@ fn search_path(paths: &[PathBuf], names: &[ModuleName], python: Option<&Path>) -
     search_path
 }
 
-/// Make the absolute imports of the scripts in a package that only a module beside them can stand
-/// for relative imports of it. Python runs a script with its own directory first on the import path,
-/// so that `from helpers import name` in a script imports `helpers.py` beside it, and so do the
-/// modules beside it that it imports in turn.
+/// Qualify imports that can only refer to a sibling of a script. Python runs a script with its
+/// resolved directory first on the import path, so `from helpers import name` can import `helpers.py`
+/// from there. The sibling modules it imports can also import from that directory.
 ///
 /// A module of the project or of the environment with the name comes first, as Python finds it when
 /// the module is imported rather than run.
 fn import_siblings(
     facts: &mut [FileFacts],
     names: &[ModuleName],
+    import_paths: &[PathBuf],
+    roots: &[PathBuf],
     files_by_name: &FxHashMap<String, Vec<usize>>,
     external: &mut ExternalModules,
 ) {
@@ -940,8 +948,20 @@ fn import_siblings(
                 .chain([name.as_str()])
         })
         .collect();
+    // A script reached through a symlink looks for siblings beside the source. Its import name
+    // still comes from the symlink, including when resolving the script's explicit relative imports.
+    let script_names: FxHashMap<_, _> = facts
+        .iter()
+        .zip(import_paths)
+        .enumerate()
+        .filter(|(_, (facts, _))| facts.is_script)
+        .filter_map(|(file, (_, path))| {
+            let source = path.canonicalize().ok()?;
+            (source != *path).then(|| (file, module_name(&source, roots)))
+        })
+        .collect();
     let package_of = |file: usize| {
-        let name = &names[file];
+        let name = script_names.get(&file).unwrap_or(&names[file]);
         (!name.is_package)
             .then(|| name.name.rsplit_once('.').map(|(package, _)| package))
             .flatten()
@@ -956,21 +976,19 @@ fn import_siblings(
             continue;
         };
         let mut siblings: Vec<String> = Vec::new();
-        import_relative(&mut facts[file], |module, level| {
-            let Some(top) = module.and_then(|module| module.split('.').next()) else {
-                return false;
-            };
+        qualify_sibling_imports(&mut facts[file], |module, level| {
+            let module = module.filter(|_| level == 0)?;
+            let top = module.split('.').next()?;
             let sibling = format!("{package}.{top}");
-            let is_sibling = level == 0
-                && !known.contains(top)
+            let is_sibling = !known.contains(top)
                 && known.contains(sibling.as_str())
                 && !*is_elsewhere
                     .entry(top.to_string())
                     .or_insert_with(|| external.exists(top));
-            if is_sibling {
+            is_sibling.then(|| {
                 siblings.push(sibling);
-            }
-            is_sibling
+                format!("{package}.{module}")
+            })
         });
         for sibling in siblings {
             for &imported in files_by_name.get(&sibling).into_iter().flatten() {
@@ -982,18 +1000,17 @@ fn import_siblings(
     }
 }
 
-/// Make the imports of a file that `is_sibling` tells, by their module and their number of leading
-/// dots, relative imports from its package.
-fn import_relative(
+/// Apply the qualified names of absolute imports of siblings wherever their bindings are stored.
+fn qualify_sibling_imports(
     file_facts: &mut FileFacts,
-    mut is_sibling: impl FnMut(Option<&str>, u32) -> bool,
+    mut qualify: impl FnMut(Option<&str>, u32) -> Option<String>,
 ) {
     let references = &mut file_facts.references;
     references.imports = std::mem::take(&mut references.imports)
         .into_iter()
         .map(|mut import| {
-            if is_sibling(import.module.as_deref(), import.level) {
-                import.level = 1;
+            if let Some(module) = qualify(import.module.as_deref(), import.level) {
+                import.module = Some(module);
             }
             import
         })
@@ -1001,8 +1018,8 @@ fn import_relative(
     references.imported_reads = std::mem::take(&mut references.imported_reads)
         .into_iter()
         .map(|mut read| {
-            if is_sibling(read.binding.module.as_deref(), read.binding.level) {
-                read.binding.level = 1;
+            if let Some(module) = qualify(read.binding.module.as_deref(), read.binding.level) {
+                read.binding.module = Some(module);
             }
             read
         })
@@ -1012,8 +1029,8 @@ fn import_relative(
         .values_mut()
         .chain(file_facts.lazy.values_mut().flatten())
     {
-        if is_sibling(binding.module.as_deref(), binding.level) {
-            binding.level = 1;
+        if let Some(module) = qualify(binding.module.as_deref(), binding.level) {
+            binding.module = Some(module);
         }
     }
 }

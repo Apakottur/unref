@@ -81,6 +81,26 @@ def test_file_symlink_uses_its_own_package(tmp_path: Path) -> None:
     assert result.stderr == ""
 
 
+def test_symlinked_script_imports_from_its_source_directory(tmp_path: Path) -> None:
+    for name in ("original", "public"):
+        package = tmp_path / name
+        package.mkdir()
+        (package / "__init__.py").touch()
+    (tmp_path / "original" / "helper.py").write_text("def live(): return 7\n")
+    (tmp_path / "original" / "runner.py").write_text(
+        'from helper import live\n\nif __name__ == "__main__":\n    print(live())\n'
+    )
+    try:
+        (tmp_path / "public" / "runner.py").symlink_to("../original/runner.py")
+    except OSError as error:
+        pytest.skip(f"Could not create a symlink: {error}")
+
+    result = run(["original/helper.py", "public/runner.py"], cwd=tmp_path)
+
+    assert result.exit_code == 0
+    assert result.output == ""
+
+
 def test_default_path(tmp_path: Path) -> None:
     # Without arguments and without a `pyproject.toml`, the current directory is checked.
     project = tmp_path / "project"
