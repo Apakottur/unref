@@ -728,6 +728,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruff_python_stdlib"
+version = "0.0.22"
+source = "git+https://github.com/astral-sh/ruff?tag=0.17.5#c91de8a012cb87efe279b762020a0d28dd75ddb5"
+dependencies = [
+ "bitflags",
+ "unicode-ident",
+]
+
+[[package]]
 name = "ruff_python_trivia"
 version = "0.0.22"
 source = "git+https://github.com/astral-sh/ruff?tag=0.17.5#c91de8a012cb87efe279b762020a0d28dd75ddb5"
@@ -1015,6 +1024,7 @@ dependencies = [
  "regex",
  "ruff_python_ast",
  "ruff_python_parser",
+ "ruff_python_stdlib",
  "ruff_source_file",
  "ruff_text_size",
  "rustc-hash",

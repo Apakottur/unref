@@ -6,6 +6,7 @@ use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 use ruff_python_ast::name::Name;
+use ruff_python_stdlib::builtins::is_python_builtin;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::{ClassHierarchy, join};
@@ -167,7 +168,11 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     let enums = subclass_attributes(&project, &hierarchy, &ENUMS);
     let fields: FxHashSet<DefinitionId> = typed_dicts.values().flatten().copied().collect();
     let classes = Classes::new(&project, &hierarchy, &fields);
-    let uses = find_uses(&project, &classes);
+    let typed_dicts: FxHashMap<String, Vec<DefinitionId>> = typed_dicts
+        .into_iter()
+        .map(|((file, class), fields)| (join(&project.names[file].name, &class), fields))
+        .collect();
+    let uses = find_uses(&project, &classes, &typed_dicts);
 
     let file_definitions: Vec<ProjectFile> = (0..project.files.len())
         .map(|index| {
@@ -255,9 +260,22 @@ impl Project {
 /// A plain name refers to the module that it is read in, and an imported name to the module that it
 /// is imported from. A member of a class of the project that is plain, as in `self.name`,
 /// `super().name`, `Class.name` or `Class().name`, is matched in the classes that it can be in, and
-/// any other attribute of an object by name only.
-fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), Uses> {
+/// any other attribute of an object by name only. A TypedDict of the project that is read as a whole,
+/// or passed to a function from outside the project, has all its fields used, and those of the
+/// TypedDicts that it inherits from.
+///
+/// `typed_dicts` are the fields of each TypedDict of the project, by its dotted name.
+fn find_uses(
+    project: &Project,
+    classes: &Classes,
+    typed_dicts: &FxHashMap<String, Vec<DefinitionId>>,
+) -> FxHashMap<(usize, Owner), Uses> {
     let mut uses: FxHashMap<(usize, Owner), Uses> = FxHashMap::default();
+    // The names of the TypedDicts, so that a value that cannot be one is not resolved.
+    let typed_dict_names: FxHashSet<&str> = typed_dicts
+        .keys()
+        .map(|dotted| dotted.rsplit('.').next().unwrap_or(dotted))
+        .collect();
     for (file, file_facts) in project.facts.iter().enumerate() {
         let references = &file_facts.references;
         let module = &project.names[file].name;
@@ -359,6 +377,37 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
                 .or_default()
                 .keys
                 .insert(name.clone());
+        }
+        for read in &references.whole_reads {
+            // A TypedDict is called by its name, or by a name that it is imported as.
+            let (root, _) = read.value.split_once('.').unwrap_or((&read.value, ""));
+            let last = read.value.rsplit('.').next().unwrap_or(&read.value);
+            let imported = references
+                .bindings
+                .get(root)
+                .and_then(|binding| binding.name.as_deref());
+            if !typed_dict_names.contains(last)
+                && !imported.is_some_and(|name| typed_dict_names.contains(name))
+            {
+                continue;
+            }
+            let fields: Vec<DefinitionId> = classes
+                .hierarchy
+                .resolve(file, &read.value)
+                .iter()
+                .flat_map(|dotted| typed_dicts.get(dotted).into_iter().flatten().copied())
+                .collect();
+            if !fields.is_empty()
+                && read
+                    .reader
+                    .as_ref()
+                    .is_none_or(|reader| is_external(project, classes.hierarchy, file, reader))
+            {
+                uses.entry((file, read.owner))
+                    .or_default()
+                    .definitions
+                    .extend(fields);
+            }
         }
         for (owner, index) in &references.local_reads {
             uses.entry((file, *owner))
@@ -607,6 +656,22 @@ impl<'a> Classes<'a> {
         });
         self.members(lineage.iter().copied(), name)
     }
+}
+
+/// Check whether a function, as it is written in a module, is from outside the project: a builtin, or
+/// a name that the module imports from outside the project. Any other name, such as a method of a local
+/// variable, is not known.
+fn is_external(project: &Project, hierarchy: &ClassHierarchy, file: usize, written: &str) -> bool {
+    let root = written.split('.').next().unwrap_or(written);
+    // The builtins of any version of Python.
+    let is_known = project.facts[file].references.bindings.contains_key(root)
+        || is_python_builtin(root, u8::MAX, false);
+    is_known
+        && hierarchy.resolve(file, written).iter().all(|name| {
+            !name
+                .match_indices('.')
+                .any(|(index, _)| project.files_by_name.contains_key(&name[..index]))
+        })
 }
 
 /// Check whether a base class of a class, as it is written in its module, is not known: it is

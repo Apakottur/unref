@@ -15,6 +15,8 @@ use ruff_python_ast::{
 use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use ruff_python_stdlib::builtins::is_python_builtin;
+
 use crate::definitions::{Definition, Kind, Unwrap, annotation_name, decorator_names, dotted_name};
 use crate::positions::SourcePositions;
 
@@ -80,8 +82,23 @@ pub(crate) struct Import {
     pub name: String,
 }
 
+/// A value that is read as a whole, which reads every key of a TypedDict.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct WholeRead {
+    pub owner: Owner,
+    /// The dotted name of what the value is the result of calling, as it is written, such as
+    /// `RetryEvent` for `event = RetryEvent(...)`.
+    pub value: String,
+    /// The dotted name of the function that the value is passed to, as it is written, such as
+    /// `json.dumps`, or None when it is read by `**`, a loop or a method of a mapping. It reads every
+    /// key if it is from outside the project.
+    pub reader: Option<String>,
+}
+
 /// The methods of a mapping that read a key, given as their first argument.
 const KEY_METHODS: [&str; 3] = ["get", "pop", "setdefault"];
+/// The methods of a mapping that read every key.
+const WHOLE_METHODS: [&str; 3] = ["items", "keys", "values"];
 /// The functions and methods whose string arguments frameworks read: Django's `include`, which names a
 /// module of URLs, and `os.environ.setdefault`, which can set `DJANGO_SETTINGS_MODULE`.
 const STRING_CALLS: [&str; 2] = ["include", "setdefault"];
@@ -107,6 +124,10 @@ pub(crate) struct References {
     /// The string keys that are read from a mapping: `value["name"]`, `value.get("name")`,
     /// `"name" in value`, or a mapping pattern (`case {"name": ...}`).
     pub keys: FxHashSet<(Owner, String)>,
+    /// The values that are read as a whole, or passed to a function: `{**value}`, `f(**value)`,
+    /// `for key in value`, `value.items()` or `f(value)`, when the value is the result of a call, or a
+    /// local variable that is assigned one.
+    pub whole_reads: FxHashSet<WholeRead>,
     /// The names that are imported from another module. A star import has the name `*`.
     pub imports: FxHashSet<Import>,
     /// Whether the module defines `__all__`.
@@ -318,6 +339,12 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 None,
                 false,
             ),
+            Stmt::For(loop_) => {
+                // A loop over a mapping reads its keys.
+                let values = self.value_calls(&loop_.iter);
+                self.add_whole_read(values, None);
+                walk_stmt(self, stmt);
+            }
             Stmt::TypeAlias(alias) => {
                 // Its value is evaluated when it is used, but what it reads is still read.
                 self.define_target(&alias.name, false, None, None, None, None);
@@ -384,6 +411,14 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 walk_expr(self, expr);
             }
             Expr::Call(call) => self.visit_call(call, None),
+            Expr::Dict(dict) => {
+                // `{**value}` reads every key of the value.
+                for item in dict.iter().filter(|item| item.key.is_none()) {
+                    let values = self.value_calls(&item.value);
+                    self.add_whole_read(values, None);
+                }
+                walk_expr(self, expr);
+            }
             Expr::Compare(compare) => {
                 // A read of a string key by a membership test (`"name" in value`).
                 let operands = compare.operands.iter();
@@ -548,6 +583,7 @@ impl<'a> Walker<'_, '_> {
         {
             self.add_key(first);
         }
+        self.add_whole_reads(call);
         self.add_string_call(call);
         let (base, attributes) = match &*call.func {
             Expr::Attribute(func) => attribute_chain(func),
@@ -620,6 +656,11 @@ impl<'a> Walker<'_, '_> {
         let Some(first) = generators.first() else {
             return;
         };
+        // A comprehension over a mapping reads its keys.
+        for generator in generators {
+            let values = self.value_calls(&generator.iter);
+            self.add_whole_read(values, None);
+        }
         self.visit_expr(&first.iter);
         let (scope, binder) = (self.scope, self.binder);
         let mut inner = Scope::new(ScopeKind::Function);
@@ -1127,6 +1168,101 @@ impl<'a> Walker<'_, '_> {
             })
             .collect();
         self.references.string_calls.insert((called, arguments));
+    }
+
+    /// Add the values that a call reads as a whole, `f(**value)` and `value.items()`, and those that
+    /// it passes to a function, which reads them whole if it is from outside the project.
+    fn add_whole_reads(&mut self, call: &ast::ExprCall) {
+        if let Expr::Attribute(func) = &*call.func
+            && WHOLE_METHODS.contains(&func.attr.as_str())
+            && call.arguments.is_empty()
+        {
+            let values = self.value_calls(&func.value);
+            self.add_whole_read(values, None);
+        }
+        for keyword in &call.arguments.keywords {
+            if keyword.arg.is_none() {
+                let values = self.value_calls(&keyword.value);
+                self.add_whole_read(values, None);
+            }
+        }
+        if !self.may_be_external(&call.func) {
+            return;
+        }
+        // The name of the function is found only for a call that passes such a value, as few do.
+        let mut reader: Option<Option<String>> = None;
+        let passed = call.arguments.args.iter().chain(
+            call.arguments
+                .keywords
+                .iter()
+                .filter(|keyword| keyword.arg.is_some())
+                .map(|keyword| &keyword.value),
+        );
+        for argument in passed {
+            let values = self.value_calls(argument);
+            if values.is_empty() {
+                continue;
+            }
+            if let Some(reader) =
+                reader.get_or_insert_with(|| dotted_name(&call.func, Unwrap::Call))
+            {
+                self.add_whole_read(values, Some(reader));
+            }
+        }
+    }
+
+    /// Check whether a function, as it is called, can be from outside the project: a builtin, or a name
+    /// that the scope or the module imports, or an attribute of one.
+    fn may_be_external(&self, func: &Expr) -> bool {
+        let mut root = func;
+        while let Expr::Attribute(attribute) = root {
+            root = &attribute.value;
+        }
+        let Expr::Name(name) = root else {
+            return false;
+        };
+        let name = name.id.as_str();
+        // The builtins of any version of Python.
+        is_python_builtin(name, u8::MAX, false)
+            || [self.scope, 0]
+                .iter()
+                .any(|&scope| self.scopes[scope].imports.contains_key(name))
+    }
+
+    /// Add a read of a value as a whole, given by the dotted names of what it is the result of calling.
+    fn add_whole_read(&mut self, values: Vec<String>, reader: Option<&str>) {
+        let owner = self.owner;
+        self.references
+            .whole_reads
+            .extend(values.into_iter().map(|value| WholeRead {
+                owner,
+                value,
+                reader: reader.map(str::to_string),
+            }));
+    }
+
+    /// Get the dotted names of what a value is the result of calling, as they are written, if it is a
+    /// call, or a local variable that is assigned one.
+    fn value_calls(&self, value: &Expr) -> Vec<String> {
+        match value {
+            Expr::Call(call) => dotted_name(&call.func, Unwrap::Call).into_iter().collect(),
+            Expr::Name(name) => self.variable_calls(name.id.as_str()),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Get the dotted names of what a local variable is assigned the result of calling, as they are
+    /// written: in the scope that it is read in, or the scopes that bind its names as well.
+    fn variable_calls(&self, name: &str) -> Vec<String> {
+        let mut scope = Some(self.scope);
+        while let Some(index) = scope {
+            let found = &self.scopes[index];
+            if found.bound.contains(name) {
+                return found.calls.get(name).cloned().unwrap_or_default();
+            }
+            scope = found.enclosing;
+        }
+        Vec::new()
     }
 
     /// Add a read of a key, if it is a string literal.

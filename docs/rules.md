@@ -23,7 +23,7 @@ A definition counts as used when something references it:
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | Function, class, variable  | Read in its module, imported from it, read as `module.name`, or listed in its `__all__`.                            |
 | Method, attribute          | Read through its class or a related one (`self.name`, `super().name`, `Class.name`), as `value.name` of any other object, matched by name, or read by its name in its class body. |
-| `TypedDict` field          | Read as a key anywhere in the project, matched by name: `value["name"]`, `value.get("name")` or `"name" in value`.  |
+| `TypedDict` field          | Read as a key anywhere in the project, matched by name: `value["name"]`, `value.get("name")` or `"name" in value`. Or a value of its TypedDict, made by a call or set to one, is read whole: `{**value}`, `f(**value)`, a loop, `value.items()`, or passed to a function from outside the project, such as `dict(value)` or `json.dumps(value)`. |
 | Enum member                | Read as `Color.RED`, or the enum is read whole: `Color(value)`, `list(Color)`, or as the type of a class attribute. |
 | Member of an external base | Named like a member of a base class from outside the project, such as `emit` in a subclass of `logging.Handler`.    |
 | `visit_*` method           | Always, in a subclass of `ast.NodeVisitor`, whose `visit` calls it by the name of the node.                         |
