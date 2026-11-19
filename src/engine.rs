@@ -190,12 +190,14 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             options.python.as_deref(),
         ))
     });
+    let has_source_contexts = selected_count < facts.len();
     import_siblings(
         &mut facts,
         &names,
         source_names.as_deref().unwrap_or(&names),
         &files_by_name,
         source_external.as_mut().unwrap_or(&mut external),
+        has_source_contexts,
     );
 
     let mut definitions = Vec::new();
@@ -985,6 +987,7 @@ fn import_siblings(
     source_names: &[ModuleName],
     files_by_name: &FxHashMap<String, Vec<usize>>,
     external: &mut ExternalModules,
+    has_source_contexts: bool,
 ) {
     // The names of the modules and packages of the project, with every package above a module.
     let known: FxHashSet<&str> = files_by_name
@@ -1025,7 +1028,7 @@ fn import_siblings(
         let Some(package) = package_of(file) else {
             continue;
         };
-        let mut siblings: Vec<String> = Vec::new();
+        let mut siblings = FxHashSet::default();
         qualify_sibling_imports(&mut facts[file], |module, level| {
             let module = module.filter(|_| level == 0)?;
             let top = module.split('.').next()?;
@@ -1036,10 +1039,19 @@ fn import_siblings(
                     .entry(top.to_string())
                     .or_insert_with(|| external.exists(top));
             is_sibling.then(|| {
-                siblings.push(sibling);
+                siblings.insert(sibling);
                 format!("{package}.{module}")
             })
         });
+        if has_source_contexts {
+            // The load records for plain imports also use the qualified sibling name.
+            for (_, module) in &mut facts[file].references.module_imports {
+                let top = module.split('.').next().unwrap_or_default();
+                if siblings.contains(&join(package, top)) {
+                    *module = Name::new(join(package, module));
+                }
+            }
+        }
         for sibling in siblings {
             for &imported in files_by_name.get(&sibling).into_iter().flatten() {
                 if package_of(imported).is_some() && seen.insert(imported) {
@@ -1311,6 +1323,14 @@ fn source_loads(project: &Project) -> FxHashMap<(usize, Owner), FxHashSet<usize>
     if project.selected_count == project.files.len() {
         return loads;
     }
+    let mut source_children: FxHashMap<&str, FxHashSet<&str>> = FxHashMap::default();
+    for name in &project.names[project.selected_count..] {
+        if let Some((parent, child)) = name.name.rsplit_once('.') {
+            source_children.entry(parent).or_default().insert(child);
+        }
+    }
+    let mut package_definitions: FxHashMap<usize, FxHashSet<&str>> = FxHashMap::default();
+    let mut star_children: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
     for (file, facts) in project.facts.iter().enumerate() {
         let mut add = |owner, module: &str| {
             for prefix in module
@@ -1334,42 +1354,115 @@ fn source_loads(project: &Project) -> FxHashMap<(usize, Owner), FxHashSet<usize>
                 continue;
             };
             add(import.owner, &module);
-            if import.name == "*" {
+            // The initializer and its prefixes were handled above. Only a synthetic child can
+            // add another load, so ordinary from-imports do not need to inspect package definitions.
+            let Some(children) = source_children.get(module.as_str()) else {
                 continue;
-            }
-            let child = join(&module, &import.name);
-            if project.files_by_name.contains_key(&child)
-                && !project
-                    .files_by_name
-                    .get(&module)
-                    .into_iter()
-                    .flatten()
-                    .any(|&package| {
-                        let facts = &project.facts[package];
-                        facts.lazy.contains_key(&import.name)
-                            || facts
-                                .references
-                                .bindings
-                                .get(&import.name)
-                                .is_some_and(|binding| {
-                                    binding.name.as_deref() != Some(import.name.as_str())
-                                        || project.names[package]
-                                            .resolve(binding.module.as_deref(), binding.level)
-                                            .as_deref()
-                                            != Some(module.as_str())
-                                })
-                            || project.file_definitions(package).iter().any(|definition| {
-                                definition.owner.is_none()
-                                    && definition.class.is_none()
-                                    && definition.name == import.name
-                            })
-                    })
+            };
+            let packages = project.files_by_name.get(&module).into_iter().flatten();
+            let mut shadows_child = |name: &str, include_stars| {
+                packages.clone().any(|&package| {
+                    let facts = &project.facts[package];
+                    facts.lazy.contains_key(name)
+                        || facts.references.bindings.get(name).is_some_and(|binding| {
+                            binding.name.as_deref() != Some(name)
+                                || project.names[package]
+                                    .resolve(binding.module.as_deref(), binding.level)
+                                    .as_deref()
+                                    != Some(module.as_str())
+                        })
+                        || module_defines_name(project, &mut package_definitions, package, name)
+                        || include_stars
+                            && star_imports_name(project, &mut package_definitions, package, name)
+                })
+            };
+            if import.name == "*" {
+                let exported = star_children.entry(module.clone()).or_insert_with(|| {
+                    packages
+                        .clone()
+                        .filter(|&&file| project.names[file].is_package)
+                        .flat_map(|&file| &project.facts[file].references.exported_names)
+                        .map(Name::as_str)
+                        .filter(|name| children.contains(name) && !shadows_child(name, true))
+                        .map(|name| join(&module, name))
+                        .collect()
+                });
+                for child in exported.iter() {
+                    add(import.owner, child);
+                }
+            } else if children.contains(import.name.as_str()) && !shadows_child(&import.name, false)
             {
-                add(import.owner, &child);
+                add(import.owner, &join(&module, &import.name));
             }
         }
     }
     loads
+}
+
+/// Check for a module-level definition without following imports.
+fn module_defines_name<'a>(
+    project: &'a Project,
+    definitions: &mut FxHashMap<usize, FxHashSet<&'a str>>,
+    file: usize,
+    name: &str,
+) -> bool {
+    definitions
+        .entry(file)
+        .or_insert_with(|| {
+            project
+                .file_definitions(file)
+                .iter()
+                .filter(|definition| definition.owner.is_none() && definition.class.is_none())
+                .map(|definition| definition.name.as_str())
+                .collect()
+        })
+        .contains(name)
+}
+
+/// A name supplied by a package's wildcard import already exists when its own star import is read.
+fn star_imports_name<'a>(
+    project: &'a Project,
+    definitions: &mut FxHashMap<usize, FxHashSet<&'a str>>,
+    package: usize,
+    name: &str,
+) -> bool {
+    let mut pending = vec![package];
+    let mut seen = FxHashSet::from_iter([package]);
+    while let Some(file) = pending.pop() {
+        let imports = &project.facts[file].references.imports;
+        for import in imports
+            .iter()
+            .filter(|import| import.owner.is_none() && import.name == "*")
+        {
+            let Some(module) = project.names[file].resolve(import.module.as_deref(), import.level)
+            else {
+                continue;
+            };
+            let Some(files) = project.files_by_name.get(&module) else {
+                // A wildcard import from outside the selected files may provide the name.
+                return true;
+            };
+            for &imported in files {
+                if !seen.insert(imported) {
+                    continue;
+                }
+                let references = &project.facts[imported].references;
+                if references.has_all {
+                    if references.exported_names.contains(name) {
+                        return true;
+                    }
+                } else if !name.starts_with('_') {
+                    if references.bindings.contains_key(name)
+                        || module_defines_name(project, definitions, imported, name)
+                    {
+                        return true;
+                    }
+                    pending.push(imported);
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Make the findings of a project.

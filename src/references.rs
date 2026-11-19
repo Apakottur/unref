@@ -132,10 +132,12 @@ pub(crate) struct References {
     pub whole_reads: FxHashSet<WholeRead>,
     /// The names that are imported from another module. A star import has the name `*`.
     pub imports: FxHashSet<Import>,
-    /// The written modules in plain import statements.
+    /// The modules in plain import statements.
     pub module_imports: Vec<(Owner, Name)>,
     /// Whether the module defines `__all__`.
     pub has_all: bool,
+    /// The literal names listed in the module's `__all__`.
+    pub exported_names: FxHashSet<Name>,
     /// The names that the module imports at its top level, each with what it stands for.
     pub bindings: FxHashMap<String, Binding>,
     /// The functions and classes that are local variables of a function, by their index in the
@@ -191,7 +193,18 @@ pub(crate) fn walk_module(
         owner: None,
         in_signature: false,
     };
-    walker.visit_body(&module.body);
+    for statement in &module.body {
+        let replaces_exports = match statement {
+            Stmt::Assign(assign) => assign.targets.iter().any(is_all),
+            Stmt::AnnAssign(assign) => assign.value.is_some() && is_all(&assign.target),
+            _ => false,
+        };
+        if replaces_exports {
+            // A straight-line assignment replaces the names that may load child modules.
+            walker.references.exported_names.clear();
+        }
+        walker.visit_stmt(statement);
+    }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
@@ -1054,9 +1067,11 @@ impl<'a> Walker<'_, '_> {
         if self.binder == 0 && targets.iter().any(is_all) {
             self.references.has_all = true;
             for name in string_literals(value) {
+                let name = Name::new(name);
+                self.references.exported_names.insert(name.clone());
                 self.references.reads.insert(Read {
                     owner: self.owner,
-                    root: name.into(),
+                    root: name,
                     attributes: Vec::new(),
                     reads_object: true,
                     called: None,

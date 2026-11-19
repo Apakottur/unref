@@ -167,6 +167,71 @@ def test_explicit_symlink_scan_loads_source_context_on_import(tmp_path: Path, mo
         assert result.stderr == ""
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("import impl\n", ""),
+        (
+            "def unused():\n    from impl import live\n    live()\n\ndef load():\n    import impl\n\nload()\n",
+            "pkg/runner.py",
+        ),
+    ],
+)
+def test_explicit_symlink_scan_loads_source_context_from_script(tmp_path: Path, source: str, expected: str) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").touch()
+    (pkg / "helper.py").write_text("def live(): return 7\n")
+    (pkg / "impl.py").write_text("from helper import live\nprint(live())\n")
+    (pkg / "runner.py").write_text(source + "\nif __name__ == '__main__': pass\n")
+    try:
+        (tmp_path / "alias.py").symlink_to("pkg/impl.py")
+    except OSError as error:
+        pytest.skip(f"Could not create a symlink: {error}")
+
+    result = run(["pkg/runner.py", "pkg/helper.py", "alias.py"], cwd=tmp_path)
+
+    assert result.exit_code == int(bool(expected))
+    assert result.stdout == (f"{Path(expected)}:1:5: unused-function 'unused'\n" if expected else "")
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("exports", "provider", "exit_code"),
+    [
+        ('__all__ = ["impl"]\n', None, 0),
+        ('__all__ = ["impl"]\nimpl = 0\n', None, 1),
+        ('__all__ = ["impl"]\n__all__ = []\n', None, 1),
+        ('from .provider import *\n__all__ = ["impl"]\n', "impl = 0\n", 1),
+        ('from .provider import *\n__all__ = ["impl"]\n', "other = 0\n", 0),
+        ("", None, 1),
+    ],
+)
+def test_explicit_symlink_scan_loads_exported_source_context(
+    tmp_path: Path, exports: str, provider: str | None, exit_code: int
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text(exports)
+    (pkg / "helper.py").write_text("def live(): return 7\n")
+    (pkg / "impl.py").write_text("from .helper import live\nprint(live())\n")
+    (tmp_path / "app.py").write_text("from pkg import *\n")
+    try:
+        (tmp_path / "alias.py").symlink_to("pkg/impl.py")
+    except OSError as error:
+        pytest.skip(f"Could not create a symlink: {error}")
+
+    paths = ["app.py", "pkg/__init__.py", "pkg/helper.py", "alias.py"]
+    if provider is not None:
+        (pkg / "provider.py").write_text(provider)
+        paths.append("pkg/provider.py")
+    result = run(paths, cwd=tmp_path)
+
+    assert result.exit_code == exit_code
+    assert result.stdout == (f"{Path('pkg/helper.py')}:1:5: unused-function 'live'\n" if exit_code else "")
+    assert result.stderr == ""
+
+
 def test_default_path(tmp_path: Path) -> None:
     # Without arguments and without a `pyproject.toml`, the current directory is checked.
     project = tmp_path / "project"
