@@ -4,6 +4,7 @@ use std::cell::OnceCell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
+use rayon::prelude::*;
 use regex::Regex;
 use ruff_python_ast::name::Name;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -255,8 +256,34 @@ impl Project {
 /// `super().name`, `Class.name` or `Class().name`, is matched in the classes that it can be in, and
 /// any other attribute of an object by name only.
 fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), Uses> {
+    // The imported names, and the objects that they read, are resolved on every core first, as that
+    // needs the project only.
+    let resolved: Vec<Vec<Option<ResolvedRead>>> = project
+        .facts
+        .par_iter()
+        .enumerate()
+        .map(|(file, file_facts)| {
+            let reads = file_facts.references.imported_reads.iter();
+            reads
+                .map(|read| {
+                    let resolved = resolve_import(
+                        &project.names[file],
+                        &read.binding,
+                        &read.attributes,
+                        &project.files_by_name,
+                    )?;
+                    let objects = if read.reads_object {
+                        imported_objects(&resolved, project)
+                    } else {
+                        FxHashSet::default()
+                    };
+                    Some((resolved, objects))
+                })
+                .collect()
+        })
+        .collect();
     let mut uses: FxHashMap<(usize, Owner), Uses> = FxHashMap::default();
-    for (file, file_facts) in project.facts.iter().enumerate() {
+    for (file, (file_facts, file_resolved)) in project.facts.iter().zip(resolved).enumerate() {
         let references = &file_facts.references;
         let module = &project.names[file].name;
         for read in &references.reads {
@@ -275,24 +302,15 @@ fn find_uses(project: &Project, classes: &Classes) -> FxHashMap<(usize, Owner), 
             }
         }
 
-        for read in &references.imported_reads {
+        for (read, resolved) in references.imported_reads.iter().zip(file_resolved) {
             let owner_uses = uses.entry((file, read.owner)).or_default();
-            let Some(resolved) = resolve_import(
-                &project.names[file],
-                &read.binding,
-                &read.attributes,
-                &project.files_by_name,
-            ) else {
+            let Some((resolved, objects)) = resolved else {
                 owner_uses
                     .attributes
                     .extend(read.attributes.iter().chain(&read.called).cloned());
                 continue;
             };
-            if read.reads_object {
-                owner_uses
-                    .objects
-                    .extend(imported_objects(&resolved, project));
-            }
+            owner_uses.objects.extend(objects);
             if let Some(called) = &read.called {
                 let written = resolved.0.join(".");
                 owner_uses.add_member(classes.read_from(&written, called), called);
@@ -643,6 +661,9 @@ fn is_unknown_class(
 /// and each shorter start of it that is a module of the project, shortest first, as its number of
 /// parts with its files.
 type Resolved = (Vec<Name>, Vec<(usize, Vec<usize>)>);
+
+/// An imported read that is resolved, with the objects of the modules of the project that it reads.
+type ResolvedRead = (Resolved, FxHashSet<(usize, Vec<Name>)>);
 
 /// Find the dotted name that an imported name, and the attributes read from it, stand for.
 ///
