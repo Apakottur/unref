@@ -81,6 +81,7 @@ rfind
 Rozantsev
 rsplit
 rustc
+rustup
 saleor
 sdist
 setdefault
