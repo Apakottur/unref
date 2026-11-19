@@ -46,7 +46,7 @@ type IgnoreFile = (PathBuf, Gitignore);
 ///
 /// Returns the Python files, sorted.
 pub(crate) fn discover(paths: &[PathBuf], options: &Config) -> Vec<PathBuf> {
-    discover_files(paths, options, |files, path, _| files.push(path))
+    discover_files(paths, options, |files, input, _| files.push(clean(input)))
 }
 
 /// Find the files to list and report explicit inputs that cannot be resolved.
@@ -56,7 +56,13 @@ pub(crate) fn discover_for_listing(
 ) -> (Vec<PathBuf>, Vec<Finding>) {
     let mut errors = Vec::new();
     let files = discover_files(paths, options, |_, path, error| {
-        errors.push(Finding::new(path, 1, 1, Rule::IoError, error.to_string()));
+        errors.push(Finding::new(
+            path.to_path_buf(),
+            1,
+            1,
+            Rule::IoError,
+            error.to_string(),
+        ));
     });
     errors.sort_by(|left, right| (&left.path, &left.name).cmp(&(&right.path, &right.name)));
     errors.dedup();
@@ -66,14 +72,15 @@ pub(crate) fn discover_for_listing(
 fn discover_files(
     paths: &[PathBuf],
     options: &Config,
-    mut invalid_input: impl FnMut(&mut Vec<PathBuf>, PathBuf, io::Error),
+    mut invalid_input: impl FnMut(&mut Vec<PathBuf>, &Path, io::Error),
 ) -> Vec<PathBuf> {
     let excluded = Exclude::new(&options.exclude, &options.root);
     let gitignore = options.respect_gitignore;
     let mut files = Vec::new();
-    for path in paths {
-        let path = clean(path);
-        let metadata = path.metadata();
+    for input in paths {
+        // Cleaning removes suffixes such as `/.` that require a directory during lookup.
+        let metadata = input.metadata();
+        let path = clean(input);
         let is_directory = metadata.as_ref().is_ok_and(std::fs::Metadata::is_dir);
         if options.force_exclude && is_given_excluded(&path, is_directory, &excluded, gitignore) {
             continue;
@@ -83,7 +90,7 @@ fn discover_files(
             // A file that is given directly is checked unless `force_exclude` is set, as with ruff and
             // ty.
             Ok(_) => files.push(path),
-            Err(error) => invalid_input(&mut files, path, error),
+            Err(error) => invalid_input(&mut files, input, error),
         }
     }
     files.sort();

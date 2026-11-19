@@ -152,6 +152,20 @@ def test_show_files_reports_missing_path(tmp_path: Path, flags: list[str], exit_
     assert len(result.stderr.splitlines()) == 1
 
 
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX path lookup")
+@pytest.mark.parametrize("suffix", ["/", "/."])
+def test_show_files_reports_file_given_as_directory(tmp_path: Path, suffix: str) -> None:
+    (tmp_path / "visible.py").touch()
+    invalid = f"visible.py{suffix}"
+
+    result = run(["--show-files", invalid, "visible.py"], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == "visible.py\n"
+    assert result.stderr.startswith(f"{invalid}:1:1: io-error ")
+    assert len(result.stderr.splitlines()) == 1
+
+
 def test_show_files_respects_force_exclude_for_missing_path(tmp_path: Path) -> None:
     result = run(["--show-files", "--force-exclude", "--exclude", "missing.py", "missing.py"], cwd=tmp_path)
 
