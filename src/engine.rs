@@ -116,17 +116,15 @@ struct Project {
 /// are those that nothing references.
 ///
 /// Returns a finding for each unused definition, for each problem with an ignore comment, and for each
-/// file that does not parse, sorted by file, line and column.
+/// file that does not parse or path that cannot be read, sorted by path, line and column.
 pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     let enabled: FxHashSet<Framework> = Framework::ALL
         .into_iter()
         .filter(|framework| options.frameworks.get(framework).copied().unwrap_or(true))
         .collect();
 
-    let discovered: Vec<Arc<Path>> = discover(paths, options)
-        .into_iter()
-        .map(Arc::from)
-        .collect();
+    let discovery = discover(paths, options);
+    let discovered: Vec<Arc<Path>> = discovery.files.into_iter().map(Arc::from).collect();
     let mut syntax_errors: FxHashMap<Arc<Path>, Finding> = FxHashMap::default();
     let mut files = Vec::new();
     let mut facts = Vec::new();
@@ -253,7 +251,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         .collect();
     let is_transitive = transitive_definitions(&project, &graph, &unused);
 
-    let findings = findings(
+    let mut findings = findings(
         &project,
         &discovered,
         &syntax_errors,
@@ -261,6 +259,12 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         &needed,
         &is_transitive,
     );
+    if !discovery.errors.is_empty() {
+        findings.extend(discovery.errors);
+        findings.sort_by(|left, right| {
+            (&left.path, left.line, left.column).cmp(&(&right.path, right.line, right.column))
+        });
+    }
 
     // The command exits after the check, and the system frees its memory at once, which is faster than
     // dropping the many small parts of these one by one, as clang does too. A caller that checks many
@@ -382,10 +386,20 @@ fn find_uses(
                     .extend(read.attributes.iter().chain(&read.called).cloned());
                 continue;
             };
-            if read.reads_object {
-                owner_uses
-                    .objects
-                    .extend(imported_objects(&resolved, project));
+            if read.reads_object || !read.attributes.is_empty() {
+                let objects = imported_objects(&resolved, project);
+                if !read.attributes.is_empty() {
+                    // An imported module can be reached through a re-export. Its attributes
+                    // are names of the original module, just as they are for a direct import.
+                    owner_uses.names.extend(
+                        objects
+                            .iter()
+                            .map(|(file, parts)| (*file, parts[0].clone())),
+                    );
+                }
+                if read.reads_object {
+                    owner_uses.objects.extend(objects);
+                }
             }
             if let Some(called) = &read.called {
                 owner_uses.add_member_of(classes, "", &resolved.0, called);
@@ -393,16 +407,7 @@ fn find_uses(
             if read.attributes.is_empty() {
                 continue;
             }
-            // An attribute of an imported name is resolved: `package.module.name` is `name` in
-            // `package.module`.
             let (parts, starts) = &resolved;
-            for (index, modules) in starts {
-                owner_uses.names.extend(
-                    modules
-                        .iter()
-                        .map(|&module| (module, parts[*index].clone())),
-                );
-            }
             // What follows the last name that a module of the project holds is read from an object.
             let first_of_object = starts
                 .iter()
