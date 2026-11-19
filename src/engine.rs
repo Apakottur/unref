@@ -325,10 +325,20 @@ fn find_uses(
                     .extend(read.attributes.iter().chain(&read.called).cloned());
                 continue;
             };
-            if read.reads_object {
-                owner_uses
-                    .objects
-                    .extend(imported_objects(&resolved, project));
+            if read.reads_object || !read.attributes.is_empty() {
+                let objects = imported_objects(&resolved, project);
+                if !read.attributes.is_empty() {
+                    // An imported module can be reached through a re-export. Its attributes
+                    // are names of the original module, just as they are for a direct import.
+                    owner_uses.names.extend(
+                        objects
+                            .iter()
+                            .map(|(file, parts)| (*file, parts[0].clone())),
+                    );
+                }
+                if read.reads_object {
+                    owner_uses.objects.extend(objects);
+                }
             }
             if let Some(called) = &read.called {
                 owner_uses.add_member_of(classes, "", &resolved.0, called);
@@ -336,16 +346,7 @@ fn find_uses(
             if read.attributes.is_empty() {
                 continue;
             }
-            // An attribute of an imported name is resolved: `package.module.name` is `name` in
-            // `package.module`.
             let (parts, starts) = &resolved;
-            for (index, modules) in starts {
-                owner_uses.names.extend(
-                    modules
-                        .iter()
-                        .map(|&module| (module, parts[*index].clone())),
-                );
-            }
             // What follows the last name that a module of the project holds is read from an object.
             let first_of_object = starts
                 .iter()
