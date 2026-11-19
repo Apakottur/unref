@@ -77,6 +77,8 @@ struct Project {
     names: Vec<ModuleName>,
     /// The files of each module name.
     files_by_name: FxHashMap<String, Vec<usize>>,
+    /// Dotted project modules named explicitly by imports, including their parent packages.
+    explicit_imports: FxHashSet<String>,
     /// The definitions of every file, in order.
     definitions: Vec<Definition>,
     /// The file of each definition.
@@ -130,6 +132,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     }
     let mut external = ExternalModules::new(search_path(&files, &names, options.python.as_deref()));
     import_siblings(&mut facts, &names, &files_by_name, &mut external);
+    let explicit_imports = explicit_module_imports(&facts, &names, &files_by_name);
 
     let mut definitions = Vec::new();
     let mut definition_files = Vec::new();
@@ -145,6 +148,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         facts,
         names,
         files_by_name,
+        explicit_imports,
         definitions,
         definition_files,
         first_definition,
@@ -345,12 +349,12 @@ fn find_uses(
                 }
             }
             if let Some(called) = &read.called {
-                owner_uses.add_member_of(classes, "", &resolved.0, called);
+                owner_uses.add_member_of(classes, "", &resolved.parts, called);
             }
             if read.attributes.is_empty() {
                 continue;
             }
-            let (parts, starts) = &resolved;
+            let Resolved { parts, starts, .. } = &resolved;
             // What follows the last name that a module of the project holds is read from an object.
             let first_of_object = starts
                 .iter()
@@ -786,7 +790,48 @@ fn is_unknown_class(
 /// The dotted name that an imported name and the attributes read from it stand for, as its parts,
 /// and each shorter start of it that is a module of the project, shortest first, as its number of
 /// parts with its files.
-type Resolved = (Vec<Name>, Vec<(usize, Vec<usize>)>);
+#[derive(Clone)]
+struct Resolved {
+    parts: Vec<Name>,
+    starts: Vec<(usize, Vec<usize>)>,
+    /// The number of components named directly by the module portion of the import.
+    module_parts: usize,
+}
+
+/// Find the project submodules an import names directly. A from-list name alone can instead refer
+/// to an attribute of the package.
+fn explicit_module_imports(
+    facts: &[FileFacts],
+    names: &[ModuleName],
+    files_by_name: &FxHashMap<String, Vec<usize>>,
+) -> FxHashSet<String> {
+    let mut explicit = FxHashSet::default();
+    let mut add = |module: &str| {
+        if module.contains('.') {
+            for prefix in module
+                .match_indices('.')
+                .skip(1)
+                .map(|(index, _)| &module[..index])
+                .chain([module])
+            {
+                if files_by_name.contains_key(prefix) && !explicit.contains(prefix) {
+                    explicit.insert(prefix.to_string());
+                }
+            }
+        }
+    };
+    for (facts, name) in facts.iter().zip(names) {
+        for module in &facts.references.module_imports {
+            add(module.as_str());
+        }
+        for import in &facts.references.imports {
+            if let Some(module) = name.resolve(import.module.as_deref(), import.level) {
+                add(&module);
+            }
+        }
+    }
+    explicit
+}
 
 /// Find the dotted name that an imported name, and the attributes read from it, stand for.
 ///
@@ -799,6 +844,7 @@ fn resolve_import(
 ) -> Option<Resolved> {
     let resolved = module.resolve(binding.module.as_deref(), binding.level)?;
     let mut parts: Vec<Name> = resolved.split('.').map(Name::new).collect();
+    let module_parts = parts.len();
     if let Some(name) = binding.name.as_ref().filter(|name| !name.is_empty()) {
         parts.push(Name::new(name));
     }
@@ -810,7 +856,51 @@ fn resolve_import(
                 .map(|files| (index, files.clone()))
         })
         .collect();
-    Some((parts, starts))
+    Some(Resolved {
+        parts,
+        starts,
+        module_parts,
+    })
+}
+
+/// Keep prefixes that an attribute lookup can reach. An explicit child import can replace the
+/// attribute set by its package initializer.
+fn import_starts<'a>(resolved: &'a Resolved, project: &Project) -> &'a [(usize, Vec<usize>)] {
+    let Resolved {
+        parts,
+        starts,
+        module_parts,
+    } = resolved;
+    for (parent_index, pair) in starts.windows(2).enumerate() {
+        let [(parent, packages), (child, _)] = pair else {
+            continue;
+        };
+        if child <= module_parts || *child != *parent + 1 {
+            continue;
+        }
+        let name = parts[*parent].as_str();
+        let child_path = &parts[..*child];
+        if packages.iter().all(|&file| {
+            project.names[file].is_package
+                && project.facts[file].references.bindings.contains_key(name)
+        }) {
+            let child_path = child_path.join(".");
+            if !project.explicit_imports.contains(&child_path)
+                && packages.iter().all(|&file| {
+                    let binding = &project.facts[file].references.bindings[name];
+                    project.names[file]
+                        .resolve(binding.module.as_deref(), binding.level)
+                        .is_some_and(|module| match &binding.name {
+                            Some(name) => join(&module, name) != child_path,
+                            None => module != child_path,
+                        })
+                })
+            {
+                return &starts[..=parent_index];
+            }
+        }
+    }
+    starts
 }
 
 /// Find the objects of the modules of the project that an imported name, and the attributes read from
@@ -823,11 +913,13 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
     // names of each other.
     let mut followed: FxHashSet<(usize, Name)> = FxHashSet::default();
     let mut pending = vec![resolved.clone()];
-    while let Some((parts, starts)) = pending.pop() {
+    while let Some(resolved) = pending.pop() {
+        let parts = &resolved.parts;
+        let starts = import_starts(&resolved, project);
         let Some((index, modules)) = starts.last() else {
             continue;
         };
-        for (start, start_modules) in &starts {
+        for (start, start_modules) in starts {
             found.extend(
                 start_modules
                     .iter()

@@ -60,6 +60,45 @@ def test_default_path(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("entry", "unused_module"),
+    [
+        pytest.param("from pkg.wrapper import source\nsource.value()\n", "pkg/wrapper/source.py", id="from-package"),
+        pytest.param(
+            "import pkg.wrapper as wrapper\nwrapper.source.value()\n", "pkg/wrapper/source.py", id="attribute"
+        ),
+        pytest.param("import pkg.wrapper.source as source\nsource.value()\n", "pkg/source.py", id="explicit-child"),
+        pytest.param(
+            "import pkg.wrapper.source\nfrom pkg.wrapper import source\nsource.value()\n",
+            "pkg/source.py",
+            id="explicit-child-then-from-package",
+        ),
+        pytest.param(
+            "from pkg.wrapper.source import value\nfrom pkg.wrapper import source\nvalue(), source.value()\n",
+            "pkg/source.py",
+            id="explicit-from-child",
+        ),
+    ],
+)
+def test_reexport_and_same_named_child(tmp_path: Path, entry: str, unused_module: str) -> None:
+    pkg = tmp_path / "pkg"
+    wrapper = pkg / "wrapper"
+    wrapper.mkdir(parents=True)
+    (pkg / "__init__.py").touch()
+    (pkg / "source.py").write_text("def value(): return 7\n")
+    (wrapper / "__init__.py").write_text("from .. import source\n")
+    (wrapper / "source.py").write_text("def value(): return 9\n")
+    (tmp_path / "entry.py").write_text("class Other:\n    def value(self): return -1\n\nOther()\n" + entry)
+
+    result = run(["--show-transitive", "."], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        f"entry.py:2:9: unused-method 'value'\n{Path(unused_module)}:1:5: unused-function 'value'\n"
+    )
+    assert result.stderr == ""
+
+
 @pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory permissions")
 @pytest.mark.parametrize(
     ("args", "exit_code"),
