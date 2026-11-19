@@ -96,6 +96,48 @@ def test_fully_qualified_import_keeps_script_directory(tmp_path: Path, script_im
     assert result.stderr == ""
 
 
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [
+        pytest.param(
+            {
+                "pkg/lib/worker.py": "from .helper import work\ndef execute(): return work()\n",
+                "pkg/lib/helper.py": "from tasks import live\ndef work(): return live()\n",
+                "pkg/tasks.py": "def live(): return 7\n",
+            },
+            "",
+            id="unique-relative-helper",
+        ),
+        pytest.param(
+            {
+                "pkg/lib.py": "from tasks import dormant\nprint(dormant())\n",
+                "pkg/lib/worker.py": "from tasks import live\ndef execute(): return live()\n",
+                "pkg/tasks.py": "def live(): return 7\ndef dormant(): return -1\n",
+            },
+            f"{Path('pkg/tasks.py')}:2:5: unused-function 'dormant'\n",
+            id="package-shadows-module-at-dotted-prefix",
+        ),
+    ],
+)
+def test_qualified_script_imports_load_the_resolved_module(
+    tmp_path: Path, files: dict[str, str], expected: str
+) -> None:
+    (tmp_path / "pkg/lib").mkdir(parents=True)
+    (tmp_path / "pkg/__init__.py").touch()
+    (tmp_path / "pkg/lib/__init__.py").touch()
+    (tmp_path / "pkg/run.py").write_text(
+        'from pkg.lib.worker import execute\nif __name__ == "__main__": print(execute())\n'
+    )
+    for name, contents in files.items():
+        (tmp_path / name).write_text(contents)
+
+    result = run(["."], cwd=tmp_path, env={"PYTHONPATH": str(tmp_path)})
+
+    assert result.stdout == expected
+    assert result.exit_code == int(bool(expected))
+    assert result.stderr == ""
+
+
 @pytest.mark.parametrize("case", ["dormant", "competing-module", "competing-function"])
 def test_qualified_import_does_not_assume_a_script_directory(tmp_path: Path, case: str) -> None:
     (tmp_path / "pkg/lib").mkdir(parents=True)

@@ -131,7 +131,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             .push(index);
     }
     let mut external = ExternalModules::new(search_path(&files, &names, options.python.as_deref()));
-    import_siblings(&mut facts, &names, &files_by_name, &mut external);
+    import_siblings(&mut facts, &files, &names, &files_by_name, &mut external);
 
     let mut definitions = Vec::new();
     let mut definition_files = Vec::new();
@@ -890,6 +890,7 @@ fn search_path(files: &[Arc<Path>], names: &[ModuleName], python: Option<&Path>)
 /// the module is imported rather than run.
 fn import_siblings(
     facts: &mut [FileFacts],
+    paths: &[Arc<Path>],
     names: &[ModuleName],
     files_by_name: &FxHashMap<String, Vec<usize>>,
     external: &mut ExternalModules,
@@ -934,6 +935,34 @@ fn import_siblings(
         .iter()
         .filter_map(|&file| package_of(file))
         .collect();
+    let import_files = |module: &str| {
+        let files = files_by_name.get(module).map_or(&[][..], Vec::as_slice);
+        // A package initializer takes precedence over a same-named module beside the package.
+        files.iter().copied().filter(|&file| {
+            names[file].is_package
+                || !files.iter().any(|&package| {
+                    names[package].is_package
+                        && paths[package].parent().and_then(Path::parent) == paths[file].parent()
+                })
+        })
+    };
+    let add_project_import = |project: &mut FxHashSet<usize>,
+                              possible: &mut FxHashSet<usize>,
+                              owner: Option<u32>,
+                              module: &str| {
+        // The modules imported by this path, including its package initializers.
+        for prefix in module
+            .match_indices('.')
+            .map(|(end, _)| &module[..end])
+            .chain([module])
+        {
+            let files = import_files(prefix);
+            if owner.is_none() {
+                project.extend(files.clone());
+            }
+            possible.extend(files);
+        }
+    };
     let mut project_imports = Vec::with_capacity(facts.len());
     let mut possible_imports = Vec::with_capacity(facts.len());
     let mut sibling_imports = Vec::with_capacity(facts.len());
@@ -956,17 +985,7 @@ fn import_siblings(
         let mut siblings = FxHashSet::default();
         for (owner, module) in modules {
             if known.contains(module) {
-                let prefixes = module
-                    .match_indices('.')
-                    .map(|(end, _)| &module[..end])
-                    .chain([module]);
-                for prefix in prefixes {
-                    let files = files_by_name.get(prefix).into_iter().flatten().copied();
-                    if owner.is_none() {
-                        project.extend(files.clone());
-                    }
-                    possible.extend(files);
-                }
+                add_project_import(&mut project, &mut possible, owner, module);
             } else if owner.is_none()
                 && let Some(package) = package
                 && let Some((_, sibling)) = qualify(Some(module), 0, package)
@@ -981,18 +1000,18 @@ fn import_siblings(
                 );
             }
         }
-        // Relative imports and from-list submodules can compete with an explicit import
-        // even when they do not supply a directory for the new rewrite.
+        // An explicit relative import also runs the target in the same script directory.
+        // A from-list name might instead be an attribute, so it only counts as a possible load.
         for import in &references.imports {
             let Some(module) = names[file].resolve(import.module.as_deref(), import.level) else {
                 continue;
             };
             if import.level != 0 {
-                possible.extend(files_by_name.get(&module).into_iter().flatten().copied());
+                add_project_import(&mut project, &mut possible, import.owner, &module);
             }
             if import.name != "*" {
                 let child = join(&module, &import.name);
-                possible.extend(files_by_name.get(&child).into_iter().flatten().copied());
+                possible.extend(import_files(&child));
             }
         }
         project_imports.push(project);
