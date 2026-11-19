@@ -997,6 +997,12 @@ fn import_siblings(
             .imports
             .iter()
             .map(|import| (import.module.as_deref(), import.level, import.owner))
+            .chain(
+                references
+                    .module_imports
+                    .iter()
+                    .map(|(owner, module)| (Some(module.as_str()), 0, *owner)),
+            )
             .chain(references.imported_reads.iter().map(|read| {
                 (
                     read.binding.module.as_deref(),

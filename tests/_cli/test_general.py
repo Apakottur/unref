@@ -87,6 +87,36 @@ def test_sibling_module_loaded_by_reachable_function(tmp_path: Path, entry: str,
     assert result.stdout == unused
 
 
+@pytest.mark.parametrize(
+    ("entry", "unused_loads"),
+    [
+        pytest.param("pass", True, id="both-loaders-dormant"),
+        pytest.param("load()", False, id="plain-import-reached"),
+    ],
+)
+def test_plain_sibling_import_loads_module(tmp_path: Path, entry: str, *, unused_loads: bool) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").touch()
+    (pkg / "tasks.py").write_text("def warmup(): return 9\n")
+    (pkg / "helpers.py").write_text("from tasks import warmup\nprint(warmup())\ndef ready(): pass\n")
+    (pkg / "run.py").write_text(
+        "def never():\n    from helpers import ready\n    ready()\n\n"
+        "def load():\n    import helpers\n\n"
+        f'if __name__ == "__main__":\n    {entry}\n'
+    )
+
+    result = run([], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    expected = f"{Path('pkg/run.py')}:1:5: unused-function 'never'\n"
+    if unused_loads:
+        expected += (
+            f"{Path('pkg/run.py')}:5:5: unused-function 'load'\n{Path('pkg/tasks.py')}:1:5: unused-function 'warmup'\n"
+        )
+    assert result.stdout == expected
+
+
 def test_gitignored_given_directory() -> None:
     # A directory that git ignores is still checked when it is given directly, as with ruff and ty.
     result = run(["main.py", "generated"], cwd=CASES_DIR / "gitignore")
