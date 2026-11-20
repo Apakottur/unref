@@ -34,7 +34,7 @@ repos:
       - id: ruff-check
       - id: ruff-format
   - repo: https://github.com/Apakottur/unref
-    rev: v0.3.1
+    rev: v0.3.2
     hooks:
       - id: unref
 ```
