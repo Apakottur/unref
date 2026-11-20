@@ -185,6 +185,7 @@ pub(crate) fn walk_module(
         positions,
         definitions: Vec::new(),
         references: References::default(),
+        scoped_whole_reads: Vec::new(),
         scopes: vec![Scope {
             defined_in: Some(0),
             ..Scope::new(ScopeKind::Module)
@@ -195,6 +196,7 @@ pub(crate) fn walk_module(
         in_signature: false,
     };
     walker.visit_body(&module.body);
+    walker.resolve_whole_read_constructors();
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
@@ -252,6 +254,8 @@ struct Scope {
     calls: FxHashMap<String, Vec<String>>,
     /// The scope a comprehension reads from when a name is not local to it.
     comprehension_parent: Option<usize>,
+    /// The enclosing scope of a function or lambda, excluding class namespaces.
+    function_parent: Option<usize>,
     /// In a class body, the nearest scope around it that is not a class body. The functions,
     /// lambdas and comprehensions in a class body do not see its names, and neither does a class
     /// body nested in it, so their reads go on to this scope, as do the reads of the class body that
@@ -278,6 +282,7 @@ impl Scope {
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
             comprehension_parent: None,
+            function_parent: None,
             outer: None,
         }
     }
@@ -302,6 +307,8 @@ struct Walker<'p, 'a> {
     definitions: Vec<Definition>,
     /// The references to add to.
     references: References,
+    /// Whole reads whose constructor must be checked once all local names are known.
+    scoped_whole_reads: Vec<(usize, WholeRead)>,
     /// Every scope that was entered, by its index.
     scopes: Vec<Scope>,
     /// The scope that the node being walked is in.
@@ -868,8 +875,10 @@ impl<'a> Walker<'_, '_> {
 
         // The body runs only when the function is called. A lambda has no name, and is part of the code
         // that it is in.
-        let (body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
+        let (mut body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
         let (scope, owner) = (self.scope, self.owner);
+        let target = self.reads_target(scope);
+        body_scope.function_parent = Some(target);
         self.scope = self.push_scope(body_scope);
         self.binder = self.scope;
         match body {
@@ -907,8 +916,10 @@ impl<'a> Walker<'_, '_> {
                 .extend(calls.map(|(name, called)| ((line, name), called)));
         }
         local_names.extend(names.iter().map(|name| (*name).to_string()));
-        let target = self.reads_target(scope);
         self.close(inner, &local_names, Target::Scope(target));
+        self.scopes[inner]
+            .bound
+            .extend(names.into_iter().map(str::to_string));
     }
 
     /// Add a class, and what it defines and refers to.
@@ -1335,7 +1346,7 @@ impl<'a> Walker<'_, '_> {
     }
 
     /// Add a read of a value as a whole, given by the dotted names of what it is the result of calling.
-    fn add_whole_read(&mut self, values: Vec<String>, reader: Option<&str>) {
+    fn add_whole_read(&mut self, values: Vec<(usize, String)>, reader: Option<&str>) {
         let owner = self.owner;
         let local_import = reader
             .filter(|_| self.scope != 0)
@@ -1344,21 +1355,29 @@ impl<'a> Walker<'_, '_> {
                 self.scopes[self.scope].imports.get(root)
             })
             .cloned();
-        self.references
-            .whole_reads
-            .extend(values.into_iter().map(|value| WholeRead {
+        for (scope, value) in values {
+            let read = WholeRead {
                 owner,
                 value,
                 reader: reader.map(str::to_string),
                 local_import: local_import.clone(),
-            }));
+            };
+            if scope == 0 {
+                self.references.whole_reads.insert(read);
+            } else {
+                self.scoped_whole_reads.push((scope, read));
+            }
+        }
     }
 
     /// Get the dotted names of what a value is the result of calling, as they are written, if it is a
     /// call, or a local variable that is assigned one.
-    fn value_calls(&self, value: &Expr) -> Vec<String> {
+    fn value_calls(&self, value: &Expr) -> Vec<(usize, String)> {
         match value {
-            Expr::Call(call) => dotted_name(&call.func, Unwrap::Call).into_iter().collect(),
+            Expr::Call(call) => dotted_name(&call.func, Unwrap::Call)
+                .into_iter()
+                .map(|name| (self.scope, name))
+                .collect(),
             Expr::Name(name) => self.variable_calls(name.id.as_str()),
             _ => Vec::new(),
         }
@@ -1366,16 +1385,57 @@ impl<'a> Walker<'_, '_> {
 
     /// Get the dotted names of what a local variable is assigned the result of calling, as they are
     /// written, looking through enclosing scopes for a comprehension.
-    fn variable_calls(&self, name: &str) -> Vec<String> {
+    fn variable_calls(&self, name: &str) -> Vec<(usize, String)> {
         let mut scope = Some(self.scope);
         while let Some(index) = scope {
             let found = &self.scopes[index];
             if found.bound.contains(name) {
-                return found.calls.get(name).cloned().unwrap_or_default();
+                return found
+                    .calls
+                    .get(name)
+                    .into_iter()
+                    .flatten()
+                    .map(|name| (index, name.clone()))
+                    .collect();
             }
             scope = found.comprehension_parent;
         }
         Vec::new()
+    }
+
+    /// A locally shadowed root cannot name the module-level constructor or module being resolved.
+    fn resolve_whole_read_constructors(&mut self) {
+        for (scope, read) in std::mem::take(&mut self.scoped_whole_reads) {
+            let root = read.value.split('.').next().unwrap_or(&read.value);
+            if !self.shadows_constructor(scope, root) {
+                self.references.whole_reads.insert(read);
+            }
+        }
+    }
+
+    fn shadows_constructor(&self, mut index: usize, name: &str) -> bool {
+        while index != 0 {
+            let scope = &self.scopes[index];
+            if scope.global_names.contains(name) {
+                return false;
+            }
+            if scope.kind != ScopeKind::Class
+                && !scope.nonlocal_names.contains(name)
+                && scope.bound.contains(name)
+            {
+                // A repeated import of the same name still resolves to the module's binding.
+                return scope
+                    .imports
+                    .get(name)
+                    .is_none_or(|binding| self.scopes[0].imports.get(name) != Some(binding));
+            }
+            index = scope
+                .comprehension_parent
+                .or(scope.function_parent)
+                .or(scope.outer)
+                .unwrap_or(0);
+        }
+        false
     }
 
     /// Add a read of a key, if it is a string literal.
