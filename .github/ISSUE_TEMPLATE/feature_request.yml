@@ -42,5 +42,7 @@ body:
     attributes:
       label: Contributing
       options:
-        - label: I have read [CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md).
+        - label: >-
+            I have read the
+            [issue guidelines](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md#issues-and-pull-requests).
           required: true
