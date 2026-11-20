@@ -2,9 +2,9 @@
 """
 Set the version of unref in the files that name it.
 
-Run with `uv run --only-group dev scripts/set_version.py [VERSION] [--package]`, with a version such as `1.2.3`, or
-without one for the latest release on PyPI. The pre-commit examples of the docs and the benchmark name a release. With
-`--package`, the version of the package in `Cargo.toml` is set as well, as the release workflow does from its tag.
+Run with `uv run --only-group dev scripts/set_version.py [VERSION]`, with a version such as `1.2.3`, or without one
+for the latest release on PyPI. The pre-commit examples of the docs and the benchmark name a release, and the package
+has its version, so that a build from source names the release that it follows.
 """
 
 import re
@@ -20,8 +20,9 @@ _RELEASES = {
     "README.md": r"(repo: https://github\.com/Apakottur/unref\s+rev: v)[0-9.]+",
     "docs/usage.md": r"(repo: https://github\.com/Apakottur/unref\s+rev: v)[0-9.]+",
     "scripts/benchmark.py": r"(\"unref==)[0-9.]+",
+    "Cargo.toml": r'(?m)(^version = ")[^"]*',
+    "Cargo.lock": r'(name = "unref"\nversion = ")[^"]*',
 }
-_PACKAGE = {"Cargo.toml": r'(?m)(^version = ")[^"]*'}
 
 app = typer.Typer(add_completion=False)
 
@@ -48,13 +49,10 @@ def _set(path: str, pattern: str, version: str) -> None:
 @app.command()
 def main(
     version: Annotated[str | None, typer.Argument(help="The version, by default the latest release on PyPI.")] = None,
-    *,
-    package: Annotated[bool, typer.Option(help="Also set the version of the package.")] = False,
 ) -> None:
-    """Set the version of unref in the docs and the benchmark, and with `--package` in the package."""
+    """Set the version of unref in the docs, the benchmark and the package."""
     version = version or _latest_version()
-    files = _RELEASES | _PACKAGE if package else _RELEASES
-    for path, pattern in files.items():
+    for path, pattern in _RELEASES.items():
         _set(path, pattern, version)
     print(f"Set the version to {version}.")
 
