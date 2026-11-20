@@ -349,6 +349,13 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 None,
                 false,
             ),
+            Stmt::Expr(expr) => {
+                // `__all__.extend([...])` and `__all__.append("...")` add to `__all__`.
+                if let Some(names) = all_call_names(&expr.value) {
+                    self.add_all_names(names);
+                }
+                walk_stmt(self, stmt);
+            }
             Stmt::For(loop_) => {
                 // A loop over a mapping reads its keys.
                 let values = self.value_calls(&loop_.iter);
@@ -1015,6 +1022,24 @@ impl<'a> Walker<'_, '_> {
         self.bind_imports(bindings);
     }
 
+    /// Add the names listed in `__all__`. Only the `__all__` of the module, at its top level or
+    /// declared `global`, is its public interface.
+    fn add_all_names(&mut self, names: Vec<String>) {
+        if self.binder != 0 && !self.scopes[self.binder].global_names.contains("__all__") {
+            return;
+        }
+        self.references.has_all = true;
+        for name in names {
+            self.references.reads.insert(Read {
+                owner: self.owner,
+                root: name.into(),
+                attributes: Vec::new(),
+                reads_object: true,
+                called: None,
+            });
+        }
+    }
+
     /// Add the variables and attributes that an assignment defines, the names that an assignment to
     /// `__all__` lists, and what the assignment refers to.
     fn visit_assign(
@@ -1053,18 +1078,8 @@ impl<'a> Walker<'_, '_> {
                 );
             }
         }
-        // Only the `__all__` of the module is its public interface.
-        if self.binder == 0 && targets.iter().any(is_all) {
-            self.references.has_all = true;
-            for name in string_literals(value) {
-                self.references.reads.insert(Read {
-                    owner: self.owner,
-                    root: name.into(),
-                    attributes: Vec::new(),
-                    reads_object: true,
-                    called: None,
-                });
-            }
+        if targets.iter().any(is_all) {
+            self.add_all_names(string_literals(value));
         }
         // The value is evaluated before the targets are bound, so in a class body, `size = size + 1`
         // reads the name around the class.
@@ -1619,6 +1634,28 @@ fn typing_name(name: &str) -> Option<&str> {
 /// Check whether an assignment target is the `__all__` variable.
 fn is_all(target: &Expr) -> bool {
     matches!(target, Expr::Name(name) if name.id.as_str() == "__all__")
+}
+
+/// Get the string literals that `__all__.extend([...])` or `__all__.append("...")` adds to
+/// `__all__`, or None if the expression is not such a call.
+fn all_call_names(expr: &Expr) -> Option<Vec<String>> {
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    let Expr::Attribute(attribute) = &*call.func else {
+        return None;
+    };
+    if !is_all(&attribute.value) || !call.arguments.keywords.is_empty() {
+        return None;
+    }
+    let [argument] = &*call.arguments.args else {
+        return None;
+    };
+    match (attribute.attr.as_str(), argument) {
+        ("extend", argument) => Some(string_literals(Some(argument))),
+        ("append", Expr::StringLiteral(literal)) => Some(vec![literal.value.to_str().to_string()]),
+        _ => None,
+    }
 }
 
 /// Get the string literals of a list or tuple literal. Anything else, such as a computed list, has
