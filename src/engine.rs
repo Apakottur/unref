@@ -500,21 +500,16 @@ impl<'a> Classes<'a> {
         let mut ids = FxHashMap::default();
         let mut definitions = Vec::new();
         let mut by_dotted: FxHashMap<String, Vec<ClassId>> = FxHashMap::default();
-        for (definition_id, (file, definition)) in project
-            .definition_files
-            .iter()
-            .zip(&project.definitions)
-            .enumerate()
-        {
+        for (definition_id, file, definition) in project.definitions_by_file() {
             if definition.kind == Kind::Class {
-                let key = (*file, definition.qualified_name());
+                let key = (file, definition.qualified_name());
                 if ids.contains_key(&key) {
                     continue;
                 }
                 let id = keys.len();
                 ids.insert(key.clone(), id);
                 definitions.push(definition_id);
-                let dotted = join(&project.names[*file].name, &key.1);
+                let dotted = join(&project.names[file].name, &key.1);
                 by_dotted.entry(dotted).or_default().push(id);
                 keys.push(key);
             }
@@ -523,18 +518,18 @@ impl<'a> Classes<'a> {
         let mut metaclasses = Vec::new();
         let mut protocols = vec![false; keys.len()];
         let mut unknown_bases = vec![false; keys.len()];
-        for (file, definition) in project.definition_files.iter().zip(&project.definitions) {
+        for (_, file, definition) in project.definitions_by_file() {
             if definition.kind != Kind::Class {
                 continue;
             }
             // The loop above gave an id to every class.
             let name = definition.qualified_name();
-            let id = ids[&(*file, name.clone())];
+            let id = ids[&(file, name.clone())];
             unknown_bases[id] |= definition.other_bases;
             for base in &definition.bases {
-                let names = hierarchy.resolve_in(*file, &name, base);
+                let names = hierarchy.resolve_in(file, &name, base);
                 protocols[id] |= PROTOCOLS.iter().any(|protocol| names.contains(*protocol));
-                unknown_bases[id] |= is_unknown_class(project, &by_dotted, *file, base, &names);
+                unknown_bases[id] |= is_unknown_class(project, &by_dotted, file, base, &names);
             }
         }
         for (file, name) in &keys {
@@ -572,15 +567,10 @@ impl<'a> Classes<'a> {
         let mut by_member: FxHashMap<String, FxHashMap<ClassId, Vec<DefinitionId>>> =
             FxHashMap::default();
         let mut loose: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
-        for (id, (file, definition)) in project
-            .definition_files
-            .iter()
-            .zip(&project.definitions)
-            .enumerate()
-        {
+        for (id, file, definition) in project.definitions_by_file() {
             if let Some(class_name) = &definition.class
                 && !fields.contains(&id)
-                && let Some(&class) = ids.get(&(*file, class_name.clone()))
+                && let Some(&class) = ids.get(&(file, class_name.clone()))
             {
                 by_member
                     .entry(definition.name.clone())
@@ -720,8 +710,7 @@ impl<'a> Classes<'a> {
             if !found.is_empty()
                 && definition.decorators.iter().any(|decorator| {
                     self.hierarchy
-                        .resolve(file, decorator)
-                        .contains(ABSTRACT_METHOD)
+                        .resolves_to(file, decorator, &[ABSTRACT_METHOD])
                 })
             {
                 implementations.insert(id, found);
