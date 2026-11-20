@@ -28,6 +28,15 @@ pub(crate) struct Binding {
     pub module: Option<String>,
     pub level: u32,
     pub name: Option<String>,
+    /// The position of a direct import in a package initializer.
+    pub initializer_offset: Option<TextSize>,
+}
+
+/// An import in the direct body of a package initializer, with its full written module.
+#[derive(Debug)]
+pub(crate) struct InitializerImport {
+    pub binding: Binding,
+    pub alias: Option<Name>,
 }
 
 /// The code that a reference or a definition is in: the line of the name of the function that it is
@@ -134,6 +143,8 @@ pub(crate) struct References {
     pub imports: FxHashSet<Import>,
     /// The written modules in plain import statements.
     pub module_imports: Vec<Name>,
+    /// Direct imports of a package initializer, in execution order.
+    pub initializer_imports: Vec<InitializerImport>,
     /// Whether the module defines `__all__`.
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
@@ -190,8 +201,16 @@ pub(crate) fn walk_module(
         binder: 0,
         owner: None,
         in_signature: false,
+        initializer_import: false,
     };
-    walker.visit_body(&module.body);
+    if path.file_name().is_some_and(|name| name == "__init__.py") {
+        for statement in &module.body {
+            walker.initializer_import = matches!(statement, Stmt::Import(_) | Stmt::ImportFrom(_));
+            walker.visit_stmt(statement);
+        }
+    } else {
+        walker.visit_body(&module.body);
+    }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
@@ -313,6 +332,8 @@ struct Walker<'p, 'a> {
     owner: Owner,
     /// Whether the node is in the annotation of a parameter or the return of a function.
     in_signature: bool,
+    /// Whether the statement is an import in the direct body of a package initializer.
+    initializer_import: bool,
 }
 
 impl<'a> Visitor<'a> for Walker<'_, '_> {
@@ -967,32 +988,31 @@ impl<'a> Walker<'_, '_> {
 
     /// Bind the names that an `import` statement imports.
     fn visit_import(&mut self, import: &ast::StmtImport) {
-        self.references
-            .module_imports
-            .extend(import.names.iter().map(|alias| alias.name.id.clone()));
-        let bindings = import.names.iter().map(|alias| match &alias.asname {
-            // `import package.module` binds `package`.
-            None => {
-                let package = alias.name.split('.').next().unwrap_or_default().to_string();
-                (
-                    package.clone(),
-                    Binding {
-                        module: Some(package),
-                        level: 0,
-                        name: None,
-                    },
-                )
+        let mut bindings = FxHashMap::default();
+        for alias in &import.names {
+            self.references.module_imports.push(alias.name.id.clone());
+            let mut binding = Binding {
+                module: Some(alias.name.to_string()),
+                level: 0,
+                name: None,
+                initializer_offset: self.initializer_import.then(|| alias.start()),
+            };
+            if self.initializer_import {
+                self.references.initializer_imports.push(InitializerImport {
+                    binding: binding.clone(),
+                    alias: alias.asname.as_ref().map(|name| name.id.clone()),
+                });
             }
-            Some(asname) => (
-                asname.to_string(),
-                Binding {
-                    module: Some(alias.name.to_string()),
-                    level: 0,
-                    name: None,
-                },
-            ),
-        });
-        let bindings = bindings.collect();
+            let name = if let Some(asname) = &alias.asname {
+                asname.to_string()
+            } else {
+                // `import package.module` binds `package`.
+                let package = alias.name.split('.').next().unwrap_or_default().to_string();
+                binding.module = Some(package.clone());
+                package
+            };
+            bindings.insert(name, binding);
+        }
         self.bind_imports(bindings);
     }
 
@@ -1008,14 +1028,19 @@ impl<'a> Walker<'_, '_> {
                 name: alias.name.to_string(),
             });
             let bound = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
-            bindings.insert(
-                bound,
-                Binding {
-                    module: module.clone(),
-                    level: import.level,
-                    name: Some(alias.name.to_string()),
-                },
-            );
+            let binding = Binding {
+                module: module.clone(),
+                level: import.level,
+                name: Some(alias.name.to_string()),
+                initializer_offset: self.initializer_import.then(|| alias.start()),
+            };
+            if self.initializer_import {
+                self.references.initializer_imports.push(InitializerImport {
+                    binding: binding.clone(),
+                    alias: alias.asname.as_ref().map(|name| name.id.clone()),
+                });
+            }
+            bindings.insert(bound, binding);
         }
         self.bind_imports(bindings);
     }

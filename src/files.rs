@@ -228,6 +228,7 @@ fn lazy_imports(
                 module: import.module.clone(),
                 level: import.level,
                 name: Some(import.name.clone()),
+                initializer_offset: None,
             });
         }
     }

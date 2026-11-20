@@ -60,6 +60,17 @@ def test_default_path(tmp_path: Path) -> None:
     )
 
 
+@pytest.fixture
+def reexport_package(tmp_path: Path) -> Path:
+    pkg = tmp_path / "pkg"
+    wrapper = pkg / "wrapper"
+    wrapper.mkdir(parents=True)
+    (pkg / "__init__.py").touch()
+    (pkg / "source.py").write_text("def value(): return 7\n")
+    (wrapper / "source.py").write_text("def value(): return 9\n")
+    return wrapper
+
+
 @pytest.mark.parametrize(
     ("entry", "unused_module"),
     [
@@ -80,14 +91,8 @@ def test_default_path(tmp_path: Path) -> None:
         ),
     ],
 )
-def test_reexport_and_same_named_child(tmp_path: Path, entry: str, unused_module: str) -> None:
-    pkg = tmp_path / "pkg"
-    wrapper = pkg / "wrapper"
-    wrapper.mkdir(parents=True)
-    (pkg / "__init__.py").touch()
-    (pkg / "source.py").write_text("def value(): return 7\n")
-    (wrapper / "__init__.py").write_text("from .. import source\n")
-    (wrapper / "source.py").write_text("def value(): return 9\n")
+def test_reexport_and_same_named_child(tmp_path: Path, reexport_package: Path, entry: str, unused_module: str) -> None:
+    (reexport_package / "__init__.py").write_text("from .. import source\n")
     (tmp_path / "entry.py").write_text("class Other:\n    def value(self): return -1\n\nOther()\n" + entry)
 
     result = run(["--show-transitive", "."], cwd=tmp_path)
@@ -96,6 +101,85 @@ def test_reexport_and_same_named_child(tmp_path: Path, entry: str, unused_module
     assert result.stdout == (
         f"entry.py:2:9: unused-method 'value'\n{Path(unused_module)}:1:5: unused-function 'value'\n"
     )
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("initializer", "entry", "unused_module"),
+    [
+        pytest.param(
+            "from . import source as child\nfrom .. import source\n",
+            "from pkg.wrapper import child\nchild.value()\n",
+            "pkg/source.py",
+            id="child-alias-before-reexport",
+        ),
+        pytest.param(
+            "from .source import value as child_value\nfrom .. import source\n",
+            "from pkg.wrapper import child_value, source\nchild_value(), source.value()\n",
+            None,
+            id="child-loaded-before-reexport",
+        ),
+        pytest.param(
+            "from .. import source\nfrom .source import value as child_value\n",
+            "from pkg.wrapper import child_value, source\nchild_value(), source.value()\n",
+            "pkg/source.py",
+            id="child-first-loaded-after-reexport",
+        ),
+        pytest.param(
+            "from . import source\nfrom .. import source\n",
+            "from pkg.wrapper import source\nsource.value()\n",
+            "pkg/wrapper/source.py",
+            id="child-imported-by-name-before-reexport",
+        ),
+        pytest.param(
+            "from . import source as child\nfrom .. import source\nchild.value()\n",
+            "from pkg.wrapper import source\nsource.value()\n",
+            None,
+            id="child-alias-read-in-initializer",
+        ),
+        pytest.param(
+            "if True:\n    from .. import source\nfrom . import source as exported\n",
+            "from pkg.wrapper import exported\nexported.value()\n",
+            "pkg/wrapper/source.py",
+            id="child-name-bound-by-conditional-reexport",
+        ),
+    ],
+)
+def test_package_initializer_child_imports(
+    tmp_path: Path, reexport_package: Path, initializer: str, entry: str, unused_module: str | None
+) -> None:
+    (reexport_package / "__init__.py").write_text(initializer)
+    (tmp_path / "entry.py").write_text(entry)
+
+    result = run(["--show-transitive", "."], cwd=tmp_path)
+
+    assert result.exit_code == (0 if unused_module is None else 1)
+    assert result.stdout == ("" if unused_module is None else f"{Path(unused_module)}:1:5: unused-function 'value'\n")
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize("explicit", [False, True], ids=["dormant", "explicit"])
+def test_reexport_and_same_named_namespace_child(tmp_path: Path, *, explicit: bool) -> None:
+    pkg = tmp_path / "pkg"
+    original = pkg / "original"
+    wrapper = pkg / "wrapper"
+    original.mkdir(parents=True)
+    (wrapper / "source").mkdir(parents=True)
+    (pkg / "__init__.py").touch()
+    (original / "__init__.py").write_text("from . import helpers\n")
+    (original / "helpers.py").write_text("def value(): return 7\n")
+    (wrapper / "__init__.py").write_text("from .. import original as source\n")
+    (wrapper / "source" / "helpers.py").write_text("def value(): return 9\n")
+    entry = "from pkg.wrapper import source\nsource.helpers.value()\n"
+    if explicit:
+        entry = "import pkg.wrapper.source.helpers\n" + entry
+    (tmp_path / "entry.py").write_text(entry)
+
+    result = run(["--show-transitive", "."], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    unused = "pkg/original/helpers.py" if explicit else "pkg/wrapper/source/helpers.py"
+    assert result.stdout == f"{Path(unused)}:1:5: unused-function 'value'\n"
     assert result.stderr == ""
 
 
