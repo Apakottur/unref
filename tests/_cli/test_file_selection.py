@@ -229,3 +229,24 @@ def test_force_exclude_without_respect_gitignore(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert result.stdout == _files("scratch_one.py")
+
+
+def test_exclude_through_links(tmp_path: Path) -> None:
+    # A linked file is excluded by where it leads, and a file in a linked directory by where it is in the
+    # directory that the link leads to.
+    project = tmp_path / "project"
+    (project / "generated").mkdir(parents=True)
+    (project / "generated" / "impl.py").write_text("")
+    (project / "src").mkdir()
+    (project / "src" / "kept.py").write_text("")
+    write_config(project, '[tool.unref]\nexclude = ["generated/impl.py"]\n', "pyproject.toml")
+    try:
+        (project / "api.py").symlink_to("generated/impl.py")
+        (tmp_path / "linked").symlink_to("project")
+    except OSError:
+        pytest.skip("the file system does not support links")
+
+    result = run(["--show-files", "."], cwd=tmp_path / "linked")
+
+    assert result.exit_code == 0
+    assert result.stdout == _files("src/kept.py")
