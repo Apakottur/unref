@@ -330,8 +330,10 @@ fn find_uses(
                     .extend(read.attributes.iter().chain(&read.called).cloned());
                 continue;
             };
+            let mut object_parts = usize::MAX;
             if read.reads_object || !read.attributes.is_empty() {
-                let objects = imported_objects(&resolved, project);
+                let (objects, terminal_parts) = imported_objects(&resolved, project);
+                object_parts = terminal_parts;
                 if !read.attributes.is_empty() {
                     // An imported module can be reached through a re-export. Its attributes
                     // are names of the original module, just as they are for a direct import.
@@ -356,7 +358,10 @@ fn find_uses(
             let first_of_object = starts
                 .iter()
                 .map(|(index, _)| index + 1)
-                .chain([parts.len() - read.attributes.len()])
+                .chain([
+                    parts.len() - read.attributes.len(),
+                    parts.len().saturating_sub(object_parts),
+                ])
                 .max()
                 .unwrap_or(0);
             for index in first_of_object..parts.len() {
@@ -822,15 +827,21 @@ fn resolve_import(
 /// Find the objects of the modules of the project that an imported name, and the attributes read from
 /// it, stand for, through the modules that import the name in turn.
 ///
-/// Returns each object with its module, and its name in the module followed by the attributes.
-fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize, Vec<Name>)> {
+/// Returns each object with its module and attributes, and the longest suffix after the
+/// module-level name among all terminal paths. Attributes consumed by every path belong to modules.
+fn imported_objects(
+    resolved: &Resolved,
+    project: &Project,
+) -> (FxHashSet<(usize, Vec<Name>)>, usize) {
     let mut found = FxHashSet::default();
+    let mut object_parts = 0;
     // Each binding that is followed is followed once, which ends a cycle of modules that import the
     // names of each other.
     let mut followed: FxHashSet<(usize, Name)> = FxHashSet::default();
     let mut pending = vec![resolved.clone()];
     while let Some((parts, starts)) = pending.pop() {
         let Some((index, modules)) = starts.last() else {
+            object_parts = object_parts.max(parts.len());
             continue;
         };
         for (start, start_modules) in &starts {
@@ -854,10 +865,12 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
                 )
             {
                 pending.push(next);
+            } else {
+                object_parts = object_parts.max(parts.len() - index - 1);
             }
         }
     }
-    found
+    (found, object_parts)
 }
 
 /// Get the directories that a module from outside the project is looked for in.
