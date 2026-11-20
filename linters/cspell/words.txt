@@ -17,6 +17,7 @@ commitish
 conftest
 contextlib
 cpython
+cspc
 dataclass
 dataclasses
 deadcode

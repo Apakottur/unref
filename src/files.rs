@@ -21,6 +21,17 @@ static CODING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[ \t\x0c]*#.*?coding[:=][ \t]*([-\w.]+)").expect("valid pattern")
 });
 
+/// The characters for bytes 0x80 through 0xFF in Python's CP437 codec. Lower bytes are ASCII.
+const CP437_HIGH: [char; 128] = [
+    'Ç', 'ü', 'é', 'â', 'ä', 'à', 'å', 'ç', 'ê', 'ë', 'è', 'ï', 'î', 'ì', 'Ä', 'Å', 'É', 'æ', 'Æ',
+    'ô', 'ö', 'ò', 'û', 'ù', 'ÿ', 'Ö', 'Ü', '¢', '£', '¥', '₧', 'ƒ', 'á', 'í', 'ó', 'ú', 'ñ', 'Ñ',
+    'ª', 'º', '¿', '⌐', '¬', '½', '¼', '¡', '«', '»', '░', '▒', '▓', '│', '┤', '╡', '╢', '╖', '╕',
+    '╣', '║', '╗', '╝', '╜', '╛', '┐', '└', '┴', '┬', '├', '─', '┼', '╞', '╟', '╚', '╔', '╩', '╦',
+    '╠', '═', '╬', '╧', '╨', '╤', '╥', '╙', '╘', '╒', '╓', '╫', '╪', '┘', '┌', '█', '▄', '▌', '▐',
+    '▀', 'α', 'ß', 'Γ', 'π', 'Σ', 'σ', 'µ', 'τ', 'Φ', 'Θ', 'Ω', 'δ', '∞', 'φ', 'ε', '∩', '≡', '±',
+    '≥', '≤', '⌠', '⌡', '÷', '≈', '°', '∙', '·', '√', 'ⁿ', '²', '■', '\u{a0}',
+];
+
 /// What a Python file defines and refers to.
 #[derive(Debug)]
 pub(crate) struct FileFacts {
@@ -45,23 +56,18 @@ pub(crate) fn analyze_files(paths: &[Arc<Path>]) -> Vec<Result<FileFacts, Findin
     paths.par_iter().map(analyze_file).collect()
 }
 
-/// Find what a Python file defines and refers to, or a finding if it cannot be read or does not parse.
+/// Find what a Python file defines and refers to, or report a read, decoding or parse error.
 pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
-    let syntax_error = |line: u32, column: u32, name: String| {
-        Finding::new(path.to_path_buf(), line, column, Rule::InvalidSyntax, name)
-    };
-    // A file that cannot be read, such as a given path that does not exist, has its own code, as
-    // ruff's `io-error`. A file that is read but cannot be decoded is a syntax error, as in Python.
-    let bytes = std::fs::read(path).map_err(|error| Finding {
-        code: Rule::IoError,
-        ..syntax_error(1, 1, error.to_string())
-    })?;
+    let finding =
+        |line, column, rule, message| Finding::new(path.to_path_buf(), line, column, rule, message);
+    let bytes =
+        std::fs::read(path).map_err(|error| finding(1, 1, Rule::IoError, error.to_string()))?;
     let text = decode_source(&bytes)
-        .map_err(|error| syntax_error(error.line, error.column, error.message))?;
+        .map_err(|error| finding(error.line, error.column, error.rule, error.message))?;
     let positions = SourcePositions::new(&text);
     let parsed = ruff_python_parser::parse_module(&text).map_err(|error| {
         let (line, column) = positions.line_column(error.location.start());
-        syntax_error(line, column, error.error.to_string())
+        finding(line, column, Rule::InvalidSyntax, error.error.to_string())
     })?;
 
     let (definitions, references) = walk_module(path, parsed.syntax(), &positions);
@@ -106,6 +112,7 @@ fn is_script(module: &ModModule) -> bool {
 pub(crate) struct DecodeError {
     pub line: u32,
     pub column: u32,
+    rule: Rule,
     pub message: String,
 }
 
@@ -116,9 +123,10 @@ pub(crate) fn decode_source(bytes: &[u8]) -> Result<String, DecodeError> {
         Some(rest) => (true, rest),
         None => (false, bytes),
     };
-    let error = |message: String| DecodeError {
+    let error = |rule, message| DecodeError {
         line: 1,
         column: 1,
+        rule,
         message,
     };
     let Some(declared) = declared_encoding(bytes) else {
@@ -127,13 +135,18 @@ pub(crate) fn decode_source(bytes: &[u8]) -> Result<String, DecodeError> {
     let name = declared.to_lowercase().replace('_', "-");
     let is_utf8 = name == "utf-8" || name.starts_with("utf-8-");
     if bom && !is_utf8 {
-        return Err(error(format!("encoding problem: {declared} with BOM")));
+        return Err(error(
+            Rule::InvalidSyntax,
+            format!("encoding problem: {declared} with BOM"),
+        ));
     }
     // Python takes `latin-1-unix` and the like as Latin-1.
     let is_latin1 = ["latin-1", "iso-8859-1", "iso-latin-1"]
         .iter()
         .any(|latin1| name == *latin1 || name.starts_with(&format!("{latin1}-")))
         || ["latin1", "iso8859-1", "l1"].contains(&name.as_str());
+    // Python ignores surrounding dashes and underscores when looking up these codec names.
+    let is_cp437 = ["cp437", "437", "ibm437", "cspc8codepage437"].contains(&name.trim_matches('-'));
     match name.as_str() {
         _ if is_utf8 => utf8(bytes),
         "utf8" => utf8(bytes),
@@ -143,18 +156,31 @@ pub(crate) fn decode_source(bytes: &[u8]) -> Result<String, DecodeError> {
         // ASCII is strict, where WHATWG takes it as Windows-1252.
         "ascii" | "us-ascii" | "646" => match bytes.iter().position(|byte| !byte.is_ascii()) {
             None => Ok(bytes.iter().map(|&byte| char::from(byte)).collect()),
-            Some(_) => Err(error(format!(
-                "(unicode error) '{declared}' codec can't decode the source"
-            ))),
+            Some(_) => Err(error(
+                Rule::InvalidSyntax,
+                format!("(unicode error) '{declared}' codec can't decode the source"),
+            )),
         },
+        _ if is_cp437 => Ok(bytes
+            .iter()
+            .map(|&byte| match byte {
+                0..=0x7F => char::from(byte),
+                _ => CP437_HIGH[usize::from(byte - 0x80)],
+            })
+            .collect()),
         _ => {
-            let encoding = encoding_rs::Encoding::for_label(name.as_bytes())
-                .ok_or_else(|| error(format!("unknown encoding: {declared}")))?;
+            let encoding = encoding_rs::Encoding::for_label(name.as_bytes()).ok_or_else(|| {
+                error(
+                    Rule::UnsupportedEncoding,
+                    format!("unsupported encoding: {declared}"),
+                )
+            })?;
             let (text, _, had_errors) = encoding.decode(bytes);
             if had_errors {
-                return Err(error(format!(
-                    "(unicode error) '{declared}' codec can't decode the source"
-                )));
+                return Err(error(
+                    Rule::InvalidSyntax,
+                    format!("(unicode error) '{declared}' codec can't decode the source"),
+                ));
             }
             Ok(text.into_owned())
         }
@@ -186,6 +212,7 @@ fn utf8(bytes: &[u8]) -> Result<String, DecodeError> {
         DecodeError {
             line: to_u32(before.matches('\n').count() + 1),
             column: to_u32(before[line_start..].chars().count() + 1),
+            rule: Rule::InvalidSyntax,
             message: format!(
                 "(unicode error) 'utf-8' codec can't decode byte {:#04x}",
                 bytes[position]

@@ -12,7 +12,8 @@
 | `unused-ignore-comment`       | An ignore comment, or a code of one, that ignores nothing.            |
 | `invalid-ignore-comment`      | An ignore comment that names no code, or that does not parse.         |
 | `ignore-comment-unknown-rule` | A code of an ignore comment that unref does not know.                 |
-| `invalid-syntax`              | A file that does not parse. It is skipped, the rest is still checked. |
+| `invalid-syntax`              | A file with invalid Python syntax or source bytes that are invalid for its encoding. The file is skipped. |
+| `unsupported-encoding`        | A file that declares an encoding for which unref has no decoder. The file is skipped. |
 | `io-error`                    | A file or directory that cannot be read, such as a given path that does not exist. |
 
 Unused imports and local variables are left to [Ruff](https://docs.astral.sh/ruff/).

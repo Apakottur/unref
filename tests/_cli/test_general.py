@@ -144,24 +144,37 @@ def test_syntax_error() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("name", "error"),
-    [
-        ("undecodable.txt", "(unicode error) 'euc-jp' codec can't decode the source"),
-        ("unknown_encoding.txt", "unknown encoding: unknown-codec"),
-    ],
-)
-def test_undecodable(name: str, error: str) -> None:
-    # A file that does not decode with the encoding it declares, or that declares an encoding that does
-    # not exist, is a syntax error, as in Python. The files are not named `.py`, so that the cases, which
-    # read every `.py` file, do not read them, and a file that is given directly is checked whatever its
-    # name.
-    path = CASES_DIR / "syntax_error" / name
+@pytest.mark.parametrize("encoding", ["cp437", "437", "IBM437", "cspc8codepage437", "_CP437-"])
+def test_cp437_source(tmp_path: Path, encoding: str) -> None:
+    (tmp_path / "app.py").write_bytes(f"# coding: {encoding}\nfrom library import café\n\ncafé()\n".encode(encoding))
+    (tmp_path / "library.py").write_text("def café():\n    print('café')\n", encoding="utf-8")
+
+    result = run(["."], cwd=tmp_path)
+
+    assert result.exit_code == 0
+    assert result.output == ""
+
+
+def test_undecodable() -> None:
+    path = CASES_DIR / "syntax_error" / "undecodable.txt"
 
     result = run([str(path)])
 
     assert result.exit_code == 1
-    assert result.stdout == f"{path}:1:1: invalid-syntax '{error}'\n"
+    assert result.stdout == f"{path}:1:1: invalid-syntax '(unicode error) 'euc-jp' codec can't decode the source'\n"
+
+
+def test_unsupported_encoding(tmp_path: Path) -> None:
+    # Python can read this file, but unref has no CP850 decoder.
+    (tmp_path / "app.py").write_bytes("# coding: cp850\nprint('café')\n".encode("cp850"))
+
+    result = run(["app.py", str(CASES_DIR / "syntax_error" / "unknown_encoding.txt")], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        f"{CASES_DIR}/syntax_error/unknown_encoding.txt:1:1: unsupported-encoding 'unsupported encoding: unknown-codec'\n"
+        "app.py:1:1: unsupported-encoding 'unsupported encoding: cp850'\n"
+    )
 
 
 def test_linked_module(tmp_path: Path) -> None:
