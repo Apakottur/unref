@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use regex::bytes::Regex;
 use ruff_python_ast::{CmpOp, Expr, ModModule, Stmt};
 use ruff_python_parser::Parsed;
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::FxHashMap;
 
 use crate::definitions::Definition;
@@ -182,10 +182,11 @@ fn utf8(bytes: &[u8]) -> Result<String, DecodeError> {
         let position = error.utf8_error().valid_up_to();
         // The bytes before the invalid one are valid, so they are counted as characters.
         let before = String::from_utf8_lossy(&bytes[..position]);
-        let line_start = before.rfind('\n').map_or(0, |index| index + 1);
+        let (line, column) =
+            SourcePositions::new(&before).line_column(TextSize::new(to_u32(position)));
         DecodeError {
-            line: to_u32(before.matches('\n').count() + 1),
-            column: to_u32(before[line_start..].chars().count() + 1),
+            line,
+            column,
             message: format!(
                 "(unicode error) 'utf-8' codec can't decode byte {:#04x}",
                 bytes[position]

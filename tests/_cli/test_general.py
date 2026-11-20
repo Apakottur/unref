@@ -164,6 +164,16 @@ def test_undecodable(name: str, error: str) -> None:
     assert result.stdout == f"{path}:1:1: invalid-syntax '{error}'\n"
 
 
+@pytest.mark.parametrize("newline", [b"\r", b"\r\n", b"\n"], ids=["cr", "crlf", "lf"])
+def test_invalid_utf8_position(tmp_path: Path, newline: bytes) -> None:
+    (tmp_path / "app.py").write_bytes(newline.join((b"# header", b"print('caf\xc3\xa9\x82')", b"")))
+
+    result = run(["app.py"], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.output == "app.py:2:12: invalid-syntax '(unicode error) 'utf-8' codec can't decode byte 0x82'\n"
+
+
 def test_linked_module(tmp_path: Path) -> None:
     # A link to a file is imported by its own name. What is used through it is used in the file that it
     # links to as well, since they are one source.
