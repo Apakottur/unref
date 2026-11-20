@@ -54,6 +54,13 @@ impl Discovery {
             error.to_string(),
         ));
     }
+
+    fn record_invalid_file_type(&mut self, path: &Path) {
+        self.record_error(
+            path,
+            &io::Error::new(io::ErrorKind::InvalidInput, "not a regular file"),
+        );
+    }
 }
 
 /// Find the Python files of a project.
@@ -87,6 +94,7 @@ fn discover_files(paths: &[PathBuf], options: &Config, validate_explicit: bool) 
         }
         match metadata {
             Ok(_) if is_directory => walk(&path, &excluded, gitignore, &mut discovery),
+            Ok(metadata) if !metadata.is_file() => discovery.record_invalid_file_type(input),
             Err(error) if validate_explicit => discovery.record_error(input, &error),
             // A file that is given directly is checked unless `force_exclude` is set, as with ruff and
             // ty. A normal check reports failures when it tries to read the file.
@@ -334,7 +342,9 @@ fn walk_directory(
             }
         };
         // A link to a directory is not walked into, as with Python's `os.walk`.
-        let is_directory = kind.is_dir() || (kind.is_symlink() && path.is_dir());
+        let link_target = kind.is_symlink().then(|| path.metadata().ok()).flatten();
+        let is_directory =
+            kind.is_dir() || link_target.as_ref().is_some_and(std::fs::Metadata::is_dir);
         let selected = |is_directory| {
             // Only a link needs resolving: any other entry is a name in the resolved directory.
             let absolute = if kind.is_symlink() {
@@ -354,7 +364,14 @@ fn walk_directory(
             }
         } else if entry.file_name().to_string_lossy().ends_with(".py") && selected(false).is_some()
         {
-            discovery.files.push(path);
+            // A failed link lookup is left to the same read error handling as before.
+            if kind.is_file()
+                || (kind.is_symlink() && link_target.is_none_or(|target| target.is_file()))
+            {
+                discovery.files.push(path);
+            } else {
+                discovery.record_invalid_file_type(&path);
+            }
         }
     }
     for (child, absolute) in directories {

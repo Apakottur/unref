@@ -3,6 +3,7 @@ The options that select the files to check: `--exclude`, `--extend-exclude`, `--
 `--respect-gitignore` and `--show-files`.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,27 @@ def test_show_files_given_paths() -> None:
 
     assert result.exit_code == 0
     assert result.stdout == _files("pkg/generated/module.py", "single.py")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX named pipes")
+@pytest.mark.parametrize("paths", [["source.py", "pipe.py", "alias.py"], ["."]], ids=["explicit", "walked"])
+@pytest.mark.parametrize("show_files", [False, True])
+def test_named_pipe_is_not_a_source(tmp_path: Path, paths: list[str], *, show_files: bool) -> None:
+    (tmp_path / "source.py").write_text("def unused(): pass\n")
+    os.mkfifo(tmp_path / "pipe.py")
+    (tmp_path / "alias.py").symlink_to("pipe.py")
+    args = ["--show-files", *paths] if show_files else paths
+
+    result = run(args, cwd=tmp_path, timeout=5)
+
+    assert result.exit_code == 1
+    diagnostics = "alias.py:1:1: io-error 'not a regular file'\npipe.py:1:1: io-error 'not a regular file'\n"
+    if show_files:
+        assert result.stdout == _files("source.py")
+        assert result.stderr == diagnostics
+    else:
+        assert result.stdout == diagnostics + "source.py:1:5: unused-function 'unused'\n"
+        assert result.stderr == ""
 
 
 def test_show_files_missing_path() -> None:

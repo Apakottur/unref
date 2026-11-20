@@ -55,6 +55,7 @@ metaclass
 metaclasses
 metafunc
 mimalloc
+mkfifo
 mkdocstrings
 modifyitems
 musllinux

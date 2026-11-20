@@ -45,6 +45,7 @@ def run(
     env: Mapping[str, str | None] | None = None,
     cwd: Path | None = None,
     binary: Path = UNREF,
+    timeout: float | None = None,
 ) -> Result:
     """
     Run the command.
@@ -54,9 +55,10 @@ def run(
         env: Environment variables to set for the run, or to remove with None.
         cwd: The directory to run it in, or None for the current directory.
         binary: The executable of the command, which is the one that the tests run by default.
+        timeout: The maximum time to wait for the command, in seconds.
 
     Returns:
         What the run gives.
     """
-    result = shpyx.run([binary, *args], env=env, exec_dir=cwd, verify_return_code=False)
+    result = shpyx.run([binary, *args], env=env, exec_dir=cwd, verify_return_code=False, timeout=timeout)
     return Result(exit_code=result.return_code, stdout=result.stdout, stderr=result.stderr)
