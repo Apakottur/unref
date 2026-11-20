@@ -169,12 +169,13 @@ pub(crate) fn decode_source(bytes: &[u8]) -> Result<String, DecodeError> {
             })
             .collect()),
         _ => {
-            let encoding = encoding_rs::Encoding::for_label(name.as_bytes()).ok_or_else(|| {
-                error(
-                    Rule::UnsupportedEncoding,
-                    format!("unsupported encoding: {declared}"),
-                )
-            })?;
+            let encoding = encoding_rs::Encoding::for_label_no_replacement(name.as_bytes())
+                .ok_or_else(|| {
+                    error(
+                        Rule::UnsupportedEncoding,
+                        format!("unsupported encoding: {declared}"),
+                    )
+                })?;
             let (text, _, had_errors) = encoding.decode(bytes);
             if had_errors {
                 return Err(error(
@@ -189,13 +190,17 @@ pub(crate) fn decode_source(bytes: &[u8]) -> Result<String, DecodeError> {
 
 /// The encoding that a module declares on one of its first two lines, if it declares one.
 fn declared_encoding(bytes: &[u8]) -> Option<String> {
-    let mut lines = bytes.split(|&byte| byte == b'\n');
+    let mut lines = bytes.split(|&byte| matches!(byte, b'\r' | b'\n'));
     let first = lines.next().unwrap_or_default();
     let mut declared = CODING.captures(first);
     // The declaration can be on the second line only if the first line is a comment or blank.
     if declared.is_none() {
         let trimmed = first.trim_ascii_start();
         if trimmed.is_empty() || trimmed.starts_with(b"#") {
+            // CRLF is one physical line ending, but the split yields an empty slice between them.
+            if bytes[first.len()..].starts_with(b"\r\n") {
+                lines.next();
+            }
             declared = lines.next().and_then(|second| CODING.captures(second));
         }
     }

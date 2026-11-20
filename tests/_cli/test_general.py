@@ -155,6 +155,27 @@ def test_cp437_source(tmp_path: Path, encoding: str) -> None:
     assert result.output == ""
 
 
+@pytest.mark.parametrize("newline", ["\r", "\r\n"], ids=["cr", "crlf"])
+def test_cp437_second_line_declaration(tmp_path: Path, newline: str) -> None:
+    source = newline.join(("", "# coding: cp437", "print('café')", ""))
+    (tmp_path / "app.py").write_bytes(source.encode("cp437"))
+
+    result = run(["."], cwd=tmp_path)
+
+    assert result.exit_code == 0
+    assert result.output == ""
+
+
+def test_cp437_third_line_declaration_with_cr(tmp_path: Path) -> None:
+    source = "# first\r# second\r# coding: cp437\rprint('café')\r"
+    (tmp_path / "app.py").write_bytes(source.encode("cp437"))
+
+    result = run(["."], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert ": invalid-syntax '(unicode error) 'utf-8' codec can't decode byte 0x82'\n" in result.stdout
+
+
 def test_undecodable() -> None:
     path = CASES_DIR / "syntax_error" / "undecodable.txt"
 
@@ -164,16 +185,17 @@ def test_undecodable() -> None:
     assert result.stdout == f"{path}:1:1: invalid-syntax '(unicode error) 'euc-jp' codec can't decode the source'\n"
 
 
-def test_unsupported_encoding(tmp_path: Path) -> None:
-    # Python can read this file, but unref has no CP850 decoder.
-    (tmp_path / "app.py").write_bytes("# coding: cp850\nprint('café')\n".encode("cp850"))
+@pytest.mark.parametrize(("encoding", "message"), [("cp850", "café"), ("iso-2022-kr", "한글"), ("hz-gb-2312", "中文")])
+def test_unsupported_encoding(tmp_path: Path, encoding: str, message: str) -> None:
+    # Python can read these files using codecs that unref does not implement.
+    (tmp_path / "app.py").write_bytes(f"# coding: {encoding}\nprint('{message}')\n".encode(encoding))
 
     result = run(["app.py", str(CASES_DIR / "syntax_error" / "unknown_encoding.txt")], cwd=tmp_path)
 
     assert result.exit_code == 1
     assert result.stdout == (
         f"{CASES_DIR}/syntax_error/unknown_encoding.txt:1:1: unsupported-encoding 'unsupported encoding: unknown-codec'\n"
-        "app.py:1:1: unsupported-encoding 'unsupported encoding: cp850'\n"
+        f"app.py:1:1: unsupported-encoding 'unsupported encoding: {encoding}'\n"
     )
 
 
