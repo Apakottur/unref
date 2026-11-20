@@ -41,12 +41,21 @@ pub(crate) struct FileFacts {
 /// Find what each Python file defines and refers to, or a finding for a file that does not parse.
 ///
 /// Each file is analyzed on its own, in the thread pool that the call runs in.
-pub(crate) fn analyze_files(paths: &[Arc<Path>]) -> Vec<Result<FileFacts, Finding>> {
-    paths.par_iter().map(analyze_file).collect()
+pub(crate) fn analyze_files(
+    paths: &[Arc<Path>],
+    shadowed_typing: &[&str],
+) -> Vec<Result<FileFacts, Finding>> {
+    paths
+        .par_iter()
+        .map(|path| analyze_file(path, shadowed_typing))
+        .collect()
 }
 
 /// Find what a Python file defines and refers to, or a finding if it cannot be read or does not parse.
-pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
+pub(crate) fn analyze_file(
+    path: &Arc<Path>,
+    shadowed_typing: &[&str],
+) -> Result<FileFacts, Finding> {
     let syntax_error = |line: u32, column: u32, name: String| {
         Finding::new(path.to_path_buf(), line, column, Rule::InvalidSyntax, name)
     };
@@ -64,7 +73,7 @@ pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
         syntax_error(line, column, error.error.to_string())
     })?;
 
-    let (definitions, references) = walk_module(path, parsed.syntax(), &positions);
+    let (definitions, references) = walk_module(path, parsed.syntax(), &positions, shadowed_typing);
     let (ignore_comments, ignore_findings) =
         find_ignore_comments(&text, parsed.tokens(), &positions, path);
     let lazy = lazy_imports(&parsed, &positions, &references);

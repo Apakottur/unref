@@ -150,6 +150,18 @@ def test_reexport_and_same_named_child(tmp_path: Path, reexport_package: Path, e
             id="deleted-reexport",
         ),
         pytest.param(
+            "from .. import source\ndel (source,)\n",
+            "from pkg.wrapper import source\nsource.value()\n",
+            "pkg/source.py",
+            id="deleted-reexport-in-tuple",
+        ),
+        pytest.param(
+            "from .. import source\ntry:\n    del source\nexcept NameError:\n    pass\n",
+            "from pkg.wrapper import source\nsource.value()\n",
+            "pkg/source.py",
+            id="deleted-reexport-in-try",
+        ),
+        pytest.param(
             "from .. import source\ndel source\nfrom .. import source\n",
             "from pkg.wrapper import source\nsource.value()\n",
             "pkg/wrapper/source.py",
@@ -173,11 +185,29 @@ def test_reexport_and_same_named_child(tmp_path: Path, reexport_package: Path, e
         ),
         pytest.param(
             "from .. import source\n",
+            "import pkg.wrapper as wrapper\n"
+            "wrapper.source.value()\n"
+            "import pkg.wrapper.source\n"
+            "wrapper.source.value()\n",
+            None,
+            id="child-load-between-package-attribute-reads",
+        ),
+        pytest.param(
+            "from .. import source\n",
             "from typing import TYPE_CHECKING as checking\n"
             "if checking:\n    import pkg.wrapper.source\n"
             "from pkg.wrapper import source\nsource.value()\n",
             "pkg/wrapper/source.py",
             id="child-imported-for-type-checking",
+        ),
+        pytest.param(
+            "from .. import source\n",
+            "from typing import TYPE_CHECKING\n"
+            "if __name__ == 'other':\n    pass\n"
+            "elif TYPE_CHECKING:\n    import pkg.wrapper.source\n"
+            "from pkg.wrapper import source\nsource.value()\n",
+            "pkg/wrapper/source.py",
+            id="child-imported-for-type-checking-in-elif",
         ),
         pytest.param(
             "from .. import source\n",
@@ -216,12 +246,17 @@ def test_package_initializer_child_imports(
 
 
 @pytest.mark.parametrize("early", [True, False], ids=["before-reexport", "after-reexport"])
-def test_from_import_during_package_initialization(tmp_path: Path, reexport_package: Path, *, early: bool) -> None:
-    load_bridge = "from . import bridge\n"
+@pytest.mark.parametrize("peer", [False, True], ids=["child", "peer"])
+def test_from_import_during_package_initialization(
+    tmp_path: Path, reexport_package: Path, *, early: bool, peer: bool
+) -> None:
+    load_bridge = "from .. import bridge\n" if peer else "from . import bridge\n"
     export_source = "from .. import source\n"
     initializer = load_bridge + export_source if early else export_source + load_bridge
     (reexport_package / "__init__.py").write_text(initializer)
-    (reexport_package / "bridge.py").write_text("from . import source\nsource.value()\n")
+    bridge_path = reexport_package.parent if peer else reexport_package
+    bridge_import = "from .wrapper import source\n" if peer else "from . import source\n"
+    (bridge_path / "bridge.py").write_text(bridge_import + "source.value()\n")
     (tmp_path / "entry.py").write_text("import pkg.wrapper\nfrom pkg import source\nsource.value()\n")
 
     result = run(["--show-transitive", "."], cwd=tmp_path)
@@ -229,6 +264,22 @@ def test_from_import_during_package_initialization(tmp_path: Path, reexport_pack
     assert result.exit_code == (0 if early else 1)
     unused = Path("pkg/wrapper/source.py")
     assert result.stdout == ("" if early else f"{unused}:1:5: unused-function 'value'\n")
+    assert result.stderr == ""
+
+
+def test_child_load_guarded_by_project_typing_module(tmp_path: Path, reexport_package: Path) -> None:
+    (reexport_package / "__init__.py").write_text("from .. import source\n")
+    (tmp_path / "typing.py").write_text("TYPE_CHECKING = True\n")
+    (tmp_path / "entry.py").write_text(
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    import pkg.wrapper.source\n"
+        "from pkg.wrapper import source\nsource.value()\n"
+    )
+
+    result = run(["--show-transitive", "."], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == f"{Path('pkg/source.py')}:1:5: unused-function 'value'\n"
     assert result.stderr == ""
 
 

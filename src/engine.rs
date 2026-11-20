@@ -105,13 +105,34 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
 
     let discovery = discover(paths, options);
     let discovered: Vec<Arc<Path>> = discovery.files.into_iter().map(Arc::from).collect();
+    // Only a directory can have a namespace package under it. A hook of prek or pre-commit gives every
+    // file of the project, and checking each directory against each of them takes quadratic time.
+    let roots: Vec<PathBuf> = paths
+        .iter()
+        .map(|path| resolve(path))
+        .filter(|root| root.is_dir())
+        .collect();
+    let discovered_names: Vec<_> = discovered
+        .iter()
+        .map(|path| module_name(path, &roots))
+        .collect();
+    let shadowed_typing: Vec<_> = ["typing", "typing_extensions"]
+        .into_iter()
+        .filter(|module| discovered_names.iter().any(|name| name.name == *module))
+        .collect();
     let mut syntax_errors: FxHashMap<Arc<Path>, Finding> = FxHashMap::default();
     let mut files = Vec::new();
+    let mut names = Vec::new();
     let mut facts = Vec::new();
-    for (path, result) in discovered.iter().zip(analyze_files(&discovered)) {
+    for ((path, name), result) in discovered
+        .iter()
+        .zip(discovered_names)
+        .zip(analyze_files(&discovered, &shadowed_typing))
+    {
         match result {
             Ok(file_facts) => {
                 files.push(path.clone());
+                names.push(name);
                 facts.push(file_facts);
             }
             Err(finding) => {
@@ -120,14 +141,6 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         }
     }
 
-    // Only a directory can have a namespace package under it. A hook of prek or pre-commit gives every
-    // file of the project, and checking each directory against each of them takes quadratic time.
-    let roots: Vec<PathBuf> = paths
-        .iter()
-        .map(|path| resolve(path))
-        .filter(|root| root.is_dir())
-        .collect();
-    let names: Vec<ModuleName> = files.iter().map(|path| module_name(path, &roots)).collect();
     let mut files_by_name: FxHashMap<String, Vec<usize>> = FxHashMap::default();
     for (index, name) in names.iter().enumerate() {
         files_by_name
@@ -340,8 +353,13 @@ fn find_uses(
 
         for read in &references.imported_reads {
             let owner_uses = uses.entry((file, read.owner)).or_default();
-            let Some(resolved) = resolve_import(file, &read.binding, &read.attributes, project)
-            else {
+            let Some(resolved) = resolve_import(
+                file,
+                &read.binding,
+                &read.attributes,
+                read.offset.map(|offset| (file, offset)),
+                project,
+            ) else {
                 owner_uses
                     .attributes
                     .extend(read.attributes.iter().chain(&read.called).cloned());
@@ -802,6 +820,8 @@ struct Resolved {
     module_parts: usize,
     /// Where a direct from-import captured the package attribute.
     from_site: Option<(usize, ImportSite)>,
+    /// Where the caller evaluated the attributes of the imported object.
+    read_site: Option<(usize, TextSize)>,
 }
 
 /// Find the project submodules an import names directly. A from-list name alone can instead refer
@@ -849,13 +869,14 @@ fn explicit_module_imports(
 struct PackageImports {
     /// The final import bindings of child names. A deletion replaces the binding with None.
     exports: FxHashMap<String, Option<Binding>>,
-    /// The child modules loaded by the initializer. Importing them again uses the module cache.
+    /// The modules loaded by the initializer. Importing them again uses the module cache.
     loaded: FxHashSet<String>,
 }
 
 struct PackageLoader<'a> {
     package: usize,
     prefix: String,
+    follow_peers: bool,
     facts: &'a [FileFacts],
     names: &'a [ModuleName],
     files_by_name: &'a FxHashMap<String, Vec<usize>>,
@@ -915,20 +936,56 @@ impl PackageLoader<'_> {
         Some((value, load))
     }
 
-    /// Follow direct imports of known descendants while the package is still initializing.
+    /// A peer can import from the package before its initializer finishes.
+    fn can_visit(&self, module: &str) -> bool {
+        let package = &self.names[self.package].name;
+        (self.follow_peers || module.starts_with(&self.prefix))
+            && self.known.contains(module)
+            && package != module
+            && !package
+                .strip_prefix(module)
+                .is_some_and(|suffix| suffix.starts_with('.'))
+    }
+
+    /// A from-list can also start a module outside the package if its parent has no known binding.
+    fn implicit_child(&self, module: &str, binding: &Binding) -> Option<String> {
+        if !self.follow_peers || module == self.names[self.package].name {
+            return None;
+        }
+        let name = binding.name.as_deref()?;
+        let child = join(module, name);
+        if !self.can_visit(&child) {
+            return None;
+        }
+        self.files_by_name
+            .get(module)
+            .into_iter()
+            .flatten()
+            .all(|&file| {
+                let facts = &self.facts[file];
+                !facts.references.bindings.contains_key(name)
+                    && !facts.lazy.contains_key(name)
+                    && !facts.definitions.iter().any(|def| {
+                        def.name == name && def.class.is_none() && def.function.is_none()
+                    })
+            })
+            .then_some(child)
+    }
+
+    /// Follow direct imports of project modules while the package is still initializing.
     fn load(&mut self, module: String) {
-        if !module.starts_with(&self.prefix) || !self.known.contains(module.as_str()) {
+        if !self.can_visit(&module) {
             return;
         }
         let mut pending = vec![ChildLoad::Load(module)];
         while let Some(action) = pending.pop() {
             match action {
                 ChildLoad::Load(module) => {
-                    if self.imports.loaded.contains(&module) {
+                    if self.imports.loaded.contains(&module) || !self.can_visit(&module) {
                         continue;
                     }
                     if let Some((parent, _)) = module.rsplit_once('.')
-                        && parent.starts_with(&self.prefix)
+                        && self.can_visit(parent)
                         && !self.imports.loaded.contains(parent)
                     {
                         let parent = parent.to_string();
@@ -937,8 +994,9 @@ impl PackageLoader<'_> {
                         continue;
                     }
                     self.imports.loaded.insert(module.clone());
-                    let child = &module[self.prefix.len()..];
-                    if !child.contains('.') {
+                    if let Some(child) = module.strip_prefix(&self.prefix)
+                        && !child.contains('.')
+                    {
                         pending.push(ChildLoad::Publish(child.to_string(), module.clone()));
                     }
                     for &file in self.files_by_name.get(&module).into_iter().flatten() {
@@ -962,11 +1020,15 @@ impl PackageLoader<'_> {
                     else {
                         continue;
                     };
-                    if let Some((_, Some(load))) = self.capture(file, &module, binding) {
+                    let load = if let Some((_, load)) = self.capture(file, &module, binding) {
+                        load
+                    } else {
+                        self.implicit_child(&module, binding)
+                    };
+                    if let Some(load) = load {
                         pending.push(ChildLoad::Load(load));
-                    } else if module.starts_with(&self.prefix)
-                        && self.known.contains(module.as_str())
-                    {
+                    }
+                    if self.can_visit(&module) {
                         pending.push(ChildLoad::Load(module));
                     }
                 }
@@ -995,6 +1057,11 @@ fn package_imports(
         let mut loader = PackageLoader {
             package: file,
             prefix: format!("{}.", package.name),
+            follow_peers: file_facts
+                .references
+                .bindings
+                .keys()
+                .any(|name| known.contains(join(&package.name, name).as_str())),
             facts,
             names,
             files_by_name,
@@ -1040,6 +1107,9 @@ fn package_imports(
                 }
                 continue;
             }
+            if let Some(path) = loader.implicit_child(&module, binding) {
+                loader.load(path);
+            }
             if bound_child {
                 let module = if binding.name.is_none() && alias.is_none() {
                     imported
@@ -1082,6 +1152,7 @@ fn resolve_import(
     file: usize,
     binding: &Binding,
     attributes: &[Name],
+    read_site: Option<(usize, TextSize)>,
     project: &Project,
 ) -> Option<Resolved> {
     let binding = binding
@@ -1111,6 +1182,7 @@ fn resolve_import(
             .site
             .filter(|site| site.direct && binding.name.is_some())
             .map(|site| (file, site)),
+        read_site,
     })
 }
 
@@ -1122,6 +1194,7 @@ fn import_starts<'a>(resolved: &'a Resolved, project: &Project) -> &'a [(usize, 
         starts,
         module_parts,
         from_site,
+        read_site,
     } = resolved;
     for (parent_index, pair) in starts.windows(2).enumerate() {
         let [(parent, packages), _] = pair else {
@@ -1133,17 +1206,22 @@ fn import_starts<'a>(resolved: &'a Resolved, project: &Project) -> &'a [(usize, 
         let name = parts[*parent].as_str();
         // The next known file can be deeper than this child if the child is a namespace package.
         let child_path = parts[..=*parent].join(".");
+        // A from-list name is captured by the import. Attributes of a module are read later.
+        let site = if parent == module_parts {
+            from_site
+                .map(|(file, site)| (file, site.offset))
+                .or(*read_site)
+        } else {
+            *read_site
+        };
         let explicit = project
             .explicit_imports
             .get(&child_path)
             .is_some_and(|imports| {
                 imports.iter().any(|&(file, at)| {
-                    parent != module_parts
-                        || from_site.is_none_or(|(reader, captured)| {
-                            file != reader
-                                || at.owner != captured.owner
-                                || at.offset < captured.offset
-                        })
+                    site.is_none_or(|(reader, offset)| {
+                        file != reader || at.owner.is_some() || at.offset < offset
+                    })
                 })
             });
         if packages.iter().all(|&file| {
@@ -1200,7 +1278,13 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
             let name = &parts[*index];
             if let Some(binding) = package_binding(project, module, name.as_str())
                 && followed.insert((module, name.clone()))
-                && let Some(next) = resolve_import(module, binding, &parts[index + 1..], project)
+                && let Some(next) = resolve_import(
+                    module,
+                    binding,
+                    &parts[index + 1..],
+                    resolved.read_site,
+                    project,
+                )
             {
                 pending.push(next);
             }

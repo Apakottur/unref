@@ -66,6 +66,7 @@ pub(crate) struct Read {
     pub reads_object: bool,
     /// The attribute read from the result of calling the chain, such as `name` in `Class().name`.
     pub called: Option<Name>,
+    pub offset: Option<TextSize>,
 }
 
 /// A read of an imported name, or of a chain of attributes that starts with one.
@@ -76,6 +77,7 @@ pub(crate) struct ImportedRead {
     pub attributes: Vec<Name>,
     pub reads_object: bool,
     pub called: Option<Name>,
+    pub offset: Option<TextSize>,
 }
 
 /// The object that a member is read from, when the class that it is in is plain.
@@ -195,6 +197,7 @@ pub(crate) fn walk_module(
     path: &Arc<Path>,
     module: &ast::ModModule,
     positions: &SourcePositions,
+    shadowed_typing: &[&str],
 ) -> (Vec<Definition>, References) {
     let mut walker = Walker {
         path: path.clone(),
@@ -210,20 +213,36 @@ pub(crate) fn walk_module(
         owner: None,
         in_signature: false,
         direct_import: false,
+        direct_read: None,
         type_only: false,
+        shadowed_typing,
     };
     let is_package = path.file_name().is_some_and(|name| name == "__init__.py");
     for statement in &module.body {
         walker.direct_import = matches!(statement, Stmt::Import(_) | Stmt::ImportFrom(_));
-        if is_package && let Stmt::Delete(delete) = statement {
-            walker
-                .references
-                .import_events
-                .extend(delete.targets.iter().filter_map(|target| {
-                    target
-                        .as_name_expr()
-                        .map(|name| ImportEvent::Delete(name.id.clone()))
-                }));
+        walker.direct_read = matches!(
+            statement,
+            Stmt::Expr(_) | Stmt::Assign(_) | Stmt::AnnAssign(_) | Stmt::AugAssign(_)
+        )
+        .then(|| statement.start());
+        if is_package {
+            let targets = match statement {
+                Stmt::Delete(delete) => delete.targets.as_slice(),
+                Stmt::Try(block) if block.orelse.is_empty() && block.finalbody.is_empty() => {
+                    match (&block.body[..], &block.handlers[..]) {
+                        ([Stmt::Delete(delete)], [ExceptHandler::ExceptHandler(handler)])
+                            if handler.name.is_none()
+                                && matches!(delete.targets.as_slice(), [Expr::Name(_)])
+                                && matches!(&handler.body[..], [Stmt::Pass(_)]) =>
+                        {
+                            delete.targets.as_slice()
+                        }
+                        _ => &[],
+                    }
+                }
+                _ => &[],
+            };
+            record_deletions(targets, &mut walker.references.import_events);
         }
         walker.visit_stmt(statement);
     }
@@ -231,6 +250,17 @@ pub(crate) fn walk_module(
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
     (walker.definitions, walker.references)
+}
+
+fn record_deletions(targets: &[Expr], imports: &mut Vec<ImportEvent>) {
+    for target in targets {
+        match target {
+            Expr::Name(name) => imports.push(ImportEvent::Delete(name.id.clone())),
+            Expr::Tuple(tuple) => record_deletions(&tuple.elts, imports),
+            Expr::List(list) => record_deletions(&list.elts, imports),
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,8 +388,11 @@ struct Walker<'p, 'a> {
     /// Whether the node is in the annotation of a parameter or the return of a function.
     in_signature: bool,
     direct_import: bool,
+    /// The position of a direct module-level statement that evaluates an expression.
+    direct_read: Option<TextSize>,
     /// Whether runtime skips the current body because of a typing guard.
     type_only: bool,
+    shadowed_typing: &'p [&'p str],
 }
 
 impl<'a> Visitor<'a> for Walker<'_, '_> {
@@ -370,20 +403,23 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             Stmt::Import(import) => self.visit_import(import),
             Stmt::ImportFrom(import) => self.visit_import_from(import),
             Stmt::If(branch) => {
-                let Some(runtime) = self.type_checking_test(&branch.test) else {
-                    walk_stmt(self, stmt);
-                    return;
-                };
                 let enclosing = self.type_only;
-                self.visit_expr(&branch.test);
-                self.type_only = enclosing || !runtime;
-                self.visit_body(&branch.body);
-                self.type_only = enclosing || runtime;
-                for clause in &branch.elif_else_clauses {
-                    if let Some(test) = &clause.test {
+                let mut remaining = enclosing;
+                let clauses = std::iter::once((Some(branch.test.as_ref()), &branch.body)).chain(
+                    branch
+                        .elif_else_clauses
+                        .iter()
+                        .map(|clause| (clause.test.as_ref(), &clause.body)),
+                );
+                for (test, body) in clauses {
+                    self.type_only = remaining;
+                    let runtime = test.and_then(|test| self.type_checking_test(test));
+                    if let Some(test) = test {
                         self.visit_expr(test);
                     }
-                    self.visit_body(&clause.body);
+                    self.type_only = remaining || runtime == Some(false);
+                    self.visit_body(body);
+                    remaining |= runtime == Some(true);
                 }
                 self.type_only = enclosing;
             }
@@ -629,6 +665,11 @@ impl<'a> Walker<'_, '_> {
         let read = Read {
             owner: self.owner,
             root: root.clone(),
+            offset: if self.scope == 0 && !attributes.is_empty() {
+                self.direct_read
+            } else {
+                None
+            },
             attributes,
             reads_object: !self.in_signature,
             called,
@@ -691,6 +732,7 @@ impl<'a> Walker<'_, '_> {
             attributes: Vec::new(),
             reads_object: true,
             called: None,
+            offset: None,
         });
     }
 
@@ -1175,6 +1217,7 @@ impl<'a> Walker<'_, '_> {
                     attributes: Vec::new(),
                     reads_object: true,
                     called: None,
+                    offset: None,
                 });
             }
         }
@@ -1531,10 +1574,10 @@ impl<'a> Walker<'_, '_> {
             let scope = &mut self.scopes[self.binder];
             if !self.type_only
                 && binding.level == 0
-                && matches!(
-                    binding.module.as_deref(),
-                    Some("typing" | "typing_extensions")
-                )
+                && binding.module.as_deref().is_some_and(|module| {
+                    matches!(module, "typing" | "typing_extensions")
+                        && !self.shadowed_typing.contains(&module)
+                })
             {
                 let kind = match binding.name.as_deref() {
                     None => Some(TypingImport::Module),
@@ -1594,6 +1637,7 @@ impl<'a> Walker<'_, '_> {
                         attributes: Vec::new(),
                         reads_object: false,
                         called: None,
+                        offset: None,
                     });
                 }
                 self.references.imported_reads.insert(ImportedRead {
@@ -1602,6 +1646,7 @@ impl<'a> Walker<'_, '_> {
                     attributes: read.attributes,
                     reads_object: read.reads_object,
                     called: read.called,
+                    offset: read.offset,
                 });
             } else if local_names.contains(read.root.as_str()) {
                 for &index in defined.get(read.root.as_str()).into_iter().flatten() {

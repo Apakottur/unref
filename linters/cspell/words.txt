@@ -32,6 +32,7 @@ elts
 errorhandler
 fastapi
 feff
+finalbody
 fnmatch
 fnmatchcase
 freqtrade
@@ -61,6 +62,7 @@ musllinux
 mypy
 mysite
 openlibrary
+orelse
 pathlib
 pathspec
 peekable

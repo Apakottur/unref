@@ -91,7 +91,7 @@ impl ExternalModules {
             return None;
         }
         let file: Arc<Path> = Arc::from(file);
-        let facts = analyze_file(&file).ok()?;
+        let facts = analyze_file(&file, &[]).ok()?;
         Some(ModuleSymbols::of(
             file,
             ModuleName {
