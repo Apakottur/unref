@@ -34,6 +34,47 @@ def local_project_import() -> None:
     h.send(Helped(helped="a"))
 
 
+# An import of a function around the call counts, also for a call in a comprehension, unless a scope in
+# between imports the name again.
+class Enclosed(TypedDict):
+    enclosed: str
+
+
+class Comprehended(TypedDict):
+    comprehended: str
+
+
+class Hidden(TypedDict):
+    hidden: str  # expect: 5 [unused-attribute]
+
+
+def enclosing_import() -> str:
+    import json as outer_json
+
+    def nested() -> str:
+        return outer_json.dumps(Enclosed(enclosed="a"))
+
+    return nested()
+
+
+def comprehension_import() -> list[str]:
+    import json as each_json
+
+    return [each_json.dumps(Comprehended(comprehended="a")) for _ in range(2)]
+
+
+def hidden_import() -> None:
+    import json as hidden
+
+    def nested() -> None:
+        import helpers as hidden
+
+        hidden.send(Hidden(hidden="a"))
+
+    nested()
+
+
 import json
 
 late_import(), local_import(), local_project_import()
+enclosing_import(), comprehension_import(), hidden_import()
