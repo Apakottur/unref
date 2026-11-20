@@ -68,8 +68,9 @@ Enabled by default: yes.
 
 - Functions and methods with a route, error or request decorator, such as `app.route` or
   `bp.errorhandler`, of `Flask()` or `Blueprint()`, or an instance of a subclass, set at module level or
-  in the same function, of a parameter annotated as one, of a module-level variable set to what a
-  factory makes, or of `current_app`.
+  in the same function, of a parameter annotated as one, of a parameter of a test or fixture named as a
+  pytest fixture that returns or yields one, of a module-level variable set to what a factory makes, or
+  of `current_app`.
 - Commands of `cli.command` and `cli.group` of these, and of `command` and `group` of an `AppGroup()`
   or of such a group.
 - Module-level `create_app` and `make_app` functions that make a `Flask()`, and module-level `app` and
