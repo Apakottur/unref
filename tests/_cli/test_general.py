@@ -143,6 +143,63 @@ def test_reexport_and_same_named_child(tmp_path: Path, reexport_package: Path, e
             "pkg/wrapper/source.py",
             id="child-name-bound-by-conditional-reexport",
         ),
+        pytest.param(
+            "from .. import source\ndel source\n",
+            "from pkg.wrapper import source\nsource.value()\n",
+            "pkg/source.py",
+            id="deleted-reexport",
+        ),
+        pytest.param(
+            "from .. import source\ndel source\nfrom .. import source\n",
+            "from pkg.wrapper import source\nsource.value()\n",
+            "pkg/wrapper/source.py",
+            id="restored-reexport",
+        ),
+        pytest.param(
+            "from .. import source\n",
+            "from pkg.wrapper import source as exported\n"
+            "from pkg.wrapper.source import value as child_value\n"
+            "exported.value(), child_value()\n",
+            None,
+            id="child-loaded-after-from-import",
+        ),
+        pytest.param(
+            "from .. import source\n",
+            "from pkg.wrapper import source as exported\n"
+            "import pkg.wrapper.source\n"
+            "exported.value(), pkg.wrapper.source.value()\n",
+            None,
+            id="dotted-import-after-from-import",
+        ),
+        pytest.param(
+            "from .. import source\n",
+            "from typing import TYPE_CHECKING as checking\n"
+            "if checking:\n    import pkg.wrapper.source\n"
+            "from pkg.wrapper import source\nsource.value()\n",
+            "pkg/wrapper/source.py",
+            id="child-imported-for-type-checking",
+        ),
+        pytest.param(
+            "from .. import source\n",
+            "import typing as t\n"
+            "if t.TYPE_CHECKING:\n    pass\n"
+            "else:\n    from pkg.wrapper.source import value\n"
+            "from pkg.wrapper import source\nvalue(), source.value()\n",
+            "pkg/source.py",
+            id="child-imported-in-runtime-branch",
+        ),
+        pytest.param(
+            "from .. import source\n",
+            "def warmup():\n"
+            "    from typing import TYPE_CHECKING as checking\n"
+            "    checking = True\n"
+            "    if checking:\n"
+            "        import pkg.wrapper.source\n"
+            "warmup()\n"
+            "from pkg.wrapper import source\nsource.value()\n",
+            "pkg/source.py",
+            id="reassigned-type-checking-name",
+        ),
     ],
 )
 def test_package_initializer_child_imports(
@@ -155,6 +212,23 @@ def test_package_initializer_child_imports(
 
     assert result.exit_code == (0 if unused_module is None else 1)
     assert result.stdout == ("" if unused_module is None else f"{Path(unused_module)}:1:5: unused-function 'value'\n")
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize("early", [True, False], ids=["before-reexport", "after-reexport"])
+def test_from_import_during_package_initialization(tmp_path: Path, reexport_package: Path, *, early: bool) -> None:
+    load_bridge = "from . import bridge\n"
+    export_source = "from .. import source\n"
+    initializer = load_bridge + export_source if early else export_source + load_bridge
+    (reexport_package / "__init__.py").write_text(initializer)
+    (reexport_package / "bridge.py").write_text("from . import source\nsource.value()\n")
+    (tmp_path / "entry.py").write_text("import pkg.wrapper\nfrom pkg import source\nsource.value()\n")
+
+    result = run(["--show-transitive", "."], cwd=tmp_path)
+
+    assert result.exit_code == (0 if early else 1)
+    unused = Path("pkg/wrapper/source.py")
+    assert result.stdout == ("" if early else f"{unused}:1:5: unused-function 'value'\n")
     assert result.stderr == ""
 
 

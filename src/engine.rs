@@ -7,6 +7,7 @@ use std::sync::{Arc, LazyLock};
 use regex::Regex;
 use ruff_python_ast::name::Name;
 use ruff_python_stdlib::builtins::is_python_builtin;
+use ruff_text_size::TextSize;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::{ClassHierarchy, join};
@@ -19,7 +20,7 @@ use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::ignores::{apply_ignore_comments, ignored_codes};
 use crate::models::{Finding, Framework, Override, fnmatch};
 use crate::modules::{ModuleName, import_root, module_name, resolve};
-use crate::references::{Binding, Owner, Receiver};
+use crate::references::{Binding, ImportEvent, ImportSite, Owner, Receiver};
 use crate::symbols::ModuleSymbols;
 use crate::transitive::transitive;
 
@@ -78,9 +79,11 @@ struct Project {
     /// The files of each module name.
     files_by_name: FxHashMap<String, Vec<usize>>,
     /// Dotted project modules named explicitly by imports, including their parent packages.
-    explicit_imports: FxHashSet<String>,
+    explicit_imports: FxHashMap<String, Vec<(usize, ImportSite)>>,
     /// The child-module bindings and loads of each package initializer.
     package_imports: FxHashMap<usize, PackageImports>,
+    /// Values captured by from-imports during package initialization.
+    initial_imports: FxHashMap<(usize, TextSize), Binding>,
     /// The definitions of every file, in order.
     definitions: Vec<Definition>,
     /// The file of each definition.
@@ -143,7 +146,8 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     let mut external = ExternalModules::new(search_path(&files, &names, options.python.as_deref()));
     import_siblings(&mut facts, &names, &files_by_name, &known, &mut external);
     let explicit_imports = explicit_module_imports(&facts, &names, &known);
-    let package_imports = package_imports(&facts, &names, &known);
+    let (package_imports, initial_imports) =
+        package_imports(&facts, &names, &files_by_name, &known);
 
     let mut definitions = Vec::new();
     let mut definition_files = Vec::new();
@@ -161,6 +165,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         files_by_name,
         explicit_imports,
         package_imports,
+        initial_imports,
         definitions,
         definition_files,
         first_definition,
@@ -795,6 +800,8 @@ struct Resolved {
     starts: Vec<(usize, Vec<usize>)>,
     /// The number of components named directly by the module portion of the import.
     module_parts: usize,
+    /// Where a direct from-import captured the package attribute.
+    from_site: Option<(usize, ImportSite)>,
 }
 
 /// Find the project submodules an import names directly. A from-list name alone can instead refer
@@ -803,29 +810,35 @@ fn explicit_module_imports(
     facts: &[FileFacts],
     names: &[ModuleName],
     known: &FxHashSet<&str>,
-) -> FxHashSet<String> {
-    let mut explicit = FxHashSet::default();
-    let mut add = |module: &str| {
-        if module.contains('.') {
+) -> FxHashMap<String, Vec<(usize, ImportSite)>> {
+    let mut explicit: FxHashMap<_, Vec<_>> = FxHashMap::default();
+    for (file, (facts, name)) in facts.iter().zip(names).enumerate() {
+        for event in &facts.references.import_events {
+            let ImportEvent::Import { binding, .. } = event else {
+                continue;
+            };
+            let Some((module, site)) = name
+                .resolve(binding.module.as_deref(), binding.level)
+                .zip(binding.site)
+            else {
+                continue;
+            };
+            if !module.contains('.') {
+                continue;
+            }
             for prefix in module
                 .match_indices('.')
                 .skip(1)
                 .map(|(index, _)| &module[..index])
-                .chain([module])
+                .chain([module.as_str()])
             {
-                if known.contains(prefix) && !explicit.contains(prefix) {
-                    explicit.insert(prefix.to_string());
+                if known.contains(prefix) {
+                    if let Some(sites) = explicit.get_mut(prefix) {
+                        sites.push((file, site));
+                    } else {
+                        explicit.insert(prefix.to_string(), vec![(file, site)]);
+                    }
                 }
-            }
-        }
-    };
-    for (facts, name) in facts.iter().zip(names) {
-        for module in &facts.references.module_imports {
-            add(module.as_str());
-        }
-        for import in &facts.references.imports {
-            if let Some(module) = name.resolve(import.module.as_deref(), import.level) {
-                add(&module);
             }
         }
     }
@@ -834,26 +847,130 @@ fn explicit_module_imports(
 
 #[derive(Default)]
 struct PackageImports {
-    /// The initializer's final import binding of an attribute with a same-named child.
-    exports: FxHashMap<String, Binding>,
+    /// The final import bindings of child names. A deletion replaces the binding with None.
+    exports: FxHashMap<String, Option<Binding>>,
     /// The child modules loaded by the initializer. Importing them again uses the module cache.
     loaded: FxHashSet<String>,
-    /// The value of a child attribute when a from-import of the package itself reads it.
-    from_values: FxHashMap<Binding, Binding>,
 }
 
-impl PackageImports {
-    fn load(&mut self, name: &str, path: String) {
-        if self.loaded.insert(name.to_string()) {
-            self.exports.insert(
-                name.to_string(),
-                Binding {
-                    module: Some(path),
-                    level: 0,
-                    name: None,
-                    initializer_offset: None,
-                },
-            );
+struct PackageLoader<'a> {
+    package: usize,
+    prefix: String,
+    facts: &'a [FileFacts],
+    names: &'a [ModuleName],
+    files_by_name: &'a FxHashMap<String, Vec<usize>>,
+    known: &'a FxHashSet<&'a str>,
+    imports: PackageImports,
+    captures: &'a mut FxHashMap<(usize, TextSize), Binding>,
+}
+
+enum ChildLoad<'a> {
+    Load(String),
+    Publish(String, String),
+    Import(usize, &'a Binding),
+}
+
+fn module_binding(module: String) -> Binding {
+    Binding {
+        module: Some(module),
+        level: 0,
+        name: None,
+        site: None,
+    }
+}
+
+impl PackageLoader<'_> {
+    /// Capture a from-list name in this package at the time the import runs.
+    fn capture(
+        &mut self,
+        file: usize,
+        module: &str,
+        binding: &Binding,
+    ) -> Option<(Binding, Option<String>)> {
+        let (name, site) = binding.name.as_deref().zip(binding.site)?;
+        if module != self.names[self.package].name {
+            return None;
+        }
+        let path = join(module, name);
+        if !self.known.contains(path.as_str()) {
+            return None;
+        }
+        let (mut value, load) = match self.imports.exports.get(name) {
+            Some(Some(value)) => (value.clone(), None),
+            None if self.facts[self.package]
+                .references
+                .bindings
+                .get(name)
+                .and_then(|first| first.site)
+                .is_some_and(|first| !first.direct) =>
+            {
+                return None;
+            }
+            _ => (module_binding(path.clone()), Some(path)),
+        };
+        value.site = Some(site);
+        self.captures.insert((file, site.offset), value.clone());
+        // Exported values are already captured and must not look themselves up again.
+        value.site = None;
+        Some((value, load))
+    }
+
+    /// Follow direct imports of known descendants while the package is still initializing.
+    fn load(&mut self, module: String) {
+        if !module.starts_with(&self.prefix) || !self.known.contains(module.as_str()) {
+            return;
+        }
+        let mut pending = vec![ChildLoad::Load(module)];
+        while let Some(action) = pending.pop() {
+            match action {
+                ChildLoad::Load(module) => {
+                    if self.imports.loaded.contains(&module) {
+                        continue;
+                    }
+                    if let Some((parent, _)) = module.rsplit_once('.')
+                        && parent.starts_with(&self.prefix)
+                        && !self.imports.loaded.contains(parent)
+                    {
+                        let parent = parent.to_string();
+                        pending.push(ChildLoad::Load(module));
+                        pending.push(ChildLoad::Load(parent));
+                        continue;
+                    }
+                    self.imports.loaded.insert(module.clone());
+                    let child = &module[self.prefix.len()..];
+                    if !child.contains('.') {
+                        pending.push(ChildLoad::Publish(child.to_string(), module.clone()));
+                    }
+                    for &file in self.files_by_name.get(&module).into_iter().flatten() {
+                        for event in self.facts[file].references.import_events.iter().rev() {
+                            if let ImportEvent::Import { binding, .. } = event
+                                && binding.site.is_some_and(|site| site.direct)
+                            {
+                                pending.push(ChildLoad::Import(file, binding));
+                            }
+                        }
+                    }
+                }
+                ChildLoad::Publish(name, module) => {
+                    self.imports
+                        .exports
+                        .insert(name, Some(module_binding(module)));
+                }
+                ChildLoad::Import(file, binding) => {
+                    let Some(module) =
+                        self.names[file].resolve(binding.module.as_deref(), binding.level)
+                    else {
+                        continue;
+                    };
+                    if let Some((_, Some(load))) = self.capture(file, &module, binding) {
+                        pending.push(ChildLoad::Load(load));
+                    } else if module.starts_with(&self.prefix)
+                        && self.known.contains(module.as_str())
+                    {
+                        pending.push(ChildLoad::Load(module));
+                    }
+                }
+            }
         }
     }
 }
@@ -863,86 +980,99 @@ impl PackageImports {
 fn package_imports(
     facts: &[FileFacts],
     names: &[ModuleName],
+    files_by_name: &FxHashMap<String, Vec<usize>>,
     known: &FxHashSet<&str>,
-) -> FxHashMap<usize, PackageImports> {
+) -> (
+    FxHashMap<usize, PackageImports>,
+    FxHashMap<(usize, TextSize), Binding>,
+) {
     let mut packages = FxHashMap::default();
-    for (file, (facts, package)) in facts.iter().zip(names).enumerate() {
-        if !package.is_package || facts.references.initializer_imports.is_empty() {
+    let mut captures = FxHashMap::default();
+    for (file, (file_facts, package)) in facts.iter().zip(names).enumerate() {
+        if !package.is_package || file_facts.references.import_events.is_empty() {
             continue;
         }
-        let prefix = format!("{}.", package.name);
-        let mut imports = PackageImports::default();
-        for import in &facts.references.initializer_imports {
-            let binding = &import.binding;
+        let mut loader = PackageLoader {
+            package: file,
+            prefix: format!("{}.", package.name),
+            facts,
+            names,
+            files_by_name,
+            known,
+            imports: PackageImports::default(),
+            captures: &mut captures,
+        };
+        for event in &file_facts.references.import_events {
+            let (binding, alias) = match event {
+                ImportEvent::Delete(name) => {
+                    if known.contains(join(&package.name, name.as_str()).as_str()) {
+                        loader.imports.exports.insert(name.to_string(), None);
+                    }
+                    continue;
+                }
+                ImportEvent::Import { binding, alias }
+                    if binding.site.is_some_and(|site| site.direct) =>
+                {
+                    (binding, alias)
+                }
+                ImportEvent::Import { .. } => continue,
+            };
             let Some(module) = package.resolve(binding.module.as_deref(), binding.level) else {
                 continue;
             };
-            if let Some(suffix) = module.strip_prefix(&prefix)
-                && known.contains(module.as_str())
-            {
-                let child = suffix.split('.').next().unwrap_or(suffix);
-                imports.load(child, join(&package.name, child));
-            }
+            loader.load(module.clone());
 
             let imported = binding
                 .name
                 .as_deref()
                 .unwrap_or_else(|| module.split('.').next().unwrap_or(&module));
-            let bound = import.alias.as_deref().unwrap_or(imported);
+            let bound = alias.as_deref().unwrap_or(imported);
             let bound_child = known.contains(join(&package.name, bound).as_str());
-            if binding.name.is_some() && module == package.name {
-                let path = join(&package.name, imported);
-                if known.contains(path.as_str()) {
-                    if !imports.exports.contains_key(imported) {
-                        // The ordinary resolver still handles a binding from a conditional block.
-                        if facts
-                            .references
-                            .bindings
-                            .get(imported)
-                            .is_some_and(|first| first.initializer_offset.is_none())
-                        {
-                            continue;
-                        }
-                        imports.load(imported, path);
-                    }
-                    let value = imports.exports[imported].clone();
-                    if bound_child {
-                        imports.exports.insert(bound.to_string(), value.clone());
-                    }
-                    imports.from_values.insert(binding.clone(), value);
-                    continue;
+            if let Some((value, load)) = loader.capture(file, &module, binding) {
+                if let Some(path) = load {
+                    loader.load(path);
                 }
+                if bound_child {
+                    loader
+                        .imports
+                        .exports
+                        .insert(bound.to_string(), Some(value));
+                }
+                continue;
             }
             if bound_child {
-                let module = if binding.name.is_none() && import.alias.is_none() {
+                let module = if binding.name.is_none() && alias.is_none() {
                     imported
                 } else {
                     &module
                 };
-                imports.exports.insert(
+                loader.imports.exports.insert(
                     bound.to_string(),
-                    Binding {
+                    Some(Binding {
                         module: Some(module.to_string()),
                         level: 0,
                         name: binding.name.clone(),
-                        initializer_offset: None,
-                    },
+                        site: binding.site,
+                    }),
                 );
             }
         }
-        if !imports.exports.is_empty() {
-            packages.insert(file, imports);
+        if !loader.imports.exports.is_empty() {
+            packages.insert(file, loader.imports);
         }
     }
-    packages
+    (packages, captures)
 }
 
 fn package_binding<'a>(project: &'a Project, file: usize, name: &str) -> Option<&'a Binding> {
-    project
+    match project
         .package_imports
         .get(&file)
         .and_then(|imports| imports.exports.get(name))
-        .or_else(|| project.facts[file].references.bindings.get(name))
+    {
+        Some(binding) => binding.as_ref(),
+        None => project.facts[file].references.bindings.get(name),
+    }
 }
 
 /// Find the dotted name that an imported name, and the attributes read from it, stand for.
@@ -955,8 +1085,8 @@ fn resolve_import(
     project: &Project,
 ) -> Option<Resolved> {
     let binding = binding
-        .initializer_offset
-        .and_then(|_| project.package_imports.get(&file)?.from_values.get(binding))
+        .site
+        .and_then(|site| project.initial_imports.get(&(file, site.offset)))
         .unwrap_or(binding);
     let resolved = project.names[file].resolve(binding.module.as_deref(), binding.level)?;
     let mut parts: Vec<Name> = resolved.split('.').map(Name::new).collect();
@@ -977,6 +1107,10 @@ fn resolve_import(
         parts,
         starts,
         module_parts,
+        from_site: binding
+            .site
+            .filter(|site| site.direct && binding.name.is_some())
+            .map(|site| (file, site)),
     })
 }
 
@@ -987,6 +1121,7 @@ fn import_starts<'a>(resolved: &'a Resolved, project: &Project) -> &'a [(usize, 
         parts,
         starts,
         module_parts,
+        from_site,
     } = resolved;
     for (parent_index, pair) in starts.windows(2).enumerate() {
         let [(parent, packages), _] = pair else {
@@ -998,14 +1133,26 @@ fn import_starts<'a>(resolved: &'a Resolved, project: &Project) -> &'a [(usize, 
         let name = parts[*parent].as_str();
         // The next known file can be deeper than this child if the child is a namespace package.
         let child_path = parts[..=*parent].join(".");
-        let explicit = project.explicit_imports.contains(&child_path);
+        let explicit = project
+            .explicit_imports
+            .get(&child_path)
+            .is_some_and(|imports| {
+                imports.iter().any(|&(file, at)| {
+                    parent != module_parts
+                        || from_site.is_none_or(|(reader, captured)| {
+                            file != reader
+                                || at.owner != captured.owner
+                                || at.offset < captured.offset
+                        })
+                })
+            });
         if packages.iter().all(|&file| {
             if !project.names[file].is_package
                 || (explicit
                     && !project
                         .package_imports
                         .get(&file)
-                        .is_some_and(|imports| imports.loaded.contains(name)))
+                        .is_some_and(|imports| imports.loaded.contains(&child_path)))
             {
                 return false;
             }
@@ -1175,6 +1322,14 @@ fn import_relative(
             read
         })
         .collect();
+    for event in &mut references.import_events {
+        if let ImportEvent::Import { binding, .. } = event
+            && binding.name.is_some()
+            && is_sibling(binding.module.as_deref(), binding.level)
+        {
+            binding.level = 1;
+        }
+    }
     for binding in references
         .bindings
         .values_mut()

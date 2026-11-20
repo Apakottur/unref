@@ -28,15 +28,25 @@ pub(crate) struct Binding {
     pub module: Option<String>,
     pub level: u32,
     pub name: Option<String>,
-    /// The position of a direct import in a package initializer.
-    pub initializer_offset: Option<TextSize>,
+    pub site: Option<ImportSite>,
 }
 
-/// An import in the direct body of a package initializer, with its full written module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ImportSite {
+    pub owner: Owner,
+    pub offset: TextSize,
+    /// Whether the import is a statement in the direct module body.
+    pub direct: bool,
+}
+
+/// Statements that can change which module a package attribute refers to at runtime.
 #[derive(Debug)]
-pub(crate) struct InitializerImport {
-    pub binding: Binding,
-    pub alias: Option<Name>,
+pub(crate) enum ImportEvent {
+    Import {
+        binding: Binding,
+        alias: Option<Name>,
+    },
+    Delete(Name),
 }
 
 /// The code that a reference or a definition is in: the line of the name of the function that it is
@@ -141,10 +151,8 @@ pub(crate) struct References {
     pub whole_reads: FxHashSet<WholeRead>,
     /// The names that are imported from another module. A star import has the name `*`.
     pub imports: FxHashSet<Import>,
-    /// The written modules in plain import statements.
-    pub module_imports: Vec<Name>,
-    /// Direct imports of a package initializer, in execution order.
-    pub initializer_imports: Vec<InitializerImport>,
+    /// Runtime imports with their full written module, and direct deletions in an initializer.
+    pub import_events: Vec<ImportEvent>,
     /// Whether the module defines `__all__`.
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
@@ -201,15 +209,23 @@ pub(crate) fn walk_module(
         binder: 0,
         owner: None,
         in_signature: false,
-        initializer_import: false,
+        direct_import: false,
+        type_only: false,
     };
-    if path.file_name().is_some_and(|name| name == "__init__.py") {
-        for statement in &module.body {
-            walker.initializer_import = matches!(statement, Stmt::Import(_) | Stmt::ImportFrom(_));
-            walker.visit_stmt(statement);
+    let is_package = path.file_name().is_some_and(|name| name == "__init__.py");
+    for statement in &module.body {
+        walker.direct_import = matches!(statement, Stmt::Import(_) | Stmt::ImportFrom(_));
+        if is_package && let Stmt::Delete(delete) = statement {
+            walker
+                .references
+                .import_events
+                .extend(delete.targets.iter().filter_map(|target| {
+                    target
+                        .as_name_expr()
+                        .map(|name| ImportEvent::Delete(name.id.clone()))
+                }));
         }
-    } else {
-        walker.visit_body(&module.body);
+        walker.visit_stmt(statement);
     }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
@@ -222,6 +238,12 @@ enum ScopeKind {
     Module,
     Class,
     Function,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypingImport {
+    Module,
+    TypeChecking,
 }
 
 /// The module, a class body, a function, a lambda or a comprehension, while it is walked.
@@ -238,6 +260,8 @@ struct Scope {
     nonlocal_names: FxHashSet<String>,
     /// The names that the scope imports, each with what it stands for.
     imports: FxHashMap<String, Binding>,
+    /// Typing aliases that haven't been rebound, used only to recognize runtime guards.
+    typing_imports: Vec<(String, TypingImport)>,
     /// In a function, the functions and classes that it defines, by their name, each with its index
     /// in the definitions of the module. A scope nested in it passes up those that it defines by a
     /// name that is not local to it, such as one declared `nonlocal`.
@@ -283,6 +307,7 @@ impl Scope {
             global_names: FxHashSet::default(),
             nonlocal_names: FxHashSet::default(),
             imports: FxHashMap::default(),
+            typing_imports: Vec::new(),
             functions_and_classes: FxHashMap::default(),
             reads: Vec::new(),
             enclosing: None,
@@ -332,8 +357,9 @@ struct Walker<'p, 'a> {
     owner: Owner,
     /// Whether the node is in the annotation of a parameter or the return of a function.
     in_signature: bool,
-    /// Whether the statement is an import in the direct body of a package initializer.
-    initializer_import: bool,
+    direct_import: bool,
+    /// Whether runtime skips the current body because of a typing guard.
+    type_only: bool,
 }
 
 impl<'a> Visitor<'a> for Walker<'_, '_> {
@@ -343,6 +369,24 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             Stmt::ClassDef(class) => self.visit_class(class),
             Stmt::Import(import) => self.visit_import(import),
             Stmt::ImportFrom(import) => self.visit_import_from(import),
+            Stmt::If(branch) => {
+                let Some(runtime) = self.type_checking_test(&branch.test) else {
+                    walk_stmt(self, stmt);
+                    return;
+                };
+                let enclosing = self.type_only;
+                self.visit_expr(&branch.test);
+                self.type_only = enclosing || !runtime;
+                self.visit_body(&branch.body);
+                self.type_only = enclosing || runtime;
+                for clause in &branch.elif_else_clauses {
+                    if let Some(test) = &clause.test {
+                        self.visit_expr(test);
+                    }
+                    self.visit_body(&clause.body);
+                }
+                self.type_only = enclosing;
+            }
             Stmt::Global(global) => {
                 // The names are not local variables.
                 let binder = self.binder;
@@ -990,15 +1034,14 @@ impl<'a> Walker<'_, '_> {
     fn visit_import(&mut self, import: &ast::StmtImport) {
         let mut bindings = FxHashMap::default();
         for alias in &import.names {
-            self.references.module_imports.push(alias.name.id.clone());
             let mut binding = Binding {
                 module: Some(alias.name.to_string()),
                 level: 0,
                 name: None,
-                initializer_offset: self.initializer_import.then(|| alias.start()),
+                site: Some(self.import_site(alias)),
             };
-            if self.initializer_import {
-                self.references.initializer_imports.push(InitializerImport {
+            if !self.type_only {
+                self.references.import_events.push(ImportEvent::Import {
                     binding: binding.clone(),
                     alias: alias.asname.as_ref().map(|name| name.id.clone()),
                 });
@@ -1032,10 +1075,10 @@ impl<'a> Walker<'_, '_> {
                 module: module.clone(),
                 level: import.level,
                 name: Some(alias.name.to_string()),
-                initializer_offset: self.initializer_import.then(|| alias.start()),
+                site: Some(self.import_site(alias)),
             };
-            if self.initializer_import {
-                self.references.initializer_imports.push(InitializerImport {
+            if !self.type_only {
+                self.references.import_events.push(ImportEvent::Import {
                     binding: binding.clone(),
                     alias: alias.asname.as_ref().map(|name| name.id.clone()),
                 });
@@ -1043,6 +1086,45 @@ impl<'a> Walker<'_, '_> {
             bindings.insert(bound, binding);
         }
         self.bind_imports(bindings);
+    }
+
+    fn import_site(&self, alias: &ast::Alias) -> ImportSite {
+        ImportSite {
+            owner: self.owner,
+            offset: alias.start(),
+            direct: self.direct_import,
+        }
+    }
+
+    /// Recognize the runtime value of an imported `TYPE_CHECKING` constant.
+    fn type_checking_test(&self, test: &Expr) -> Option<bool> {
+        let (test, negated) = match test {
+            Expr::UnaryOp(unary) if unary.op == ast::UnaryOp::Not => (&*unary.operand, true),
+            _ => (test, false),
+        };
+        let (name, imported) = match test {
+            Expr::Name(name) => (name, TypingImport::TypeChecking),
+            Expr::Attribute(attribute) if attribute.attr.as_str() == "TYPE_CHECKING" => {
+                (attribute.value.as_name_expr()?, TypingImport::Module)
+            }
+            _ => return None,
+        };
+        let scope = &self.scopes[self.scope];
+        let root = &self.scopes[0];
+        if scope.defined.contains_key(name.id.as_str())
+            || root.defined.contains_key(name.id.as_str())
+        {
+            return None;
+        }
+        let aliases = if scope.bound.contains(name.id.as_str()) {
+            &scope.typing_imports
+        } else {
+            &root.typing_imports
+        };
+        aliases
+            .iter()
+            .any(|(alias, kind)| alias == name.id.as_str() && *kind == imported)
+            .then_some(negated)
     }
 
     /// Add the variables and attributes that an assignment defines, the names that an assignment to
@@ -1412,7 +1494,11 @@ impl<'a> Walker<'_, '_> {
 
     /// Bind a name in the current scope.
     fn bind(&mut self, name: &str) {
-        self.scopes[self.binder].bound.insert(name.to_string());
+        let scope = &mut self.scopes[self.binder];
+        if !self.type_only {
+            scope.typing_imports.retain(|(alias, _)| alias != name);
+        }
+        scope.bound.insert(name.to_string());
     }
 
     /// Bind the name of a function or class, given with its index in the definitions of the module, if
@@ -1422,7 +1508,12 @@ impl<'a> Walker<'_, '_> {
         let binder = self.binder;
         let scope = &mut self.scopes[binder];
         let definitions = match scope.kind {
-            ScopeKind::Module => return,
+            ScopeKind::Module => {
+                if !self.type_only {
+                    scope.typing_imports.retain(|(alias, _)| alias != name);
+                }
+                return;
+            }
             ScopeKind::Class => &mut scope.members,
             ScopeKind::Function => &mut scope.functions_and_classes,
         };
@@ -1437,8 +1528,24 @@ impl<'a> Walker<'_, '_> {
     fn bind_imports(&mut self, statement: FxHashMap<String, Binding>) {
         for (name, binding) in statement {
             self.bind(&name);
-            let binder = self.binder;
-            self.scopes[binder].imports.entry(name).or_insert(binding);
+            let scope = &mut self.scopes[self.binder];
+            if !self.type_only
+                && binding.level == 0
+                && matches!(
+                    binding.module.as_deref(),
+                    Some("typing" | "typing_extensions")
+                )
+            {
+                let kind = match binding.name.as_deref() {
+                    None => Some(TypingImport::Module),
+                    Some("TYPE_CHECKING") => Some(TypingImport::TypeChecking),
+                    Some(_) => None,
+                };
+                if let Some(kind) = kind {
+                    scope.typing_imports.push((name.clone(), kind));
+                }
+            }
+            scope.imports.entry(name).or_insert(binding);
         }
     }
 
