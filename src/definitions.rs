@@ -105,10 +105,10 @@ impl Definition {
     }
 }
 
-/// The kind of expression that a dotted name is unwrapped from.
+/// The kind of expression that the outer end of a dotted name is unwrapped from.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Unwrap {
-    /// A decorator or a call, such as `app.command` for `@app.command("name")`.
+    /// A decorator or what a call calls, such as `app.command` for `@app.command("name")`.
     Call,
     /// A base class or an annotation, such as `pydantic.BaseModel` for `pydantic.BaseModel[int]`.
     Subscript,
@@ -137,28 +137,32 @@ pub(crate) fn annotation_name(annotation: &Expr) -> String {
 /// Get the dotted name of an expression, such as a decorator, a base class, an annotation or what a
 /// call calls.
 ///
+/// Only the outer call or subscript is unwrapped, so `@app().route` and `@registry["x"].route` are not
+/// dotted names.
+///
 /// Returns None if the expression is not a dotted name, for example `@decorators[0]` or `make_base()`.
 pub(crate) fn dotted_name(expression: &Expr, unwrap: Unwrap) -> Option<String> {
+    let expression = match (expression, unwrap) {
+        (Expr::Call(call), Unwrap::Call) => &*call.func,
+        (Expr::Subscript(subscript), Unwrap::Subscript) => &*subscript.value,
+        _ => expression,
+    };
     let mut name = String::new();
-    push_dotted_name(expression, unwrap, &mut name).then_some(name)
+    push_dotted_name(expression, &mut name).then_some(name)
 }
 
 /// Add the dotted name of an expression to the end of a string, which is built in place since many
 /// calls and assignments are checked.
 ///
 /// Returns false if the expression is not a dotted name.
-fn push_dotted_name(expression: &Expr, unwrap: Unwrap, name: &mut String) -> bool {
+fn push_dotted_name(expression: &Expr, name: &mut String) -> bool {
     match expression {
-        Expr::Call(call) if unwrap == Unwrap::Call => push_dotted_name(&call.func, unwrap, name),
-        Expr::Subscript(subscript) if unwrap == Unwrap::Subscript => {
-            push_dotted_name(&subscript.value, unwrap, name)
-        }
         Expr::Name(root) => {
             name.push_str(root.id.as_str());
             true
         }
         Expr::Attribute(attribute) => {
-            if !push_dotted_name(&attribute.value, unwrap, name) {
+            if !push_dotted_name(&attribute.value, name) {
                 return false;
             }
             name.push('.');
