@@ -709,12 +709,12 @@ impl<'a> Walker<'_, '_> {
             else {
                 continue;
             };
-            let mut names = TypeNames::default();
-            names.visit_expr(parsed.expr());
-            for (root, attributes) in names.reads {
-                self.add_read(&root, attributes, None);
-            }
-            self.add_attributes(names.attributes);
+            // The positions of the parsed expression are in the string, so it binds in a scope of
+            // its own that defines nothing.
+            let binder = self.binder;
+            self.binder = self.push_scope(Scope::new(ScopeKind::Function));
+            self.visit_expr(parsed.expr());
+            self.binder = binder;
             self.visit_type_strings(parsed.expr());
         }
     }
@@ -1518,33 +1518,6 @@ fn attribute_chain(attribute: &ast::ExprAttribute) -> (&Expr, Vec<Name>) {
     }
     attributes.reverse();
     (node, attributes)
-}
-
-/// The names that a type expression parsed from a string reads.
-#[derive(Default)]
-struct TypeNames {
-    /// The names, or the chains of attributes that start with one, each with its attributes in order.
-    reads: Vec<(Name, Vec<Name>)>,
-    /// The names that are read as attributes of something other than a name.
-    attributes: Vec<Name>,
-}
-
-impl<'b> Visitor<'b> for TypeNames {
-    fn visit_expr(&mut self, expr: &'b Expr) {
-        match expr {
-            Expr::Name(name) => self.reads.push((name.id.clone(), Vec::new())),
-            Expr::Attribute(attribute) => {
-                let (base, attributes) = attribute_chain(attribute);
-                if let Expr::Name(name) = base {
-                    self.reads.push((name.id.clone(), attributes));
-                } else {
-                    self.attributes.extend(attributes);
-                    self.visit_expr(base);
-                }
-            }
-            _ => walk_expr(self, expr),
-        }
-    }
 }
 
 /// Get the strings of a type expression that are types themselves: the expression itself when it is
