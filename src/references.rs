@@ -144,6 +144,10 @@ pub(crate) struct References {
     /// members of a class in its class body, each with the index of the definition in the definitions
     /// of the module.
     pub local_reads: FxHashSet<(Owner, usize)>,
+    /// The reads of the objects of the functions and classes that are local variables of a function,
+    /// each with the index of the definition in the definitions of the module and the attributes read
+    /// from it, in order, as in `Color.parse` for an enum.
+    pub local_objects: FxHashSet<(Owner, usize, Vec<Name>)>,
     /// The local variables of the functions that are assigned the result of a call.
     pub local_calls: LocalCalls,
     /// The annotated parameters of the functions, by the line of the name of the function and the
@@ -1472,6 +1476,13 @@ impl<'a> Walker<'_, '_> {
             } else if local_names.contains(read.root.as_str()) {
                 for &index in defined.get(read.root.as_str()).into_iter().flatten() {
                     self.references.local_reads.insert((read.owner, index));
+                    if read.reads_object {
+                        self.references.local_objects.insert((
+                            read.owner,
+                            index,
+                            read.attributes.clone(),
+                        ));
+                    }
                 }
                 let mut attributes = read.attributes.into_iter();
                 // The first parameter of a method, unless it is assigned, is the instance or the

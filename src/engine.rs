@@ -438,6 +438,16 @@ fn find_uses(
                 .definitions
                 .insert(project.first_definition[file] + index);
         }
+        // An object of a function is read by its name in the module, such as an enum in a function.
+        for (owner, index, attributes) in &references.local_objects {
+            let definition = &project.definitions[project.first_definition[file] + index];
+            let mut parts = vec![Name::new(definition.qualified_name())];
+            parts.extend(attributes.iter().cloned());
+            uses.entry((file, *owner))
+                .or_default()
+                .objects
+                .insert((file, parts));
+        }
     }
     uses
 }
