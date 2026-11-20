@@ -319,12 +319,8 @@ fn find_uses(
 
         for read in &references.imported_reads {
             let owner_uses = uses.entry((file, read.owner)).or_default();
-            let Some(resolved) = resolve_import(
-                &project.names[file],
-                &read.binding,
-                &read.attributes,
-                &project.files_by_name,
-            ) else {
+            let Some(resolved) = resolve_import(file, &read.binding, &read.attributes, project)
+            else {
                 owner_uses
                     .attributes
                     .extend(read.attributes.iter().chain(&read.called).cloned());
@@ -752,13 +748,8 @@ fn is_external(project: &Project, hierarchy: &ClassHierarchy, file: usize, writt
 /// from outside the project.
 fn is_external_import(project: &Project, file: usize, binding: &Binding, written: &str) -> bool {
     let attributes: Vec<Name> = written.split('.').skip(1).map(Name::new).collect();
-    resolve_import(
-        &project.names[file],
-        binding,
-        &attributes,
-        &project.files_by_name,
-    )
-    .is_some_and(|(parts, _)| !project.holds(&parts.join(".")))
+    resolve_import(file, binding, &attributes, project)
+        .is_some_and(|(parts, _)| !project.holds(&parts.join(".")))
 }
 
 /// Check whether a base class of a class, as it is written in its module, is not known: it is
@@ -798,12 +789,13 @@ type Resolved = (Vec<Name>, Vec<(usize, Vec<usize>)>);
 ///
 /// Returns None if it is imported from beyond the root.
 fn resolve_import(
-    module: &ModuleName,
+    file: usize,
     binding: &Binding,
     attributes: &[Name],
-    files_by_name: &FxHashMap<String, Vec<usize>>,
+    project: &Project,
 ) -> Option<Resolved> {
-    let resolved = module.resolve(binding.module.as_deref(), binding.level)?;
+    let (file, binding) = rebound_dotted_alias(file, binding, project).unwrap_or((file, binding));
+    let resolved = project.names[file].resolve(binding.module.as_deref(), binding.level)?;
     let mut parts: Vec<Name> = resolved.split('.').map(Name::new).collect();
     if let Some(name) = binding.name.as_ref().filter(|name| !name.is_empty()) {
         parts.push(Name::new(name));
@@ -811,12 +803,76 @@ fn resolve_import(
     parts.extend(attributes.iter().cloned());
     let starts = (1..parts.len())
         .filter_map(|index| {
-            files_by_name
+            project
+                .files_by_name
                 .get(&parts[..index].join("."))
                 .map(|files| (index, files.clone()))
         })
         .collect();
     Some((parts, starts))
+}
+
+/// A dotted alias reads the package's current attribute after loading the named module. An
+/// initializer that already loaded and then rebound the child leaves that attribute in place.
+fn rebound_dotted_alias<'a>(
+    reader: usize,
+    binding: &Binding,
+    project: &'a Project,
+) -> Option<(usize, &'a Binding)> {
+    if !binding.dotted_alias {
+        return None;
+    }
+    let path = binding.module.as_deref()?;
+    let (parent, child) = path.rsplit_once('.')?;
+    let [file] = project.files_by_name.get(parent)?.as_slice() else {
+        return None;
+    };
+    let package = &project.names[*file];
+    let references = &project.facts[*file].references;
+    if *file == reader
+        || !package.is_package
+        || !references.bindings.contains_key(child)
+        || references.package_deletions.contains(child)
+        || project.file_definitions(*file).iter().any(|definition| {
+            definition.owner.is_none() && definition.class.is_none() && definition.name == child
+        })
+    {
+        return None;
+    }
+
+    let mut loaded = false;
+    let mut rebound = None;
+    for import in &references.package_imports {
+        let source = &import.binding;
+        let Some(module) = package.resolve(
+            import.load.as_deref().or(source.module.as_deref()),
+            source.level,
+        ) else {
+            continue;
+        };
+        let loads_child = module == path
+            || module
+                .strip_prefix(path)
+                .is_some_and(|suffix| suffix.starts_with('.'));
+        if loads_child && project.files_by_name.contains_key(&module) && !loaded {
+            loaded = true;
+            rebound = None;
+        }
+        // A from-import of the package's own attribute reads the same value, loading the child
+        // only when there is no binding yet. So does a dotted alias of an already-loaded child.
+        if module == parent && source.name.as_deref() == Some(child) {
+            loaded |= rebound.is_none() && project.files_by_name.contains_key(path);
+            continue;
+        }
+        if import.local_name == child && !(module == path && source.dotted_alias) {
+            rebound = Some(source);
+        }
+    }
+    if loaded {
+        rebound.map(|source| (*file, source))
+    } else {
+        None
+    }
 }
 
 /// Find the objects of the modules of the project that an imported name, and the attributes read from
@@ -846,12 +902,7 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
             let name = &parts[*index];
             if let Some(binding) = project.facts[module].references.bindings.get(name.as_str())
                 && followed.insert((module, name.clone()))
-                && let Some(next) = resolve_import(
-                    &project.names[module],
-                    binding,
-                    &parts[index + 1..],
-                    &project.files_by_name,
-                )
+                && let Some(next) = resolve_import(module, binding, &parts[index + 1..], project)
             {
                 pending.push(next);
             }

@@ -26,6 +26,17 @@ pub(crate) struct Binding {
     pub module: Option<String>,
     pub level: u32,
     pub name: Option<String>,
+    /// A dotted `import ... as ...` reads the loaded package's attribute.
+    pub dotted_alias: bool,
+}
+
+/// An unconditional import in a package initializer, in its original statement order.
+#[derive(Debug)]
+pub(crate) struct PackageImport {
+    pub binding: Binding,
+    pub local_name: String,
+    /// The full module path of an unaliased dotted import, which only binds its first component.
+    pub load: Option<String>,
 }
 
 /// The code that a reference or a definition is in: the line of the name of the function that it is
@@ -137,6 +148,10 @@ pub(crate) struct References {
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
     pub bindings: FxHashMap<String, Binding>,
+    /// The direct imports of a package initializer, including unaliased child loads.
+    pub package_imports: Vec<PackageImport>,
+    /// Package attributes deleted in its initializer.
+    pub package_deletions: FxHashSet<String>,
     /// The functions and classes that are local variables of a function, by their index in the
     /// definitions of the module. A read of their name elsewhere is not a reference to them.
     pub local_definitions: FxHashSet<usize>,
@@ -198,7 +213,68 @@ pub(crate) fn walk_module(
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
+    if path.file_name().is_some_and(|name| name == "__init__.py") {
+        walker.references.package_imports = package_imports(&module.body);
+        walker.references.package_deletions = module
+            .body
+            .iter()
+            .filter_map(|statement| match statement {
+                Stmt::Delete(delete) => Some(&delete.targets),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|target| match target {
+                Expr::Name(name) => Some(name.id.to_string()),
+                _ => None,
+            })
+            .collect();
+    }
     (walker.definitions, walker.references)
+}
+
+/// Record the import path before plain imports reduce their local binding to the top-level name.
+fn package_imports(body: &[Stmt]) -> Vec<PackageImport> {
+    let mut imports = Vec::new();
+    for statement in body {
+        match statement {
+            Stmt::Import(import) => imports.extend(import.names.iter().map(|alias| {
+                let top = alias.name.split('.').next().unwrap_or_default();
+                let module = if alias.asname.is_some() {
+                    alias.name.as_str()
+                } else {
+                    top
+                };
+                PackageImport {
+                    binding: Binding {
+                        module: Some(module.to_string()),
+                        level: 0,
+                        name: None,
+                        dotted_alias: alias.asname.is_some() && alias.name.contains('.'),
+                    },
+                    local_name: alias
+                        .asname
+                        .as_ref()
+                        .map_or(top, |name| name.as_str())
+                        .to_string(),
+                    load: (module != alias.name.as_str()).then(|| alias.name.to_string()),
+                }
+            })),
+            Stmt::ImportFrom(import) => {
+                imports.extend(import.names.iter().map(|alias| PackageImport {
+                    binding: Binding {
+                        module: import.module.as_ref().map(ToString::to_string),
+                        level: import.level,
+                        name: Some(alias.name.to_string()),
+                        dotted_alias: false,
+                    },
+                    local_name: alias.asname.as_ref().unwrap_or(&alias.name).to_string(),
+                    load: None,
+                }));
+            }
+            _ => {}
+        }
+    }
+    imports
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -987,6 +1063,7 @@ impl<'a> Walker<'_, '_> {
                         module: Some(package),
                         level: 0,
                         name: None,
+                        dotted_alias: false,
                     },
                 )
             }
@@ -996,6 +1073,7 @@ impl<'a> Walker<'_, '_> {
                     module: Some(alias.name.to_string()),
                     level: 0,
                     name: None,
+                    dotted_alias: alias.name.contains('.'),
                 },
             ),
         });
@@ -1021,6 +1099,7 @@ impl<'a> Walker<'_, '_> {
                     module: module.clone(),
                     level: import.level,
                     name: Some(alias.name.to_string()),
+                    dotted_alias: false,
                 },
             );
         }
