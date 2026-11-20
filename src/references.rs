@@ -558,18 +558,26 @@ impl<'a> Walker<'_, '_> {
     /// `called` is the attribute read from the result of calling the chain, as in `Class().name`.
     fn add_read(&mut self, root: &Name, attributes: Vec<Name>, called: Option<Name>) {
         let scope = &self.scopes[self.scope];
-        if scope.kind == ScopeKind::Class
-            && scope.bound.contains(root.as_str())
-            && !scope.global_names.contains(root.as_str())
-            && !scope.imports.contains_key(root.as_str())
-        {
-            let owner = self.owner;
-            let members = scope.members.get(root.as_str()).into_iter().flatten();
-            self.references
-                .local_reads
-                .extend(members.map(|&index| (owner, index)));
-            self.add_attributes(attributes.into_iter().chain(called));
-            return;
+        if scope.kind == ScopeKind::Class {
+            if let Some(binding) = scope.imports.get(root.as_str()) {
+                self.references.imported_reads.insert(ImportedRead {
+                    owner: self.owner,
+                    binding: binding.clone(),
+                    attributes,
+                    reads_object: !self.in_signature,
+                    called,
+                });
+                return;
+            }
+            if scope.bound.contains(root.as_str()) && !scope.global_names.contains(root.as_str()) {
+                let owner = self.owner;
+                let members = scope.members.get(root.as_str()).into_iter().flatten();
+                self.references
+                    .local_reads
+                    .extend(members.map(|&index| (owner, index)));
+                self.add_attributes(attributes.into_iter().chain(called));
+                return;
+            }
         }
         let read = Read {
             owner: self.owner,
@@ -578,7 +586,7 @@ impl<'a> Walker<'_, '_> {
             reads_object: !self.in_signature,
             called,
         };
-        let scope = self.scope;
+        let scope = self.reads_target(self.scope);
         self.scopes[scope].reads.push(read);
     }
 
@@ -961,7 +969,22 @@ impl<'a> Walker<'_, '_> {
             self.visit_arguments(arguments);
         }
         self.scope = self.binder;
-        self.visit_body(&class.body);
+        for stmt in &class.body {
+            self.visit_stmt(stmt);
+            // Remove imports after evaluating a direct assignment's value. An assignment inside
+            // a conditional body may leave the import in place.
+            match stmt {
+                Stmt::Assign(assign) => {
+                    for target in &assign.targets {
+                        self.replace_class_import(target);
+                    }
+                }
+                Stmt::AnnAssign(assign) if assign.value.is_some() => {
+                    self.replace_class_import(&assign.target);
+                }
+                _ => {}
+            }
+        }
         let inner = self.scope;
         self.scope = scope;
         self.binder = binder;
@@ -973,6 +996,25 @@ impl<'a> Walker<'_, '_> {
         self.close(inner, &imported, Target::Scope(target));
         // The name is bound once the class is defined.
         self.bind_definition(class.name.as_str(), index);
+    }
+
+    /// Forget imports replaced by an unconditional assignment in the class body.
+    fn replace_class_import(&mut self, target: &Expr) {
+        match target {
+            Expr::Name(name) => {
+                let scope = &mut self.scopes[self.binder];
+                if !scope.global_names.contains(name.id.as_str()) {
+                    scope.imports.remove(name.id.as_str());
+                }
+            }
+            Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
+                for element in elts {
+                    self.replace_class_import(element);
+                }
+            }
+            Expr::Starred(starred) => self.replace_class_import(&starred.value),
+            _ => {}
+        }
     }
 
     /// Bind the names that an `import` statement imports.
