@@ -154,6 +154,13 @@ pub(crate) struct References {
     /// name of the parameter, each with the dotted name of its annotation as it is written, without
     /// its type arguments, such as `Flask` for `app: Flask`.
     pub annotated_parameters: FxHashMap<(u32, String), String>,
+    /// The parameters of the functions, by the line of the name of the function and the name of the
+    /// parameter.
+    pub parameters: FxHashSet<(u32, String)>,
+    /// The functions that return or yield the result of a call, or a local variable that is assigned
+    /// one, by the line of the name of the function, each with the dotted names of what they call as
+    /// they are written, such as `Flask` for `return Flask(__name__)`.
+    pub returned_calls: FxHashMap<u32, Vec<String>>,
     /// The calls of the functions and methods whose string arguments frameworks read, each by the
     /// dotted name of what it calls as it is written, such as `os.environ.setdefault`, and its leading
     /// positional arguments that are string literals.
@@ -367,6 +374,12 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 self.add_whole_read(values, None);
                 walk_stmt(self, stmt);
             }
+            Stmt::Return(ast::StmtReturn {
+                value: Some(value), ..
+            }) => {
+                self.add_returned(value);
+                walk_stmt(self, stmt);
+            }
             Stmt::TypeAlias(alias) => {
                 // Its value is evaluated when it is used, but what it reads is still read.
                 self.define_target(&alias.name, false, None, None, None, None);
@@ -416,6 +429,12 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 walk_expr(self, expr);
             }
             Expr::Call(call) => self.visit_call(call, None),
+            Expr::Yield(ast::ExprYield {
+                value: Some(value), ..
+            }) => {
+                self.add_returned(value);
+                walk_expr(self, expr);
+            }
             Expr::Dict(dict) => {
                 // `{**value}` reads every key of the value.
                 for item in dict.iter().filter(|item| item.key.is_none()) {
@@ -831,6 +850,11 @@ impl<'a> Walker<'_, '_> {
         if let Some(parameters) = parameters {
             for parameter in parameters {
                 names.push(parameter.name().as_str());
+                if let Some((_, line)) = &defined {
+                    self.references
+                        .parameters
+                        .insert((*line, parameter.name().to_string()));
+                }
                 if let Some(default) = parameter.default() {
                     defaults.push(default);
                 }
@@ -1359,6 +1383,20 @@ impl<'a> Walker<'_, '_> {
                 reader: reader.map(str::to_string),
                 local_import: local_import.clone(),
             }));
+    }
+
+    /// Add a value that the function the walker is in returns or yields, if it is the result of a call.
+    fn add_returned(&mut self, value: &Expr) {
+        let calls = self.value_calls(value);
+        if let Some(function) = self.owner
+            && !calls.is_empty()
+        {
+            self.references
+                .returned_calls
+                .entry(function)
+                .or_default()
+                .extend(calls);
+        }
     }
 
     /// Get the dotted names of what a value is the result of calling, as they are written, if it is a

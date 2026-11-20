@@ -33,8 +33,10 @@
 //! - Flask calls the functions that the decorators of an application or a blueprint register, such as
 //!   `app.route` or `bp.errorhandler`: of a variable that is set to `Flask()` or `Blueprint()`, or to
 //!   an instance of a subclass of them, at the top level of a module, or in the function that the
-//!   decorated function is defined in, of a parameter of that function that is annotated as one, of a
-//!   variable at the top level that is set to what a factory makes, and of `current_app`. It calls the methods of a `MethodView` named after HTTP methods, and
+//!   decorated function is defined in, of a parameter of that function that is annotated as one, or
+//!   that pytest passes a fixture to that returns or yields one, of a variable at the top level that
+//!   is set to what a factory makes, and of `current_app`. It calls the methods of a `MethodView`
+//!   named after HTTP methods, and
 //!   the `dispatch_request` method of a `View`. Its CLI runs the commands that `cli.command` and
 //!   `cli.group` of an application or a blueprint add, and those that `command` and `group` of a group
 //!   add, a group being an instance of `AppGroup` or a function that such a decorator makes one. It
@@ -507,6 +509,8 @@ impl<'a> FrameworkRules<'a> {
                 .variables
                 .extend(FLASK_CURRENT_APP.map(String::from));
             rules.flask_factories = rules.flask_factories(files);
+            let parameters = rules.flask_fixture_parameters(files);
+            rules.flask_apps.locals.extend(parameters);
             rules.flask_groups.locals = local_instances(files, hierarchy, &FLASK_GROUPS);
         }
         if rules.enabled(Framework::Celery) {
@@ -892,6 +896,46 @@ impl<'a> FrameworkRules<'a> {
         factories
     }
 
+    /// Find the parameters that pytest passes an application of Flask to: those of a test or a fixture
+    /// that are named as a fixture that returns or yields an application, or what a factory makes.
+    fn flask_fixture_parameters(&self, files: &[ProjectFile]) -> FxHashSet<(usize, u32, String)> {
+        let mut fixtures: FxHashSet<&str> = FxHashSet::default();
+        // The tests and the fixtures, which pytest passes fixtures to, by their module and line.
+        let mut tests_and_fixtures: FxHashSet<(usize, u32)> = FxHashSet::default();
+        for (module, (_, definitions, references)) in files.iter().enumerate() {
+            for definition in *definitions {
+                if definition.kind.is_function() && self.pytest_uses(definition, module) {
+                    tests_and_fixtures.insert((module, definition.line));
+                }
+                if definition.kind == Kind::Function
+                    && self.is_decorated(definition, module, &PYTEST_FIXTURES)
+                    && references
+                        .returned_calls
+                        .get(&definition.line)
+                        .is_some_and(|calls| {
+                            calls.iter().any(|call| {
+                                self.resolves_to(module, call, &FLASK_APPS)
+                                    || self.is_flask_factory(module, call)
+                            })
+                        })
+                {
+                    fixtures.insert(&definition.name);
+                }
+            }
+        }
+        let mut parameters = FxHashSet::default();
+        for (module, (_, _, references)) in files.iter().enumerate() {
+            for (function, name) in &references.parameters {
+                if fixtures.contains(name.as_str())
+                    && tests_and_fixtures.contains(&(module, *function))
+                {
+                    parameters.insert((module, *function, name.clone()));
+                }
+            }
+        }
+        parameters
+    }
+
     /// Check whether a call of a module calls a factory of Flask's applications.
     fn is_flask_factory(&self, module: usize, call: &str) -> bool {
         self.flask_factories
@@ -950,35 +994,37 @@ impl<'a> FrameworkRules<'a> {
         if !definition.kind.is_function() {
             return false;
         }
+        // Check the instance that a decorator is a method of, such as `app` for `app.route`. A method
+        // can be that of an attribute of the instance, such as `cli.command`.
+        let any_instance = |name: &str, check: &dyn Fn(&str) -> bool| {
+            methods
+                .iter()
+                .flat_map(|methods| methods.iter())
+                .filter_map(|method| name.strip_suffix(method)?.strip_suffix('.'))
+                .any(check)
+        };
         for decorator in &definition.decorators {
+            // A local variable or a parameter of the function that the definition is in hides a name
+            // of the module, so it is looked for as it is written.
+            if let Some(function) = definition.owner
+                && any_instance(decorator, &|instance| {
+                    instances
+                        .locals
+                        .contains(&(module, function, instance.to_string()))
+                })
+            {
+                return true;
+            }
             for name in self.hierarchy.resolve(module, decorator).iter() {
-                // A method can be that of an attribute of the instance, such as `cli.command`.
-                let registered = methods
-                    .iter()
-                    .flat_map(|methods| methods.iter())
-                    .any(|method| {
-                        let Some(instance) = name
-                            .strip_suffix(method)
-                            .and_then(|instance| instance.strip_suffix('.'))
-                        else {
-                            return false;
-                        };
-                        // An instance of the module itself is left as it is written, and is named
-                        // by its module, or is a local variable of the function that the definition
-                        // is in.
-                        instances.variables.contains(instance)
-                            || (name == decorator
-                                && (instances
-                                    .variables
-                                    .contains(&self.dotted_name(module, instance))
-                                    || definition.owner.is_some_and(|function| {
-                                        instances.locals.contains(&(
-                                            module,
-                                            function,
-                                            instance.to_string(),
-                                        ))
-                                    })))
-                    });
+                // An instance of the module itself is left as it is written, and is named by its
+                // module.
+                let registered = any_instance(name, &|instance| {
+                    instances.variables.contains(instance)
+                        || (name == decorator
+                            && instances
+                                .variables
+                                .contains(&self.dotted_name(module, instance)))
+                });
                 if registered {
                     return true;
                 }
