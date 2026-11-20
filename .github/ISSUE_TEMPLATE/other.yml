@@ -16,3 +16,11 @@ body:
       description: The output of `unref --version`.
     validations:
       required: true
+
+  - type: checkboxes
+    id: contributing
+    attributes:
+      label: Contributing
+      options:
+        - label: I have read [CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md).
+          required: true
