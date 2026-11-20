@@ -10,7 +10,7 @@ use crate::models::{DEFAULT_DUMMY_VARIABLE_RGX, Framework, Override};
 const PYPROJECT: &str = "pyproject.toml";
 
 /// The options of an override that select what it applies to.
-const SELECTORS: [&str; 3] = ["paths", "base-classes", "class-decorators"];
+const SELECTORS: [&str; 4] = ["paths", "base-classes", "class-decorators", "class-names"];
 
 /// How the findings are printed, named as ruff's `output-format` option names them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
@@ -351,6 +351,7 @@ fn parse_override(options: &Table, path: &Path) -> Result<Override, String> {
             "paths",
             "base-classes",
             "class-decorators",
+            "class-names",
             "used-names",
             "used-decorators",
         ],
@@ -379,6 +380,7 @@ fn parse_override(options: &Table, path: &Path) -> Result<Override, String> {
             .collect(),
         base_classes: string_list(options, "base-classes", &place)?,
         class_decorators: decorators(options, "class-decorators", &place)?,
+        class_names: string_list(options, "class-names", &place)?,
         used_names: string_list(options, "used-names", &place)?,
         used_decorators: decorators(options, "used-decorators", &place)?,
     })

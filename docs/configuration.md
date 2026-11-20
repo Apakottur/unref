@@ -201,6 +201,7 @@ Options that apply only to some definitions. An override selects them with at le
 | `paths`            | Definitions in these files and directories.                                            |
 | `base-classes`     | Definitions in subclasses of these classes, such as `ast.NodeVisitor`.                 |
 | `class-decorators` | Definitions in classes with these decorators, such as `plugins.register`.              |
+| `class-names`      | Definitions in classes whose names match these patterns, such as `*Values`.            |
 
 With several selectors, an override applies to what matches all of them. It then takes these options,
 which add to those of the project:
@@ -222,8 +223,13 @@ used-names = ["visit_*"]
 [[tool.unref.overrides]]
 class-decorators = ["plugins.register"]
 used-names = ["*"]
+
+[[tool.unref.overrides]]
+class-names = ["*Values"]
+used-names = ["*"]
 ```
 
 A base class or decorator is its dotted name as the project imports it. Subclasses of subclasses count
-too, including through classes from outside the project. In a file that is not `pyproject.toml`, the
-table is `[[overrides]]`.
+too, including through classes from outside the project. A class name is a pattern, as in
+[`used-names`](#used-names), matched against the class's own name: `*Values` matches `Outer.SizeValues`.
+In a file that is not `pyproject.toml`, the table is `[[overrides]]`.

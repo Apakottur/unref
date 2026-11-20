@@ -178,6 +178,8 @@ pub(crate) struct Override {
     pub base_classes: Vec<String>,
     /// Selects the definitions in classes with these decorators, such as `plugins.register`.
     pub class_decorators: Vec<String>,
+    /// Selects the definitions in classes whose names match these patterns, such as `*Values`.
+    pub class_names: Vec<String>,
     /// Names, as patterns, of the selected definitions that count as used.
     pub used_names: Vec<String>,
     /// Decorators that make the selected definitions they decorate count as used.

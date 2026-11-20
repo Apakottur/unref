@@ -182,7 +182,7 @@ _OVERRIDE_WRONG_TYPE = "Option '{option}' in an override in the configuration fi
             "override-without-selector",
             '[[overrides]]\nused-names = ["test_*"]',
             "An override in the configuration file {config} needs one of the options "
-            "'paths', 'base-classes', 'class-decorators'",
+            "'paths', 'base-classes', 'class-decorators', 'class-names'",
         ),
         _invalid(
             "override-base-classes-string",
@@ -193,6 +193,11 @@ _OVERRIDE_WRONG_TYPE = "Option '{option}' in an override in the configuration fi
             "override-class-decorators-string",
             '[[overrides]]\nclass-decorators = "dataclasses.dataclass"',
             _OVERRIDE_WRONG_TYPE.format(option="class-decorators"),
+        ),
+        _invalid(
+            "override-class-names-string",
+            '[[overrides]]\nclass-names = "*Values"',
+            _OVERRIDE_WRONG_TYPE.format(option="class-names"),
         ),
         _invalid(
             "override-class-decorators-at-sign",

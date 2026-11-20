@@ -1117,6 +1117,19 @@ fn covers(
             return false;
         }
     }
+    // An override with class names applies to what is defined in a class whose own name, without the
+    // classes it is nested in, matches one of the patterns.
+    if !item.class_names.is_empty() {
+        let named = definition.class.as_ref().is_some_and(|class| {
+            let name = class.rsplit('.').next().unwrap_or(class);
+            item.class_names
+                .iter()
+                .any(|pattern| fnmatch(name, pattern))
+        });
+        if !named {
+            return false;
+        }
+    }
     // An override with class decorators applies to what is defined in a class that has one of them.
     item.class_decorators.is_empty()
         || definition.class.as_ref().is_some_and(|class| {

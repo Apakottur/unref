@@ -1,0 +1,4 @@
+# Constants classes named like `*Values` count as used whole: each lists every value of an enumeration.
+[[tool.unref.overrides]]
+class-names = ["*Values"]
+used-names = ["*"]
