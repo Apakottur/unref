@@ -190,7 +190,7 @@ class-names = ["*Values"]
 used-names = ["*"]
 ```
 
-A class name is a pattern, as in [`used-names`](#used-names), matched against the name of the class that a
-definition is in, without the classes that class is nested in. A base class or decorator is its dotted name as the project imports it. Subclasses of subclasses count
-too, including through classes from outside the project. In a file that is not `pyproject.toml`, the
-table is `[[overrides]]`.
+A base class or decorator is its dotted name as the project imports it. Subclasses of subclasses count
+too, including through classes from outside the project. A class name is a pattern, as in
+[`used-names`](#used-names), matched against the class's own name: `*Values` matches `Outer.SizeValues`.
+In a file that is not `pyproject.toml`, the table is `[[overrides]]`.
