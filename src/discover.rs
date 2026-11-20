@@ -236,15 +236,15 @@ impl Exclude {
         }
     }
 
-    /// Check whether a file or directory under a given directory, which is resolved, is excluded.
-    /// The last pattern that matches it decides.
-    fn excludes(&self, path: &Path, is_directory: bool, given: &Path) -> bool {
+    /// Check whether a resolved file or directory under a given directory, which is resolved too, is
+    /// excluded. The last pattern that matches it decides.
+    fn excludes(&self, absolute: &Path, is_directory: bool, given: &Path) -> bool {
         // A path outside of the root can still match the patterns that start with `**/`.
         let relative_to_base = |path: &Path| {
             path.strip_prefix(&self.root)
                 .map_or_else(|_| without_root(path), Path::to_path_buf)
         };
-        let relative = relative_to_base(&resolve(path));
+        let relative = relative_to_base(absolute);
         let given = relative_to_base(given);
         matches!(
             matched(&self.patterns, &relative, is_directory, &given),
@@ -285,13 +285,16 @@ fn walk(directory: &Path, excluded: &Exclude, gitignore: bool, discovery: &mut D
         Vec::new()
     };
     let given = resolve(directory);
-    walk_directory(directory, excluded, gitignore, inherited, &given, discovery);
+    walk_directory(
+        directory, &given, excluded, gitignore, inherited, &given, discovery,
+    );
 }
 
 /// Add the Python files under a directory, as `walk` does, with the `.gitignore` files that apply
-/// from above it, which are read only if `gitignore` is set.
+/// from above it, which are read only if `gitignore` is set. `absolute` is the directory resolved.
 fn walk_directory(
     directory: &Path,
+    absolute: &Path,
     excluded: &Exclude,
     gitignore: bool,
     mut ignore_files: Vec<IgnoreFile>,
@@ -332,23 +335,32 @@ fn walk_directory(
         };
         // A link to a directory is not walked into, as with Python's `os.walk`.
         let is_directory = kind.is_dir() || (kind.is_symlink() && path.is_dir());
+        let selected = |is_directory| {
+            // Only a link needs resolving: any other entry is a name in the resolved directory.
+            let absolute = if kind.is_symlink() {
+                resolve(&path)
+            } else {
+                absolute.join(entry.file_name())
+            };
+            (!excluded.excludes(&absolute, is_directory, given)
+                && !is_ignored(&absolute, &ignore_files, is_directory, given))
+            .then_some(absolute)
+        };
         if is_directory {
             if kind.is_dir()
-                && !excluded.excludes(&path, true, given)
-                && !is_ignored(&path, &ignore_files, true, given)
+                && let Some(absolute) = selected(true)
             {
-                directories.push(path);
+                directories.push((path, absolute));
             }
-        } else if entry.file_name().to_string_lossy().ends_with(".py")
-            && !excluded.excludes(&path, false, given)
-            && !is_ignored(&path, &ignore_files, false, given)
+        } else if entry.file_name().to_string_lossy().ends_with(".py") && selected(false).is_some()
         {
             discovery.files.push(path);
         }
     }
-    for child in directories {
+    for (child, absolute) in directories {
         walk_directory(
             &child,
+            &absolute,
             excluded,
             gitignore,
             ignore_files.clone(),
@@ -413,8 +425,13 @@ fn is_valid_pattern(line: &str) -> bool {
 
 /// Check whether git ignores a file or directory. A deeper `.gitignore` file overrides the ones above
 /// it, and within a file the last matching pattern wins, so that `!pattern` can bring a path back.
-fn is_ignored(path: &Path, ignore_files: &[IgnoreFile], is_directory: bool, given: &Path) -> bool {
-    let absolute = resolve(path);
+/// `absolute` is the file or directory resolved.
+fn is_ignored(
+    absolute: &Path,
+    ignore_files: &[IgnoreFile],
+    is_directory: bool,
+    given: &Path,
+) -> bool {
     let mut ignored = false;
     for (base, patterns) in ignore_files {
         let Ok(relative) = absolute.strip_prefix(base) else {
