@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 
 use ignore::Match;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use rustc_hash::FxHashSet;
 
 use crate::config::Config;
 use crate::models::{Finding, Rule};
@@ -93,6 +94,17 @@ fn discover_files(paths: &[PathBuf], options: &Config, validate_explicit: bool) 
             _ => discovery.files.push(path),
         }
     }
+    if paths.len() > 1 {
+        // Overlapping inputs can select the same file under different spellings. Prefer a relative
+        // path for output when one was selected.
+        discovery
+            .files
+            .sort_by(|left, right| (left.is_absolute(), left).cmp(&(right.is_absolute(), right)));
+        let mut seen = FxHashSet::default();
+        discovery
+            .files
+            .retain(|path| absolute_file_path(path).is_none_or(|path| seen.insert(path)));
+    }
     discovery.files.sort();
     discovery.files.dedup();
     discovery
@@ -100,6 +112,18 @@ fn discover_files(paths: &[PathBuf], options: &Config, validate_explicit: bool) 
         .sort_by(|left, right| (&left.path, &left.name).cmp(&(&right.path, &right.name)));
     discovery.errors.dedup();
     discovery
+}
+
+/// Compare different spellings of a file path without resolving a link to the file itself.
+/// Unresolvable parent directories keep their own paths so their I/O errors can be reported.
+fn absolute_file_path(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let directory = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    Some(directory.canonicalize().ok()?.join(path.file_name()?))
 }
 
 /// Check whether a path that is given directly is excluded or, if `gitignore` is set, ignored by git,

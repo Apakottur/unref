@@ -34,6 +34,26 @@ def test_show_files_given_paths() -> None:
     assert result.stdout == _files("pkg/generated/module.py", "single.py")
 
 
+@pytest.mark.parametrize("show_files", [False, True])
+def test_mixed_path_spellings_select_a_file_once(tmp_path: Path, *, show_files: bool) -> None:
+    source = tmp_path / "app.py"
+    source.write_text("def unused(): pass\n")
+    (tmp_path / "subdir").mkdir()
+    args = [str(source), "subdir/../app.py", "."]
+    if show_files:
+        args.insert(0, "--show-files")
+
+    result = run(args, cwd=tmp_path)
+
+    assert result.stderr == ""
+    if show_files:
+        assert result.exit_code == 0
+        assert result.stdout == _files("app.py")
+    else:
+        assert result.exit_code == 1
+        assert result.stdout == "app.py:1:5: unused-function 'unused'\n"
+
+
 def test_show_files_missing_path() -> None:
     # A given path that does not exist is reported, as by a check, rather than listed.
     result = run(["--show-files", "missing.py", "single.py"], cwd=_EXCLUDE)
