@@ -421,7 +421,10 @@ fn find_uses(
                 && read
                     .reader
                     .as_ref()
-                    .is_none_or(|reader| is_external(project, classes.hierarchy, file, reader))
+                    .is_none_or(|reader| match &read.local_import {
+                        Some(binding) => is_external_import(project, file, binding, reader),
+                        None => is_external(project, classes.hierarchy, file, reader),
+                    })
             {
                 uses.entry((file, read.owner))
                     .or_default()
@@ -733,6 +736,19 @@ fn is_external(project: &Project, hierarchy: &ClassHierarchy, file: usize, writt
             .resolve(file, written)
             .iter()
             .all(|name| !project.holds(name))
+}
+
+/// Check whether a function, as it is written after a function-local import of its first name, is
+/// from outside the project.
+fn is_external_import(project: &Project, file: usize, binding: &Binding, written: &str) -> bool {
+    let attributes: Vec<Name> = written.split('.').skip(1).map(Name::new).collect();
+    resolve_import(
+        &project.names[file],
+        binding,
+        &attributes,
+        &project.files_by_name,
+    )
+    .is_some_and(|(parts, _)| !project.holds(&parts.join(".")))
 }
 
 /// Check whether a base class of a class, as it is written in its module, is not known: it is

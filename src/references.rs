@@ -15,8 +15,6 @@ use ruff_python_ast::{
 use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use ruff_python_stdlib::builtins::is_python_builtin;
-
 use crate::definitions::{Definition, Kind, Unwrap, annotation_name, decorator_names, dotted_name};
 use crate::positions::SourcePositions;
 
@@ -93,6 +91,9 @@ pub(crate) struct WholeRead {
     /// `json.dumps`, or None when it is read by `**`, a loop or a method of a mapping. It reads every
     /// key if it is from outside the project.
     pub reader: Option<String>,
+    /// The import of the function that holds the read, if the reader starts with a name that it
+    /// imports, such as `j` after `import json as j`.
+    pub local_import: Option<Binding>,
 }
 
 /// The methods of a mapping that read a key, given as their first argument.
@@ -1307,9 +1308,6 @@ impl<'a> Walker<'_, '_> {
                 self.add_whole_read(values, None);
             }
         }
-        if !self.may_be_external(&call.func) {
-            return;
-        }
         // The name of the function is found only for a call that passes such a value, as few do.
         let mut reader: Option<Option<String>> = None;
         let passed = call.arguments.args.iter().chain(
@@ -1332,33 +1330,23 @@ impl<'a> Walker<'_, '_> {
         }
     }
 
-    /// Check whether a function, as it is called, can be from outside the project: a builtin, or a name
-    /// that the scope or the module imports, or an attribute of one.
-    fn may_be_external(&self, func: &Expr) -> bool {
-        let mut root = func;
-        while let Expr::Attribute(attribute) = root {
-            root = &attribute.value;
-        }
-        let Expr::Name(name) = root else {
-            return false;
-        };
-        let name = name.id.as_str();
-        // The builtins of any version of Python.
-        is_python_builtin(name, u8::MAX, false)
-            || [self.scope, 0]
-                .iter()
-                .any(|&scope| self.scopes[scope].imports.contains_key(name))
-    }
-
     /// Add a read of a value as a whole, given by the dotted names of what it is the result of calling.
     fn add_whole_read(&mut self, values: Vec<String>, reader: Option<&str>) {
         let owner = self.owner;
+        let local_import = reader
+            .filter(|_| self.scope != 0)
+            .and_then(|reader| {
+                let root = reader.split('.').next().unwrap_or(reader);
+                self.scopes[self.scope].imports.get(root)
+            })
+            .cloned();
         self.references
             .whole_reads
             .extend(values.into_iter().map(|value| WholeRead {
                 owner,
                 value,
                 reader: reader.map(str::to_string),
+                local_import: local_import.clone(),
             }));
     }
 
