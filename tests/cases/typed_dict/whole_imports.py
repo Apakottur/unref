@@ -34,6 +34,6 @@ def local_project_import() -> None:
     h.send(Helped(helped="a"))
 
 
-import json  # noqa: E402
+import json
 
 late_import(), local_import(), local_project_import()
