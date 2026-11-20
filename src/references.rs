@@ -102,6 +102,8 @@ const KEY_METHODS: [&str; 3] = ["get", "pop", "setdefault"];
 const WHOLE_METHODS: [&str; 3] = ["items", "keys", "values"];
 /// The functions that read an attribute named by their second argument, as `value.name` does.
 const ATTRIBUTE_READERS: [&str; 2] = ["getattr", "hasattr"];
+/// Calls returning the module namespace when used in the appropriate scope.
+const NAMESPACE_BUILTINS: [&str; 3] = ["globals", "vars", "locals"];
 /// The functions and methods whose string arguments frameworks read: Django's `include`, which names a
 /// module of URLs, and `os.environ.setdefault`, which can set `DJANGO_SETTINGS_MODULE`.
 const STRING_CALLS: [&str; 2] = ["include", "setdefault"];
@@ -194,7 +196,22 @@ pub(crate) fn walk_module(
         owner: None,
         in_signature: false,
     };
-    walker.visit_body(&module.body);
+    for statement in &module.body {
+        // A conditional binding may never execute. Keep treating the builtin as possible afterward.
+        let old_bindings = matches!(
+            statement,
+            Stmt::If(_) | Stmt::For(_) | Stmt::While(_) | Stmt::Try(_) | Stmt::Match(_)
+        )
+        .then(|| NAMESPACE_BUILTINS.map(|name| walker.scopes[0].bound.contains(name)));
+        walker.visit_stmt(statement);
+        if let Some(old_bindings) = old_bindings {
+            for (name, was_bound) in NAMESPACE_BUILTINS.into_iter().zip(old_bindings) {
+                if !was_bound {
+                    walker.scopes[0].bound.remove(name);
+                }
+            }
+        }
+    }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
@@ -617,7 +634,7 @@ impl<'a> Walker<'_, '_> {
         let name = func.id.as_str();
         let scope = &self.scopes[self.scope];
         if !call.arguments.is_empty()
-            || !matches!(name, "globals" | "vars" | "locals")
+            || !NAMESPACE_BUILTINS.contains(&name)
             || (name != "globals" && scope.kind != ScopeKind::Module)
         {
             return;
@@ -1402,7 +1419,7 @@ impl<'a> Walker<'_, '_> {
         let scope = &mut self.scopes[binder];
         let definitions = match scope.kind {
             ScopeKind::Module => {
-                if matches!(name, "globals" | "locals" | "vars") {
+                if NAMESPACE_BUILTINS.contains(&name) {
                     self.bind(name);
                 }
                 return;

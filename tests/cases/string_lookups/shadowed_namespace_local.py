@@ -1,6 +1,7 @@
 BY_PARAMETER = 0  # expect: 1 [unused-variable]
 BY_CLOSURE = 0  # expect: 1 [unused-variable]
 BY_BUILTIN = 4
+AFTER_CONDITIONAL = 5
 
 
 def parameter(globals):
@@ -20,3 +21,8 @@ def builtin():
 
 
 parameter(lambda: {"BY_PARAMETER": 2}), enclosing(), builtin()
+
+if False:
+    globals = lambda: {"AFTER_CONDITIONAL": 0}
+
+globals()["AFTER_CONDITIONAL"]
