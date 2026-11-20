@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use regex::bytes::Regex;
 use ruff_python_ast::{CmpOp, Expr, ModModule, Stmt};
 use ruff_python_parser::Parsed;
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::FxHashMap;
 
 use crate::definitions::Definition;
@@ -59,6 +59,15 @@ pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
     let text = decode_source(&bytes)
         .map_err(|error| syntax_error(error.line, error.column, error.message))?;
     let positions = SourcePositions::new(&text);
+    // Python rejects null bytes even in comments, which the parser skips.
+    if let Some(offset) = text.find('\0') {
+        let (line, column) = positions.line_column(TextSize::new(to_u32(offset)));
+        return Err(syntax_error(
+            line,
+            column,
+            "source code cannot contain null bytes".to_owned(),
+        ));
+    }
     let parsed = ruff_python_parser::parse_module(&text).map_err(|error| {
         let (line, column) = positions.line_column(error.location.start());
         syntax_error(line, column, error.error.to_string())

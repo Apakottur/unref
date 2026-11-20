@@ -164,6 +164,20 @@ def test_undecodable(name: str, error: str) -> None:
     assert result.stdout == f"{path}:1:1: invalid-syntax '{error}'\n"
 
 
+@pytest.mark.parametrize("encoding", ["utf-8", "latin-1"])
+def test_null_byte_in_comment(tmp_path: Path, encoding: str) -> None:
+    source = f"# coding: {encoding}\n# café\0\nfrom helper import live\nlive()\n"
+    (tmp_path / "app.py").write_bytes(source.encode(encoding))
+    (tmp_path / "helper.py").write_text("def live():\n    print(7)\n", encoding="utf-8")
+
+    result = run(["."], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.output == (
+        "app.py:2:7: invalid-syntax 'source code cannot contain null bytes'\nhelper.py:1:5: unused-function 'live'\n"
+    )
+
+
 def test_linked_module(tmp_path: Path) -> None:
     # A link to a file is imported by its own name. What is used through it is used in the file that it
     # links to as well, since they are one source.
