@@ -71,3 +71,14 @@ def subscript():  # expect: 5 [unused-function]
 @decorators[0].command
 def attribute_of_subscript():  # expect: 5 [unused-function]
     return 12
+
+
+# Only the outer call is removed.
+@app().command
+def attribute_of_call():  # expect: 5 [unused-function]
+    return 13
+
+
+@app.command()()
+def call_of_call():  # expect: 5 [unused-function]
+    return 14
