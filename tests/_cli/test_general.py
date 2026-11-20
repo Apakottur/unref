@@ -155,6 +155,22 @@ def test_cp437_source(tmp_path: Path, encoding: str) -> None:
     assert result.output == ""
 
 
+@pytest.mark.parametrize(
+    ("encoding", "exit_code", "output"),
+    [("cp437", 0, ""), ("cp850", 1, "app.py:1:1: unsupported-encoding 'unsupported encoding: cp850'\n")],
+)
+def test_encoding_declaration_after_non_utf8_comment(
+    tmp_path: Path, encoding: str, exit_code: int, output: str
+) -> None:
+    source = f"# Café project, coding: {encoding}\nprint('café')\n"
+    (tmp_path / "app.py").write_bytes(source.encode(encoding))
+
+    result = run(["."], cwd=tmp_path)
+
+    assert result.exit_code == exit_code
+    assert result.output == output
+
+
 @pytest.mark.parametrize("newline", ["\r", "\r\n"], ids=["cr", "crlf"])
 def test_cp437_second_line_declaration(tmp_path: Path, newline: str) -> None:
     source = newline.join(("", "# coding: cp437", "print('café')", ""))

@@ -18,7 +18,8 @@ use crate::references::{Binding, References, walk_module};
 
 /// The encoding declaration of a module (PEP 263), on one of its first two lines.
 static CODING: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[ \t\x0c]*#.*?coding[:=][ \t]*([-\w.]+)").expect("valid pattern")
+    // The comment before the declaration can contain bytes that are invalid UTF-8.
+    Regex::new(r"^[ \t\x0c]*#(?-u:.*?)coding[:=][ \t]*([-\w.]+)").expect("valid pattern")
 });
 
 /// The characters for bytes 0x80 through 0xFF in Python's CP437 codec. Lower bytes are ASCII.
