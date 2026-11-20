@@ -252,6 +252,8 @@ struct Scope {
     calls: FxHashMap<String, Vec<String>>,
     /// The scope a comprehension reads from when a name is not local to it.
     comprehension_parent: Option<usize>,
+    /// The scope a function or lambda reads from when a name is not local to it.
+    function_parent: Option<usize>,
     /// In a class body, the nearest scope around it that is not a class body. The functions,
     /// lambdas and comprehensions in a class body do not see its names, and neither does a class
     /// body nested in it, so their reads go on to this scope, as do the reads of the class body that
@@ -278,6 +280,7 @@ impl Scope {
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
             comprehension_parent: None,
+            function_parent: None,
             outer: None,
         }
     }
@@ -868,8 +871,9 @@ impl<'a> Walker<'_, '_> {
 
         // The body runs only when the function is called. A lambda has no name, and is part of the code
         // that it is in.
-        let (body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
+        let (mut body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
         let (scope, owner) = (self.scope, self.owner);
+        body_scope.function_parent = Some(self.reads_target(scope));
         self.scope = self.push_scope(body_scope);
         self.binder = self.scope;
         match body {
@@ -1345,11 +1349,7 @@ impl<'a> Walker<'_, '_> {
     fn add_whole_read(&mut self, values: Vec<String>, reader: Option<&str>) {
         let owner = self.owner;
         let local_import = reader
-            .filter(|_| self.scope != 0)
-            .and_then(|reader| {
-                let root = reader.split('.').next().unwrap_or(reader);
-                self.scopes[self.scope].imports.get(root)
-            })
+            .and_then(|reader| self.local_import(reader.split('.').next().unwrap_or(reader)))
             .cloned();
         self.references
             .whole_reads
@@ -1369,6 +1369,23 @@ impl<'a> Walker<'_, '_> {
             Expr::Name(name) => self.variable_calls(name.id.as_str()),
             _ => Vec::new(),
         }
+    }
+
+    /// Get what a name stands for if a function, lambda or comprehension imports it, the one that the
+    /// walker is in or one around it, and no scope in between binds it otherwise.
+    fn local_import(&self, name: &str) -> Option<&Binding> {
+        let mut scope = self.scope;
+        while scope != 0 {
+            let found = &self.scopes[scope];
+            if let Some(binding) = found.imports.get(name) {
+                return Some(binding);
+            }
+            if found.bound.contains(name) {
+                return None;
+            }
+            scope = found.comprehension_parent.or(found.function_parent)?;
+        }
+        None
     }
 
     /// Get the dotted names of what a variable is assigned the result of calling, as they are
