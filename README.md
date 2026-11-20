@@ -56,5 +56,5 @@ repos:
 
 ## Contributing
 
-False positives and other bugs are welcome as [issues](https://github.com/Apakottur/unref/issues). To
-contribute code, see [CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md).
+Bug reports and other feedback are welcome as [issues](https://github.com/Apakottur/unref/issues). To
+contribute, see [CONTRIBUTING.md](https://github.com/Apakottur/unref/blob/main/CONTRIBUTING.md).

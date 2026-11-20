@@ -1,7 +1,11 @@
 # Contributing to unref
 
-Thanks for your interest in contributing! To contribute, open a pull request with your changes, or an
-issue with your bug or request.
+Thanks for your interest in contributing! Bug reports and other feedback are welcome as issues. Open an
+issue before a pull request, so that we can agree on the change first.
+
+Issues and pull requests should be about problems in real codebases. Low-quality issues and pull requests,
+such as edge cases that are unlikely in real code or changes that add a lot of complexity to handle them,
+will likely be declined.
 
 All checks (linters, type checks, and tests) run automatically in CI through GitHub Actions.
 
