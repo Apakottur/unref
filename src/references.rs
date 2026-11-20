@@ -137,6 +137,8 @@ pub(crate) struct References {
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
     pub bindings: FxHashMap<String, Binding>,
+    /// Exports whose import binding was replaced by assignment, optionally imported again later.
+    pub rebound_exports: FxHashMap<String, Option<Binding>>,
     /// The functions and classes that are local variables of a function, by their index in the
     /// definitions of the module. A read of their name elsewhere is not a reference to them.
     pub local_definitions: FxHashSet<usize>,
@@ -206,26 +208,35 @@ pub(crate) fn walk_module(
             _ => &[],
         };
         for target in targets {
-            remove_exported_import(target, &mut walker.references.bindings);
+            replace_exported_import(
+                target,
+                &walker.scopes[0].imports,
+                &mut walker.references.rebound_exports,
+            );
         }
     }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
+    walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
     (walker.definitions, walker.references)
 }
 
-/// Remove the imported names replaced by an assignment target.
-fn remove_exported_import(target: &Expr, bindings: &mut FxHashMap<String, Binding>) {
+/// Mark exported imports replaced by an assignment target.
+fn replace_exported_import(
+    target: &Expr,
+    bindings: &FxHashMap<String, Binding>,
+    rebound: &mut FxHashMap<String, Option<Binding>>,
+) {
     match target {
-        Expr::Name(name) => {
-            bindings.remove(name.id.as_str());
+        Expr::Name(name) if bindings.contains_key(name.id.as_str()) => {
+            rebound.insert(name.id.to_string(), None);
         }
         Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
             for target in elts {
-                remove_exported_import(target, bindings);
+                replace_exported_import(target, bindings, rebound);
             }
         }
-        Expr::Starred(starred) => remove_exported_import(&starred.value, bindings),
+        Expr::Starred(starred) => replace_exported_import(&starred.value, bindings, rebound),
         _ => {}
     }
 }
@@ -1444,11 +1455,10 @@ impl<'a> Walker<'_, '_> {
         for (name, binding) in statement {
             self.bind(&name);
             let binder = self.binder;
-            if binder == 0 {
-                self.references
-                    .bindings
-                    .entry(name.clone())
-                    .or_insert_with(|| binding.clone());
+            if binder == 0
+                && let Some(export) = self.references.rebound_exports.get_mut(&name)
+            {
+                export.get_or_insert_with(|| binding.clone());
             }
             self.scopes[binder].imports.entry(name).or_insert(binding);
         }

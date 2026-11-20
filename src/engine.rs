@@ -844,7 +844,12 @@ fn imported_objects(resolved: &Resolved, project: &Project) -> FxHashSet<(usize,
         // longest module is followed, as `package.module.name` reads `name` from `package.module`.
         for &module in modules {
             let name = &parts[*index];
-            if let Some(binding) = project.facts[module].references.bindings.get(name.as_str())
+            let references = &project.facts[module].references;
+            let binding = match references.rebound_exports.get(name.as_str()) {
+                Some(export) => export.as_ref(),
+                None => references.bindings.get(name.as_str()),
+            };
+            if let Some(binding) = binding
                 && followed.insert((module, name.clone()))
                 && let Some(next) = resolve_import(
                     &project.names[module],
@@ -984,6 +989,7 @@ fn import_relative(
     for binding in references
         .bindings
         .values_mut()
+        .chain(references.rebound_exports.values_mut().flatten())
         .chain(file_facts.lazy.values_mut().flatten())
     {
         if is_sibling(binding.module.as_deref(), binding.level) {
