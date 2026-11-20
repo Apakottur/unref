@@ -29,7 +29,7 @@ rev = "v10.4.1"
 
 [[repos.hooks]]
 id = "cspell"
-exclude = '\.(csv|json|txt|lock)$'
+exclude = '\.(csv|json|txt|lock)$|^src/codecs\.rs$'
 args = [
   "lint",
   "-c",
