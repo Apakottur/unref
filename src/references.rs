@@ -308,9 +308,9 @@ struct Walker<'p, 'a> {
     scope: usize,
     /// The scope that the names bound at the node belong to, which holds its definitions. It is the
     /// scope of the node, except in what a class or function evaluates where it is defined. The
-    /// decorators, type parameters and base classes of a class bind in the class body. The decorators,
-    /// default values and annotations of a function bind in a scope of their own that is never closed,
-    /// since the names that they bind are not tracked.
+    /// decorators and base classes of a class bind in the enclosing scope. The decorators, default
+    /// values and annotations of a function bind in a scope of their own that is never closed, since
+    /// the names that they bind are not tracked.
     binder: usize,
     /// The function that the node is in, or None for code that runs when the module is imported.
     owner: Owner,
@@ -578,7 +578,12 @@ impl<'a> Walker<'_, '_> {
             reads_object: !self.in_signature,
             called,
         };
-        let scope = self.scope;
+        let scope = if scope.kind == ScopeKind::Class && scope.global_names.contains(root.as_str())
+        {
+            0
+        } else {
+            self.scope
+        };
         self.scopes[scope].reads.push(read);
     }
 
@@ -949,8 +954,8 @@ impl<'a> Walker<'_, '_> {
         self.definitions.push(definition);
 
         let (scope, binder) = (self.scope, self.binder);
-        self.binder = self.push_scope(class_scope);
-        self.scopes[self.binder].defined_in = Some(self.binder);
+        let inner = self.push_scope(class_scope);
+        self.scopes[inner].defined_in = Some(inner);
         for decorator in &class.decorator_list {
             self.visit_expr(&decorator.expression);
         }
@@ -960,9 +965,9 @@ impl<'a> Walker<'_, '_> {
         if let Some(arguments) = &class.arguments {
             self.visit_arguments(arguments);
         }
-        self.scope = self.binder;
+        self.scope = inner;
+        self.binder = inner;
         self.visit_body(&class.body);
-        let inner = self.scope;
         self.scope = scope;
         self.binder = binder;
 
@@ -1168,7 +1173,17 @@ impl<'a> Walker<'_, '_> {
                     .push(call.clone());
             }
         }
-        let scope = &self.scopes[self.binder];
+        let binder = self.binder;
+        let scope = &self.scopes[binder];
+        let scope = match target {
+            Expr::Name(name)
+                if scope.kind == ScopeKind::Class
+                    && scope.global_names.contains(name.id.as_str()) =>
+            {
+                &self.scopes[0]
+            }
+            _ => scope,
+        };
         let (kind, name, position, unpacked) = match target {
             Expr::Name(name) if scope.kind != ScopeKind::Function => {
                 let kind = if scope.kind == ScopeKind::Module {
