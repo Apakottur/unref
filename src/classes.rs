@@ -13,6 +13,9 @@ use crate::external::ExternalModules;
 use crate::references::Binding;
 use crate::symbols::ModuleSymbols;
 
+/// The most parts of a dotted name that is followed, far more than a name in real code has.
+const MAX_PARTS: usize = 32;
+
 /// A set of dotted names that is cached and shared.
 pub(crate) type Names = Rc<FxHashSet<String>>;
 
@@ -250,7 +253,9 @@ impl ClassHierarchy {
     /// The names are added to one set as they are found, rather than returned and copied at each step
     /// of a long chain of imports.
     fn follow(&self, name: &str, seen: &mut FxHashSet<String>, found: &mut FxHashSet<String>) {
-        if !seen.insert(name.to_string()) {
+        // A package that imports a name from a submodule it does not have, as `from first.first import
+        // first` in `first`, makes the name longer at each step instead of repeating it.
+        if name.split('.').nth(MAX_PARTS).is_some() || !seen.insert(name.to_string()) {
             return;
         }
 

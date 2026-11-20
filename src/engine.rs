@@ -224,7 +224,8 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     // then used, and so is what it uses.
     let kept_used = graph.use_definitions(kept.iter().copied());
     let needed: Vec<DefinitionId> = ignored.into_iter().filter(|id| !kept_used[*id]).collect();
-    let all_used = graph.use_definitions(needed.iter().copied());
+    let mut all_used = graph.use_definitions(needed.iter().copied());
+    share_used(&project, &mut all_used);
     let unused: Vec<DefinitionId> = (0..project.definitions.len())
         .filter(|id| !all_used[*id])
         .collect();
@@ -482,9 +483,6 @@ struct Classes<'a> {
     definitions: Vec<DefinitionId>,
     /// The classes by their dotted names, such as `package.module.Class`.
     by_dotted: FxHashMap<String, Vec<ClassId>>,
-    /// The names of the classes, without their modules, so that a name that cannot be a class is not
-    /// followed.
-    names: FxHashSet<String>,
     /// The base classes of each class in the project, directly or not.
     ancestors: Vec<Vec<ClassId>>,
     /// The classes of the project that inherit from each class, directly or not.
@@ -514,7 +512,6 @@ impl<'a> Classes<'a> {
         let mut ids = FxHashMap::default();
         let mut definitions = Vec::new();
         let mut by_dotted: FxHashMap<String, Vec<ClassId>> = FxHashMap::default();
-        let mut names = FxHashSet::default();
         for (definition_id, (file, definition)) in project
             .definition_files
             .iter()
@@ -531,7 +528,6 @@ impl<'a> Classes<'a> {
                 definitions.push(definition_id);
                 let dotted = join(&project.names[*file].name, &key.1);
                 by_dotted.entry(dotted).or_default().push(id);
-                names.insert(definition.name.clone());
                 keys.push(key);
             }
         }
@@ -614,7 +610,6 @@ impl<'a> Classes<'a> {
             ids,
             definitions,
             by_dotted,
-            names,
             ancestors,
             lineages: std::iter::repeat_with(Default::default)
                 .take(descendants.len())
@@ -655,10 +650,6 @@ impl<'a> Classes<'a> {
     /// Returns None if the dotted name is not a class of the project, or if the class has no such
     /// member.
     fn read_from(&self, written: &str, name: &str) -> Option<Vec<DefinitionId>> {
-        let last = written.rsplit('.').next().unwrap_or(written);
-        if !self.names.contains(last) {
-            return None;
-        }
         let classes: Vec<ClassId> = self
             .hierarchy
             .follow_name(written)
@@ -1408,6 +1399,29 @@ fn transitive_definitions(
 ///
 /// Returns a finding for each unused definition, for each problem with an ignore comment, and for each
 /// file that does not parse, sorted by file, line and column.
+/// Mark a definition used if it is used in another file of the same source. A link to a file is a
+/// module of its own, with its own name, but deleting a definition from it deletes it from both.
+fn share_used(project: &Project, used: &mut [bool]) {
+    let mut by_source: FxHashMap<PathBuf, Vec<usize>> = FxHashMap::default();
+    for (file, path) in project.files.iter().enumerate() {
+        by_source.entry(resolve(path)).or_default().push(file);
+    }
+    for files in by_source.values().filter(|files| files.len() > 1) {
+        // The files have the same source, so they have the same definitions in the same order.
+        let starts: Vec<DefinitionId> = files
+            .iter()
+            .map(|&file| project.first_definition[file])
+            .collect();
+        for offset in 0..project.ids_of_file(files[0]).len() {
+            if starts.iter().any(|start| used[start + offset]) {
+                for start in &starts {
+                    used[start + offset] = true;
+                }
+            }
+        }
+    }
+}
+
 fn findings(
     project: &Project,
     discovered: &[Arc<Path>],
