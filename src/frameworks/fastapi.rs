@@ -17,7 +17,7 @@ pub(super) const FASTAPI_ROUTERS: [&str; 4] = [
 ];
 /// The methods of an application or a router that register the function they decorate, besides
 /// those named after HTTP methods.
-pub(super) const FASTAPI_DECORATORS: [&str; 5] = [
+const FASTAPI_DECORATORS: [&str; 5] = [
     "api_route",
     "websocket",
     "on_event",

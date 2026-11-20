@@ -7,12 +7,11 @@ use crate::models::fnmatch;
 
 use super::{FrameworkRules, file_name};
 
-pub(super) const UNITTEST_FILES: &str = "test*.py";
+const UNITTEST_FILES: &str = "test*.py";
 /// `unittest.TestCase` as `unittest` gives it out, and where it is defined.
-pub(super) const UNITTEST_TEST_CASES: [&str; 2] = ["unittest.TestCase", "unittest.case.TestCase"];
-pub(super) const UNITTEST_MODULE_FUNCTIONS: [&str; 3] =
-    ["setUpModule", "tearDownModule", "load_tests"];
-pub(super) const UNITTEST_METHODS: [&str; 6] = [
+const UNITTEST_TEST_CASES: [&str; 2] = ["unittest.TestCase", "unittest.case.TestCase"];
+const UNITTEST_MODULE_FUNCTIONS: [&str; 3] = ["setUpModule", "tearDownModule", "load_tests"];
+const UNITTEST_METHODS: [&str; 6] = [
     "setUp",
     "tearDown",
     "setUpClass",

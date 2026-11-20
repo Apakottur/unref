@@ -13,11 +13,11 @@ use crate::definitions::{Definition, Kind};
 use super::{FrameworkRules, file_name, is_top_level};
 
 /// The name of Sphinx's configuration file, which it reads from its configuration directory.
-pub(super) const SPHINX_CONF: &str = "conf.py";
+const SPHINX_CONF: &str = "conf.py";
 /// The settings that make a `conf.py` that of Sphinx when it sets one at the top level.
-pub(super) const SPHINX_MARKERS: [&str; 3] = ["project", "extensions", "html_theme"];
+const SPHINX_MARKERS: [&str; 3] = ["project", "extensions", "html_theme"];
 /// The functions of the configuration file that Sphinx and its extensions call.
-pub(super) const SPHINX_FUNCTIONS: [&str; 2] = ["setup", "linkcode_resolve"];
+const SPHINX_FUNCTIONS: [&str; 2] = ["setup", "linkcode_resolve"];
 
 impl FrameworkRules<'_> {
     /// Check whether Sphinx reads or calls a definition of its configuration file by itself.

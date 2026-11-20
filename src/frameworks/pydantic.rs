@@ -9,7 +9,7 @@ use super::FrameworkRules;
 
 /// `pydantic.BaseModel` as `pydantic` gives it out, and where it is defined, also in the Pydantic 1 API
 /// of `pydantic.v1`. Packages such as `pydantic_settings` import it from where it is defined.
-pub(super) const PYDANTIC_MODELS: [&str; 4] = [
+const PYDANTIC_MODELS: [&str; 4] = [
     "pydantic.BaseModel",
     "pydantic.main.BaseModel",
     "pydantic.v1.BaseModel",
@@ -17,7 +17,7 @@ pub(super) const PYDANTIC_MODELS: [&str; 4] = [
 ];
 /// The decorators that register a method with Pydantic, as `pydantic` gives them out, and where they
 /// are defined, also in the Pydantic 1 API of `pydantic.v1`.
-pub(super) const PYDANTIC_DECORATORS: [&str; 18] = [
+const PYDANTIC_DECORATORS: [&str; 18] = [
     "pydantic.field_validator",
     "pydantic.functional_validators.field_validator",
     "pydantic.model_validator",
@@ -37,9 +37,9 @@ pub(super) const PYDANTIC_DECORATORS: [&str; 18] = [
     "pydantic.v1.root_validator",
     "pydantic.v1.class_validators.root_validator",
 ];
-pub(super) const PYDANTIC_CONFIG: &str = "model_config";
+const PYDANTIC_CONFIG: &str = "model_config";
 /// The configuration class of a model in Pydantic 1.
-pub(super) const PYDANTIC_V1_CONFIG: &str = "Config";
+const PYDANTIC_V1_CONFIG: &str = "Config";
 
 impl FrameworkRules<'_> {
     /// Check whether Pydantic calls or reads a definition by itself.
@@ -74,7 +74,7 @@ impl FrameworkRules<'_> {
     }
 
     /// Check whether a class of a module is a subclass of `pydantic.BaseModel`.
-    pub(super) fn is_model(&self, module: usize, name: &str) -> bool {
+    fn is_model(&self, module: usize, name: &str) -> bool {
         self.inherits(module, name, &PYDANTIC_MODELS)
     }
 }

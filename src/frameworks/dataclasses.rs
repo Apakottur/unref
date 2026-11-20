@@ -11,7 +11,7 @@ use super::{FrameworkRules, has_any};
 
 /// The decorators that make a dataclass, as `dataclasses`, Pydantic and attrs give them out, and
 /// where they are defined. `attrs` gives out the decorators of `attr`.
-pub(super) const DATACLASS_DECORATORS: [&str; 16] = [
+const DATACLASS_DECORATORS: [&str; 16] = [
     "dataclasses.dataclass",
     "pydantic.dataclasses.dataclass",
     "attr.s",
@@ -30,9 +30,9 @@ pub(super) const DATACLASS_DECORATORS: [&str; 16] = [
     "attrs.frozen",
 ];
 /// The classes whose subclasses are named tuples, with a field for each name they annotate.
-pub(super) const NAMED_TUPLES: [&str; 2] = ["typing.NamedTuple", "typing_extensions.NamedTuple"];
+const NAMED_TUPLES: [&str; 2] = ["typing.NamedTuple", "typing_extensions.NamedTuple"];
 /// The functions of attrs that make a field without an annotation, such as `x = attr.ib()`.
-pub(super) const ATTRS_FIELDS: [&str; 7] = [
+const ATTRS_FIELDS: [&str; 7] = [
     "attr.ib",
     "attr.attr",
     "attr.attrib",

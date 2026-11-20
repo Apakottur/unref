@@ -11,8 +11,8 @@ use crate::models::fnmatch;
 
 use super::{FrameworkRules, file_name};
 
-pub(super) const PYTEST_FILES: [&str; 2] = ["test_*.py", "*_test.py"];
-pub(super) const PYTEST_CONFTEST: &str = "conftest.py";
+const PYTEST_FILES: [&str; 2] = ["test_*.py", "*_test.py"];
+const PYTEST_CONFTEST: &str = "conftest.py";
 /// `pytest.fixture` as `pytest` gives it out, and where it is defined, and the same for the fixtures of
 /// pytest-asyncio.
 pub(super) const PYTEST_FIXTURES: [&str; 4] = [
@@ -22,7 +22,7 @@ pub(super) const PYTEST_FIXTURES: [&str; 4] = [
     "pytest_asyncio.plugin.fixture",
 ];
 /// The functions of a test module that pytest calls, besides the tests.
-pub(super) const PYTEST_MODULE_FUNCTIONS: [&str; 6] = [
+const PYTEST_MODULE_FUNCTIONS: [&str; 6] = [
     "setup_module",
     "teardown_module",
     "setUpModule",
@@ -31,7 +31,7 @@ pub(super) const PYTEST_MODULE_FUNCTIONS: [&str; 6] = [
     "teardown_function",
 ];
 /// The methods of a test class that pytest calls, besides the tests.
-pub(super) const PYTEST_CLASS_METHODS: [&str; 4] = [
+const PYTEST_CLASS_METHODS: [&str; 4] = [
     "setup_class",
     "teardown_class",
     "setup_method",
@@ -39,9 +39,9 @@ pub(super) const PYTEST_CLASS_METHODS: [&str; 4] = [
 ];
 /// The variables that pytest reads from a test module or `conftest.py`, of which it reads
 /// `pytestmark` from a test class too.
-pub(super) const PYTEST_MODULE_VARIABLES: [&str; 2] = ["pytestmark", "pytest_plugins"];
+const PYTEST_MODULE_VARIABLES: [&str; 2] = ["pytestmark", "pytest_plugins"];
 /// The variables that pytest reads from `conftest.py` only.
-pub(super) const PYTEST_CONFTEST_VARIABLES: [&str; 2] = ["collect_ignore", "collect_ignore_glob"];
+const PYTEST_CONFTEST_VARIABLES: [&str; 2] = ["collect_ignore", "collect_ignore_glob"];
 
 impl FrameworkRules<'_> {
     /// Check whether pytest finds and calls a definition by itself.
@@ -85,7 +85,7 @@ impl FrameworkRules<'_> {
 }
 
 /// Check whether pytest collects the tests of a file.
-pub(super) fn is_pytest_file(path: &Path) -> bool {
+fn is_pytest_file(path: &Path) -> bool {
     PYTEST_FILES
         .iter()
         .any(|pattern| fnmatch(file_name(path), pattern))

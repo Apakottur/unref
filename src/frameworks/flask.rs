@@ -26,14 +26,14 @@ pub(super) const FLASK_APPS: [&str; 4] = [
     "flask.Blueprint",
     "flask.blueprints.Blueprint",
 ];
-pub(super) const FLASK_APPLICATIONS: [&str; 2] = ["flask.Flask", "flask.app.Flask"];
+const FLASK_APPLICATIONS: [&str; 2] = ["flask.Flask", "flask.app.Flask"];
 /// `current_app`, which stands for the application, as `flask` gives it out, and where it is defined.
 pub(super) const FLASK_CURRENT_APP: [&str; 2] = ["flask.current_app", "flask.globals.current_app"];
 /// The factories and the variables of an application that the Flask CLI finds by their names.
-pub(super) const FLASK_FACTORIES: [&str; 2] = ["create_app", "make_app"];
-pub(super) const FLASK_APP_VARIABLES: [&str; 2] = ["app", "application"];
+const FLASK_FACTORIES: [&str; 2] = ["create_app", "make_app"];
+const FLASK_APP_VARIABLES: [&str; 2] = ["app", "application"];
 /// The methods of an application or a blueprint that register the function they decorate.
-pub(super) const FLASK_DECORATORS: [&str; 33] = [
+const FLASK_DECORATORS: [&str; 33] = [
     "route",
     "get",
     "post",
@@ -72,15 +72,15 @@ pub(super) const FLASK_DECORATORS: [&str; 33] = [
 ];
 /// The decorators of an application or a blueprint that add a command or a group of commands to
 /// Flask's CLI.
-pub(super) const FLASK_CLI_DECORATORS: [&str; 2] = ["cli.command", "cli.group"];
+const FLASK_CLI_DECORATORS: [&str; 2] = ["cli.command", "cli.group"];
 /// The classes of the groups of commands of Flask's CLI, as `flask.cli` gives them out, with the
 /// methods that add a command or a group to a group.
 pub(super) const FLASK_GROUPS: [&str; 2] = ["flask.cli.AppGroup", "flask.cli.FlaskGroup"];
-pub(super) const FLASK_GROUP_DECORATORS: [&str; 2] = ["command", "group"];
+const FLASK_GROUP_DECORATORS: [&str; 2] = ["command", "group"];
 /// The class views of Flask, whose `dispatch_request` method it calls. `MethodView` inherits from
 /// `View`, and its `dispatch_request` calls its methods named after HTTP methods.
-pub(super) const FLASK_VIEWS: [&str; 2] = ["flask.views.View", FLASK_METHOD_VIEW];
-pub(super) const FLASK_METHOD_VIEW: &str = "flask.views.MethodView";
+const FLASK_VIEWS: [&str; 2] = ["flask.views.View", FLASK_METHOD_VIEW];
+const FLASK_METHOD_VIEW: &str = "flask.views.MethodView";
 
 impl FrameworkRules<'_> {
     /// Check whether Flask calls a definition by itself.

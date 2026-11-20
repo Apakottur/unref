@@ -15,7 +15,7 @@ use super::FrameworkRules;
 // SQLAlchemy's names are matched anywhere under `sqlalchemy`, by their end from a dot, as it gives most
 // of them out from several modules, such as `sqlalchemy.Column` and `sqlalchemy.schema.Column`.
 /// The base classes of declarative models.
-pub(super) const SQLALCHEMY_BASES: [&str; 3] = [
+const SQLALCHEMY_BASES: [&str; 3] = [
     ".DeclarativeBase",
     ".DeclarativeBaseNoMeta",
     ".MappedAsDataclass",
@@ -24,9 +24,8 @@ pub(super) const SQLALCHEMY_BASES: [&str; 3] = [
 pub(super) const SQLALCHEMY_BASE_FUNCTIONS: [&str; 1] = [".declarative_base"];
 pub(super) const SQLALCHEMY_BASE_DECORATORS: [&str; 1] = [".as_declarative"];
 /// The annotations and constructs of mapped attributes.
-pub(super) const SQLALCHEMY_ANNOTATIONS: [&str; 3] =
-    [".Mapped", ".WriteOnlyMapped", ".DynamicMapped"];
-pub(super) const SQLALCHEMY_CONSTRUCTS: [&str; 9] = [
+const SQLALCHEMY_ANNOTATIONS: [&str; 3] = [".Mapped", ".WriteOnlyMapped", ".DynamicMapped"];
+const SQLALCHEMY_CONSTRUCTS: [&str; 9] = [
     ".Column",
     ".mapped_column",
     ".relationship",
@@ -38,7 +37,7 @@ pub(super) const SQLALCHEMY_CONSTRUCTS: [&str; 9] = [
     ".dynamic_loader",
 ];
 /// The decorators that register a function with SQLAlchemy.
-pub(super) const SQLALCHEMY_DECORATORS: [&str; 6] = [
+const SQLALCHEMY_DECORATORS: [&str; 6] = [
     ".listens_for",
     ".validates",
     ".reconstructor",
@@ -110,12 +109,7 @@ impl FrameworkRules<'_> {
 
     /// Check whether an expression of a module resolves to a name of SQLAlchemy that ends with one of
     /// the given ends.
-    pub(super) fn resolves_to_sqlalchemy(
-        &self,
-        module: usize,
-        expression: &str,
-        ends: &[&str],
-    ) -> bool {
+    fn resolves_to_sqlalchemy(&self, module: usize, expression: &str, ends: &[&str]) -> bool {
         is_sqlalchemy(&self.hierarchy.resolve(module, expression), ends)
     }
 }

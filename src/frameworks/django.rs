@@ -23,33 +23,32 @@ use super::{FrameworkRules, ProjectFile, is_top_level};
 
 /// The environment variable that names the settings module of Django, and `os.environ.setdefault`,
 /// which `startproject` sets it with.
-pub(super) const DJANGO_SETTINGS_VARIABLE: &str = "DJANGO_SETTINGS_MODULE";
-pub(super) const OS_ENVIRON_SETDEFAULT: [&str; 1] = ["os.environ.setdefault"];
+const DJANGO_SETTINGS_VARIABLE: &str = "DJANGO_SETTINGS_MODULE";
+const OS_ENVIRON_SETDEFAULT: [&str; 1] = ["os.environ.setdefault"];
 /// The setting that names the module of the root URLs.
-pub(super) const DJANGO_ROOT_URLCONF: &str = "ROOT_URLCONF";
+const DJANGO_ROOT_URLCONF: &str = "ROOT_URLCONF";
 /// `include`, which names a module of URLs, as `django.urls` gives it out, where it is defined, and as
 /// `django.conf.urls` gave it out before Django 4.
-pub(super) const DJANGO_INCLUDES: [&str; 3] = [
+const DJANGO_INCLUDES: [&str; 3] = [
     "django.urls.include",
     "django.urls.conf.include",
     "django.conf.urls.include",
 ];
 /// The variables that Django reads from a module of URLs, and those that it reads from the module of
 /// the root URLs only, or from an included one only.
-pub(super) const DJANGO_URLS_VARIABLES: [&str; 1] = ["urlpatterns"];
-pub(super) const DJANGO_ROOT_URLS_VARIABLES: [&str; 4] =
+const DJANGO_URLS_VARIABLES: [&str; 1] = ["urlpatterns"];
+const DJANGO_ROOT_URLS_VARIABLES: [&str; 4] =
     ["handler400", "handler403", "handler404", "handler500"];
-pub(super) const DJANGO_INCLUDED_URLS_VARIABLES: [&str; 1] = ["app_name"];
+const DJANGO_INCLUDED_URLS_VARIABLES: [&str; 1] = ["app_name"];
 /// The functions that make the application that a server loads.
-pub(super) const DJANGO_APPLICATIONS: [&str; 2] = [
+const DJANGO_APPLICATIONS: [&str; 2] = [
     "django.core.wsgi.get_wsgi_application",
     "django.core.asgi.get_asgi_application",
 ];
 /// `AppConfig`, as `django.apps` gives it out, and where it is defined, with the attributes and
 /// methods of its subclasses that Django reads and calls.
-pub(super) const DJANGO_APP_CONFIGS: [&str; 2] =
-    ["django.apps.AppConfig", "django.apps.config.AppConfig"];
-pub(super) const DJANGO_APP_CONFIG_ATTRIBUTES: [&str; 6] = [
+const DJANGO_APP_CONFIGS: [&str; 2] = ["django.apps.AppConfig", "django.apps.config.AppConfig"];
+const DJANGO_APP_CONFIG_ATTRIBUTES: [&str; 6] = [
     "name",
     "label",
     "verbose_name",
@@ -57,16 +56,16 @@ pub(super) const DJANGO_APP_CONFIG_ATTRIBUTES: [&str; 6] = [
     "default",
     "default_auto_field",
 ];
-pub(super) const DJANGO_APP_CONFIG_METHODS: [&str; 1] = ["ready"];
+const DJANGO_APP_CONFIG_METHODS: [&str; 1] = ["ready"];
 /// `Migration`, as `django.db.migrations` gives it out, and where it is defined, with the attributes
 /// of its subclasses that Django reads.
-pub(super) const DJANGO_MIGRATIONS: [&str; 2] = [
+const DJANGO_MIGRATIONS: [&str; 2] = [
     "django.db.migrations.Migration",
     "django.db.migrations.migration.Migration",
 ];
 /// The name of the class that Django loads from a migration module.
-pub(super) const DJANGO_MIGRATION_CLASS: &str = "Migration";
-pub(super) const DJANGO_MIGRATION_ATTRIBUTES: [&str; 6] = [
+const DJANGO_MIGRATION_CLASS: &str = "Migration";
+const DJANGO_MIGRATION_ATTRIBUTES: [&str; 6] = [
     "operations",
     "dependencies",
     "run_before",
@@ -79,11 +78,11 @@ pub(super) const DJANGO_MIGRATION_ATTRIBUTES: [&str; 6] = [
 #[derive(Default)]
 pub(super) struct DjangoModules {
     /// The settings modules.
-    pub(super) settings: FxHashSet<usize>,
+    settings: FxHashSet<usize>,
     /// The modules of the root URLs, which `ROOT_URLCONF` names.
-    pub(super) root_urls: FxHashSet<usize>,
+    root_urls: FxHashSet<usize>,
     /// The modules of URLs that `include` names.
-    pub(super) included_urls: FxHashSet<usize>,
+    included_urls: FxHashSet<usize>,
 }
 
 impl FrameworkRules<'_> {
@@ -199,6 +198,6 @@ pub(super) fn django_modules(
 
 /// Check whether a name is uppercase, as Python's `str.isupper`: it has a cased letter, and no
 /// lowercase one.
-pub(super) fn is_uppercase(name: &str) -> bool {
+fn is_uppercase(name: &str) -> bool {
     name.chars().any(char::is_uppercase) && !name.chars().any(char::is_lowercase)
 }

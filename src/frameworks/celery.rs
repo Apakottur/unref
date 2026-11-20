@@ -23,15 +23,14 @@ pub(super) const CELERY_CURRENT_APP: [&str; 3] = [
     "celery._state.current_app",
 ];
 /// The decorator of an application that registers a task.
-pub(super) const CELERY_TASK_DECORATORS: [&str; 1] = ["task"];
+const CELERY_TASK_DECORATORS: [&str; 1] = ["task"];
 /// The decorator that registers a task with every application, as `celery` gives it out, and where it
 /// is defined.
-pub(super) const CELERY_SHARED_TASKS: [&str; 2] = ["celery.shared_task", "celery.app.shared_task"];
+const CELERY_SHARED_TASKS: [&str; 2] = ["celery.shared_task", "celery.app.shared_task"];
 /// The class of Celery's tasks, as `celery` gives it out, and where it is defined.
-pub(super) const CELERY_TASKS: [&str; 3] =
-    ["celery.Task", "celery.app.Task", "celery.app.task.Task"];
+const CELERY_TASKS: [&str; 3] = ["celery.Task", "celery.app.Task", "celery.app.task.Task"];
 /// The methods of a task that Celery calls.
-pub(super) const CELERY_TASK_METHODS: [&str; 6] = [
+const CELERY_TASK_METHODS: [&str; 6] = [
     "run",
     "before_start",
     "on_success",
