@@ -1,0 +1,4 @@
+# -*- coding: macintosh -*-
+from library import na•ve
+
+na•ve()

@@ -1,6 +1,7 @@
 //! An extremely fast Python dead code finder, written in Rust.
 
 mod classes;
+mod codecs;
 mod config;
 mod definitions;
 mod discover;

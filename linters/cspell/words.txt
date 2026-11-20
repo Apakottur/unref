@@ -17,6 +17,7 @@ commitish
 conftest
 contextlib
 cpython
+cspc
 dataclass
 dataclasses
 deadcode
@@ -32,11 +33,13 @@ elts
 errorhandler
 fastapi
 feff
+fffe
 fnmatch
 fnmatchcase
 freqtrade
 getattr
 hasattr
+hkscs
 httpx
 ignorelist
 isenabled
@@ -44,6 +47,7 @@ isort
 isupper
 jemalloc
 jemallocator
+johab
 kwonlyargs
 longpaths
 lucide
@@ -57,6 +61,7 @@ metafunc
 mimalloc
 mkdocstrings
 modifyitems
+multibyte
 musllinux
 mypy
 mysite
@@ -92,6 +97,7 @@ sdist
 setdefault
 showlocals
 shpyx
+sjis
 skylos
 softprops
 sqlalchemy

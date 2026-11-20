@@ -10,6 +10,7 @@ use ruff_python_parser::Parsed;
 use ruff_text_size::Ranged;
 use rustc_hash::FxHashMap;
 
+use crate::codecs::{self, Codec};
 use crate::definitions::Definition;
 use crate::ignores::{IgnoreComment, find_ignore_comments};
 use crate::models::{Finding, Rule};
@@ -124,32 +125,29 @@ pub(crate) fn decode_source(bytes: &[u8]) -> Result<String, DecodeError> {
     let Some(declared) = declared_encoding(bytes) else {
         return utf8(bytes);
     };
+    // The tokenizer of Python takes these spellings of UTF-8 and Latin-1, such as `latin-1-unix`, before
+    // it looks the codec up.
     let name = declared.to_lowercase().replace('_', "-");
     let is_utf8 = name == "utf-8" || name.starts_with("utf-8-");
     if bom && !is_utf8 {
         return Err(error(format!("encoding problem: {declared} with BOM")));
     }
-    // Python takes `latin-1-unix` and the like as Latin-1.
     let is_latin1 = ["latin-1", "iso-8859-1", "iso-latin-1"]
         .iter()
-        .any(|latin1| name == *latin1 || name.starts_with(&format!("{latin1}-")))
-        || ["latin1", "iso8859-1", "l1"].contains(&name.as_str());
-    match name.as_str() {
-        _ if is_utf8 => utf8(bytes),
-        "utf8" => utf8(bytes),
-        // Latin-1 maps each byte to the character with its value, where the WHATWG encodings that
-        // `encoding_rs` implements map it to Windows-1252.
-        _ if is_latin1 => Ok(bytes.iter().map(|&byte| char::from(byte)).collect()),
-        // ASCII is strict, where WHATWG takes it as Windows-1252.
-        "ascii" | "us-ascii" | "646" => match bytes.iter().position(|byte| !byte.is_ascii()) {
-            None => Ok(bytes.iter().map(|&byte| char::from(byte)).collect()),
-            Some(_) => Err(error(format!(
-                "(unicode error) '{declared}' codec can't decode the source"
-            ))),
-        },
-        _ => {
-            let encoding = encoding_rs::Encoding::for_label(name.as_bytes())
-                .ok_or_else(|| error(format!("unknown encoding: {declared}")))?;
+        .any(|latin1| name == *latin1 || name.starts_with(&format!("{latin1}-")));
+    let codec = if is_utf8 {
+        Some(Codec::Other("utf_8"))
+    } else if is_latin1 {
+        codecs::codec("latin_1")
+    } else {
+        python_codec(&declared)
+    };
+    match codec.ok_or_else(|| error(format!("unknown encoding: {declared}")))? {
+        Codec::Table(table) => decode_table(bytes, table, &declared),
+        Codec::Other("utf_8" | "utf_8_sig") => utf8(bytes),
+        Codec::Other(module) => {
+            let encoding = whatwg_encoding(module)
+                .ok_or_else(|| error(format!("unsupported encoding: {declared}")))?;
             let (text, _, had_errors) = encoding.decode(bytes);
             if had_errors {
                 return Err(error(format!(
@@ -159,6 +157,47 @@ pub(crate) fn decode_source(bytes: &[u8]) -> Result<String, DecodeError> {
             Ok(text.into_owned())
         }
     }
+}
+
+/// Find the codec that Python looks up for the name of an encoding, as `encodings.search_function`.
+fn python_codec(name: &str) -> Option<Codec> {
+    // The name is lowercased, and each run of other characters than letters, digits and dots between
+    // them is replaced with an underscore.
+    let mut normalized = String::new();
+    let mut separated = false;
+    for char in name.chars() {
+        if char.is_ascii_alphanumeric() || char == '.' {
+            if separated && !normalized.is_empty() {
+                normalized.push('_');
+            }
+            normalized.push(char.to_ascii_lowercase());
+            separated = false;
+        } else {
+            separated = true;
+        }
+    }
+    let module =
+        codecs::alias(&normalized).or_else(|| codecs::alias(&normalized.replace('.', "_")));
+    // A name that is not an alias, or whose alias has no codec, is taken as the name of a module.
+    module
+        .and_then(codecs::codec)
+        .or_else(|| codecs::codec(&normalized))
+}
+
+/// The encoding of `encoding_rs` that decodes a multibyte codec of Python. The WHATWG encodings that
+/// it implements extend some of them, as Big5 with HKSCS and Shift JIS with the Windows characters, so
+/// they decode a few sequences that Python rejects.
+fn whatwg_encoding(module: &str) -> Option<&'static encoding_rs::Encoding> {
+    Some(match module {
+        "big5" | "big5hkscs" | "cp950" => encoding_rs::BIG5,
+        "cp932" | "shift_jis" => encoding_rs::SHIFT_JIS,
+        "cp949" | "euc_kr" => encoding_rs::EUC_KR,
+        "euc_jp" => encoding_rs::EUC_JP,
+        "gb2312" | "gbk" => encoding_rs::GBK,
+        "gb18030" => encoding_rs::GB18030,
+        "iso2022_jp" => encoding_rs::ISO_2022_JP,
+        _ => return None,
+    })
 }
 
 /// The encoding that a module declares on one of its first two lines, if it declares one.
@@ -176,22 +215,44 @@ fn declared_encoding(bytes: &[u8]) -> Option<String> {
     declared.map(|declared| String::from_utf8_lossy(&declared[1]).into_owned())
 }
 
+/// Decode with a codec that maps each byte to one character, or find the first byte that it does not
+/// decode.
+fn decode_table(bytes: &[u8], table: &str, declared: &str) -> Result<String, DecodeError> {
+    let chars: Vec<char> = table.chars().collect();
+    // A table of 128 characters is of the bytes from 0x80, and the bytes below are ASCII.
+    let first = 256 - chars.len();
+    let mut text = String::with_capacity(bytes.len());
+    for &byte in bytes {
+        let char = match usize::from(byte).checked_sub(first) {
+            Some(index) => chars[index],
+            None => char::from(byte),
+        };
+        if char == '\u{fffe}' {
+            return Err(error_after(&text, declared, byte));
+        }
+        text.push(char);
+    }
+    Ok(text)
+}
+
 /// Decode UTF-8, or find the first byte that is not valid.
 fn utf8(bytes: &[u8]) -> Result<String, DecodeError> {
     String::from_utf8(bytes.to_vec()).map_err(|error| {
         let position = error.utf8_error().valid_up_to();
         // The bytes before the invalid one are valid, so they are counted as characters.
         let before = String::from_utf8_lossy(&bytes[..position]);
-        let line_start = before.rfind('\n').map_or(0, |index| index + 1);
-        DecodeError {
-            line: to_u32(before.matches('\n').count() + 1),
-            column: to_u32(before[line_start..].chars().count() + 1),
-            message: format!(
-                "(unicode error) 'utf-8' codec can't decode byte {:#04x}",
-                bytes[position]
-            ),
-        }
+        error_after(&before, "utf-8", bytes[position])
     })
+}
+
+/// The error of a byte that a codec does not decode, after the text that is decoded before it.
+fn error_after(before: &str, codec: &str, byte: u8) -> DecodeError {
+    let line_start = before.rfind('\n').map_or(0, |index| index + 1);
+    DecodeError {
+        line: to_u32(before.matches('\n').count() + 1),
+        column: to_u32(before[line_start..].chars().count() + 1),
+        message: format!("(unicode error) '{codec}' codec can't decode byte {byte:#04x}"),
+    }
 }
 
 /// Get the names that a module gives out from its `__getattr__` (PEP 562), which imports them when
@@ -263,5 +324,31 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn python_codecs() {
+        let message = |source: &[u8]| decode_source(source).err().unwrap().message;
+        // A code page, by any name that Python takes for it.
+        for name in ["cp437", "IBM437", "437", "--CP437--", "cspc8codepage437"] {
+            let source = [format!("# coding: {name}\n\"").as_bytes(), b"\x82\"\n"].concat();
+            assert!(decode_source(&source).unwrap().ends_with("\"\u{e9}\"\n"));
+        }
+        assert_eq!(message(b"# coding: cp-437\n"), "unknown encoding: cp-437");
+        // A byte that the code page does not decode is reported where it is.
+        let error = decode_source(b"# coding: cp1252\nx = \"\x81\"\n")
+            .err()
+            .unwrap();
+        assert_eq!((error.line, error.column), (2, 6));
+        assert_eq!(
+            error.message,
+            "(unicode error) 'cp1252' codec can't decode byte 0x81"
+        );
+        // A multibyte encoding, by a name of Python that WHATWG does not have.
+        assert_eq!(
+            decode_source(b"# coding: sjis\n\"\x93\xfa\"\n").unwrap(),
+            "# coding: sjis\n\"\u{65e5}\"\n"
+        );
+        assert_eq!(message(b"# coding: johab\n"), "unsupported encoding: johab");
     }
 }

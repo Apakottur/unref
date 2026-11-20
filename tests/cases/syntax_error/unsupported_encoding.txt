@@ -1,0 +1,2 @@
+# coding: johab
+# Python decodes this encoding, but unref does not.

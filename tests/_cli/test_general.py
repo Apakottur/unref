@@ -149,11 +149,13 @@ def test_syntax_error() -> None:
     [
         ("undecodable.txt", "(unicode error) 'euc-jp' codec can't decode the source"),
         ("unknown_encoding.txt", "unknown encoding: unknown-codec"),
+        ("unsupported_encoding.txt", "unsupported encoding: johab"),
     ],
 )
 def test_undecodable(name: str, error: str) -> None:
     # A file that does not decode with the encoding it declares, or that declares an encoding that does
-    # not exist, is a syntax error, as in Python. The files are not named `.py`, so that the cases, which
+    # not exist, is a syntax error, as in Python. So is one in an encoding of Python that unref cannot
+    # decode. The files are not named `.py`, so that the cases, which
     # read every `.py` file, do not read them, and a file that is given directly is checked whatever its
     # name.
     path = CASES_DIR / "syntax_error" / name
