@@ -229,6 +229,8 @@ struct Scope {
     /// The reads of names in the scope, or in a scope nested in it, that are not local to the scopes
     /// in between.
     reads: Vec<Read>,
+    /// Reads through `globals()` that may resolve to a shadowing name in an enclosing scope.
+    namespace_reads: Vec<Read>,
     /// The scope containing a comprehension, when it is not a class body. Assignment expressions
     /// follow this link to bind outside the comprehension.
     enclosing: Option<usize>,
@@ -269,6 +271,7 @@ impl Scope {
             imports: FxHashMap::default(),
             functions_and_classes: FxHashMap::default(),
             reads: Vec::new(),
+            namespace_reads: Vec::new(),
             enclosing: None,
             defined_in: None,
             defined: FxHashMap::default(),
@@ -409,9 +412,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 if subscript.ctx == ExprContext::Load {
                     self.add_key(&subscript.slice);
                     // `globals()["name"]` reads the name from the module.
-                    if self.is_module_namespace(&subscript.value) {
-                        self.add_module_read(&subscript.slice);
-                    }
+                    self.add_namespace_read(&subscript.value, &subscript.slice);
                 }
                 walk_expr(self, expr);
             }
@@ -434,9 +435,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                     if matches!(operator, CmpOp::In | CmpOp::NotIn) {
                         self.add_key(operand);
                         // `"name" in globals()` reads the name from the module.
-                        if self.is_module_namespace(container) {
-                            self.add_module_read(operand);
-                        }
+                        self.add_namespace_read(container, operand);
                     }
                 }
                 walk_expr(self, expr);
@@ -607,36 +606,41 @@ impl<'a> Walker<'_, '_> {
         }
     }
 
-    /// Check whether an expression is the namespace of the module: `globals()`, or `vars()` or
-    /// `locals()` at the top level of the module, where they are the same.
-    fn is_module_namespace(&self, expr: &Expr) -> bool {
-        let Expr::Call(call) = expr else {
-            return false;
-        };
-        let Expr::Name(func) = &*call.func else {
-            return false;
-        };
-        call.arguments.is_empty()
-            && match func.id.as_str() {
-                "globals" => true,
-                "vars" | "locals" => self.scopes[self.scope].kind == ScopeKind::Module,
-                _ => false,
-            }
-    }
-
-    /// Add a read of a name of the module itself, by a string literal that is looked up in its
-    /// namespace. The read skips the scopes in between, since the namespace holds no local variable.
-    fn add_module_read(&mut self, key: &Expr) {
-        let Expr::StringLiteral(literal) = key else {
+    /// Read a module name through a namespace builtin when no binding shadows it.
+    fn add_namespace_read(&mut self, namespace: &Expr, key: &Expr) {
+        let (Expr::Call(call), Expr::StringLiteral(literal)) = (namespace, key) else {
             return;
         };
-        self.scopes[0].reads.push(Read {
+        let Expr::Name(func) = &*call.func else {
+            return;
+        };
+        let name = func.id.as_str();
+        let scope = &self.scopes[self.scope];
+        if !call.arguments.is_empty()
+            || !matches!(name, "globals" | "vars" | "locals")
+            || (name != "globals" && scope.kind != ScopeKind::Module)
+        {
+            return;
+        }
+        let read = Read {
             owner: self.owner,
             root: Name::new(literal.value.to_str()),
             attributes: Vec::new(),
             reads_object: true,
             called: None,
-        });
+        };
+        if self.scopes[0].bound.contains(name)
+            || (scope.global_names.contains(name) && scope.bound.contains(name))
+        {
+            return;
+        }
+        if self.scope == 0 || scope.outer == Some(0) {
+            if !scope.bound.contains(name) {
+                self.scopes[0].reads.push(read);
+            }
+        } else if scope.kind != ScopeKind::Class || !scope.bound.contains(name) {
+            self.scopes[self.scope].namespace_reads.push(read);
+        }
     }
 
     /// Add the names that are read as attributes of an object whose class is not known.
@@ -659,9 +663,7 @@ impl<'a> Walker<'_, '_> {
         {
             self.add_key(first);
             // `globals().get("name")` reads the name from the module.
-            if self.is_module_namespace(&func.value) {
-                self.add_module_read(first);
-            }
+            self.add_namespace_read(&func.value, first);
         }
         // `getattr(value, "name")` and `hasattr(value, "name")` read `value.name`.
         if let Expr::Name(func) = &*call.func
@@ -1399,7 +1401,12 @@ impl<'a> Walker<'_, '_> {
         let binder = self.binder;
         let scope = &mut self.scopes[binder];
         let definitions = match scope.kind {
-            ScopeKind::Module => return,
+            ScopeKind::Module => {
+                if matches!(name, "globals" | "locals" | "vars") {
+                    self.bind(name);
+                }
+                return;
+            }
             ScopeKind::Class => &mut scope.members,
             ScopeKind::Function => &mut scope.functions_and_classes,
         };
@@ -1424,6 +1431,21 @@ impl<'a> Walker<'_, '_> {
     /// function or class that is a local variable is a reference to the definitions of that name in
     /// the scope.
     fn close(&mut self, inner: usize, local_names: &FxHashSet<String>, target: Target) {
+        let namespace_reads = std::mem::take(&mut self.scopes[inner].namespace_reads);
+        let scope = &self.scopes[inner];
+        if !namespace_reads.is_empty()
+            && (scope.kind == ScopeKind::Class || !local_names.contains("globals"))
+        {
+            match target {
+                Target::Scope(_) if scope.global_names.contains("globals") => {
+                    self.scopes[0].reads.extend(namespace_reads);
+                }
+                Target::Scope(scope) => self.scopes[scope].namespace_reads.extend(namespace_reads),
+                Target::Module => {
+                    self.scopes[0].reads.extend(namespace_reads);
+                }
+            }
+        }
         let reads = std::mem::take(&mut self.scopes[inner].reads);
         let (defined, other): (FxHashMap<String, Vec<usize>>, FxHashMap<_, _>) =
             std::mem::take(&mut self.scopes[inner].functions_and_classes)
