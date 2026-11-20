@@ -185,6 +185,7 @@ pub(crate) fn walk_module(
         positions,
         definitions: Vec::new(),
         references: References::default(),
+        module_exports: Vec::new(),
         scopes: vec![Scope {
             defined_in: Some(0),
             ..Scope::new(ScopeKind::Module)
@@ -194,10 +195,16 @@ pub(crate) fn walk_module(
         owner: None,
         in_signature: false,
     };
-    walker.visit_body(&module.body);
+    for stmt in &module.body {
+        if !walker.module_exports.is_empty() && replaces_all(stmt) {
+            walker.module_exports.clear();
+        }
+        walker.visit_stmt(stmt);
+    }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
+    walker.references.reads.extend(walker.module_exports);
     (walker.definitions, walker.references)
 }
 
@@ -302,6 +309,8 @@ struct Walker<'p, 'a> {
     definitions: Vec<Definition>,
     /// The references to add to.
     references: References,
+    /// Export reads made while the module runs, which a later literal assignment can replace.
+    module_exports: Vec<Read>,
     /// Every scope that was entered, by its index.
     scopes: Vec<Scope>,
     /// The scope that the node being walked is in.
@@ -1034,14 +1043,17 @@ impl<'a> Walker<'_, '_> {
             return;
         }
         self.references.has_all = true;
-        for name in names {
-            self.references.reads.insert(Read {
-                owner: self.owner,
-                root: name.into(),
-                attributes: Vec::new(),
-                reads_object: true,
-                called: None,
-            });
+        let reads = names.into_iter().map(|name| Read {
+            owner: self.owner,
+            root: name.into(),
+            attributes: Vec::new(),
+            reads_object: true,
+            called: None,
+        });
+        if self.owner.is_none() {
+            self.module_exports.extend(reads);
+        } else {
+            self.references.reads.extend(reads);
         }
     }
 
@@ -1606,6 +1618,23 @@ fn typing_name(name: &str) -> Option<&str> {
 /// Check whether an assignment target is the `__all__` variable.
 fn is_all(target: &Expr) -> bool {
     matches!(target, Expr::Name(name) if name.id.as_str() == "__all__")
+}
+
+/// Check whether an assignment replaces `__all__` with a complete list of literal names.
+fn replaces_all(stmt: &Stmt) -> bool {
+    let value = match stmt {
+        Stmt::Assign(assign) if assign.targets.iter().any(is_all) => Some(&*assign.value),
+        Stmt::AnnAssign(assign) if is_all(&assign.target) => assign.value.as_deref(),
+        _ => None,
+    };
+    let elements = match value {
+        Some(Expr::List(list)) => &list.elts,
+        Some(Expr::Tuple(tuple)) => &tuple.elts,
+        _ => return false,
+    };
+    elements
+        .iter()
+        .all(|element| matches!(element, Expr::StringLiteral(_)))
 }
 
 /// Get the string literals that `__all__.extend([...])` or `__all__.append("...")` adds to
