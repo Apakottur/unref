@@ -247,8 +247,8 @@ struct Scope {
     /// In a class body, the attributes, methods and classes that it defines so far, by their name,
     /// each with its index in the definitions of the module.
     members: FxHashMap<String, Vec<usize>>,
-    /// In a function, the local variables that are assigned the result of a call, each with the
-    /// dotted names of what they call as they are written.
+    /// The variables assigned the result of a call, with the dotted names of what they call as
+    /// written.
     calls: FxHashMap<String, Vec<String>>,
     /// The scope a comprehension reads from when a name is not local to it.
     comprehension_parent: Option<usize>,
@@ -1054,12 +1054,12 @@ impl<'a> Walker<'_, '_> {
         annotation: Option<&'a Expr>,
         defines: bool,
     ) {
+        let call = match (defines, value) {
+            (true, Some(Expr::Call(call))) => dotted_name(&call.func, Unwrap::Call),
+            _ => None,
+        };
         if defines {
             let annotation = annotation.map(annotation_name);
-            let call = match value {
-                Some(Expr::Call(call)) => dotted_name(&call.func, Unwrap::Call),
-                _ => None,
-            };
             let string = match value {
                 Some(Expr::StringLiteral(literal)) => Some(literal.value.to_str().to_string()),
                 _ => None,
@@ -1104,6 +1104,13 @@ impl<'a> Walker<'_, '_> {
         }
         for target in targets {
             self.visit_expr(target);
+            if self.binder == 0
+                && let (Expr::Name(name), Some(call)) = (target, &call)
+            {
+                self.scopes[0]
+                    .calls
+                    .insert(name.id.to_string(), vec![call.clone()]);
+            }
         }
     }
 
@@ -1355,7 +1362,7 @@ impl<'a> Walker<'_, '_> {
     }
 
     /// Get the dotted names of what a value is the result of calling, as they are written, if it is a
-    /// call, or a local variable that is assigned one.
+    /// call, or a variable that is assigned one in the current scope.
     fn value_calls(&self, value: &Expr) -> Vec<String> {
         match value {
             Expr::Call(call) => dotted_name(&call.func, Unwrap::Call).into_iter().collect(),
@@ -1364,7 +1371,7 @@ impl<'a> Walker<'_, '_> {
         }
     }
 
-    /// Get the dotted names of what a local variable is assigned the result of calling, as they are
+    /// Get the dotted names of what a variable is assigned the result of calling, as they are
     /// written, looking through enclosing scopes for a comprehension.
     fn variable_calls(&self, name: &str) -> Vec<String> {
         let mut scope = Some(self.scope);
@@ -1389,7 +1396,11 @@ impl<'a> Walker<'_, '_> {
 
     /// Bind a name in the current scope.
     fn bind(&mut self, name: &str) {
-        self.scopes[self.binder].bound.insert(name.to_string());
+        let scope = &mut self.scopes[self.binder];
+        if scope.kind == ScopeKind::Module {
+            scope.calls.remove(name);
+        }
+        scope.bound.insert(name.to_string());
     }
 
     /// Bind the name of a function or class, given with its index in the definitions of the module, if
@@ -1399,7 +1410,10 @@ impl<'a> Walker<'_, '_> {
         let binder = self.binder;
         let scope = &mut self.scopes[binder];
         let definitions = match scope.kind {
-            ScopeKind::Module => return,
+            ScopeKind::Module => {
+                scope.calls.remove(name);
+                return;
+            }
             ScopeKind::Class => &mut scope.members,
             ScopeKind::Function => &mut scope.functions_and_classes,
         };
