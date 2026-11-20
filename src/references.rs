@@ -195,22 +195,15 @@ pub(crate) fn walk_module(
         binder: 0,
         owner: None,
         in_signature: false,
+        conditional_module_binding: false,
     };
     for statement in &module.body {
-        // A conditional binding may never execute. Keep treating the builtin as possible afterward.
-        let old_bindings = matches!(
+        // A conditional binding may never execute, so it does not definitely shadow the builtin.
+        walker.conditional_module_binding = matches!(
             statement,
             Stmt::If(_) | Stmt::For(_) | Stmt::While(_) | Stmt::Try(_) | Stmt::Match(_)
-        )
-        .then(|| NAMESPACE_BUILTINS.map(|name| walker.scopes[0].bound.contains(name)));
+        );
         walker.visit_stmt(statement);
-        if let Some(old_bindings) = old_bindings {
-            for (name, was_bound) in NAMESPACE_BUILTINS.into_iter().zip(old_bindings) {
-                if !was_bound {
-                    walker.scopes[0].bound.remove(name);
-                }
-            }
-        }
     }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
@@ -248,6 +241,8 @@ struct Scope {
     reads: Vec<Read>,
     /// Reads through `globals()` that may resolve to a shadowing name in an enclosing scope.
     namespace_reads: Vec<Read>,
+    /// The namespace builtins shadowed by a binding in this scope.
+    namespace_shadows: [bool; NAMESPACE_BUILTINS.len()],
     /// The scope containing a comprehension, when it is not a class body. Assignment expressions
     /// follow this link to bind outside the comprehension.
     enclosing: Option<usize>,
@@ -289,6 +284,7 @@ impl Scope {
             functions_and_classes: FxHashMap::default(),
             reads: Vec::new(),
             namespace_reads: Vec::new(),
+            namespace_shadows: [false; NAMESPACE_BUILTINS.len()],
             enclosing: None,
             defined_in: None,
             defined: FxHashMap::default(),
@@ -336,6 +332,8 @@ struct Walker<'p, 'a> {
     owner: Owner,
     /// Whether the node is in the annotation of a parameter or the return of a function.
     in_signature: bool,
+    /// Whether the module statement may bind names conditionally.
+    conditional_module_binding: bool,
 }
 
 impl<'a> Visitor<'a> for Walker<'_, '_> {
@@ -492,6 +490,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                         binder = enclosing;
                     }
                     self.scopes[binder].bound.insert(name.id.to_string());
+                    self.bind_namespace(binder, name.id.as_str(), true);
                 }
             }
             _ => walk_expr(self, expr),
@@ -632,11 +631,14 @@ impl<'a> Walker<'_, '_> {
             return;
         };
         let name = func.id.as_str();
+        let Some(index) = NAMESPACE_BUILTINS
+            .iter()
+            .position(|builtin| *builtin == name)
+        else {
+            return;
+        };
         let scope = &self.scopes[self.scope];
-        if !call.arguments.is_empty()
-            || !NAMESPACE_BUILTINS.contains(&name)
-            || (name != "globals" && scope.kind != ScopeKind::Module)
-        {
+        if !call.arguments.is_empty() || (name != "globals" && scope.kind != ScopeKind::Module) {
             return;
         }
         let read = Read {
@@ -646,17 +648,16 @@ impl<'a> Walker<'_, '_> {
             reads_object: true,
             called: None,
         };
-        if self.scopes[0].bound.contains(name)
-            || (scope.global_names.contains(name) && scope.bound.contains(name))
-        {
-            return;
-        }
-        if self.scope == 0 || scope.outer == Some(0) {
-            if !scope.bound.contains(name) {
+        let shadows = scope.namespace_shadows[index];
+        if self.scope != 0 && scope.bound.contains(name) && !shadows {
+            // An explicit import of the builtin also returns the module namespace.
+            self.scopes[0].reads.push(read);
+        } else if !self.scopes[0].namespace_shadows[index] {
+            if self.scope == 0 {
                 self.scopes[0].reads.push(read);
+            } else if !shadows {
+                self.scopes[self.scope].namespace_reads.push(read);
             }
-        } else if scope.kind != ScopeKind::Class || !scope.bound.contains(name) {
-            self.scopes[self.scope].namespace_reads.push(read);
         }
     }
 
@@ -1409,6 +1410,17 @@ impl<'a> Walker<'_, '_> {
     /// Bind a name in the current scope.
     fn bind(&mut self, name: &str) {
         self.scopes[self.binder].bound.insert(name.to_string());
+        self.bind_namespace(self.binder, name, true);
+    }
+
+    fn bind_namespace(&mut self, scope: usize, name: &str, shadows: bool) {
+        if (scope != 0 || !self.conditional_module_binding)
+            && let Some(index) = NAMESPACE_BUILTINS
+                .iter()
+                .position(|builtin| *builtin == name)
+        {
+            self.scopes[scope].namespace_shadows[index] = shadows;
+        }
     }
 
     /// Bind the name of a function or class, given with its index in the definitions of the module, if
@@ -1420,7 +1432,7 @@ impl<'a> Walker<'_, '_> {
         let definitions = match scope.kind {
             ScopeKind::Module => {
                 if NAMESPACE_BUILTINS.contains(&name) {
-                    self.bind(name);
+                    self.bind_namespace(binder, name, true);
                 }
                 return;
             }
@@ -1439,6 +1451,12 @@ impl<'a> Walker<'_, '_> {
         for (name, binding) in statement {
             self.bind(&name);
             let binder = self.binder;
+            if binding.level == 0
+                && binding.module.as_deref() == Some("builtins")
+                && binding.name.as_deref() == Some(name.as_str())
+            {
+                self.bind_namespace(binder, &name, false);
+            }
             self.scopes[binder].imports.entry(name).or_insert(binding);
         }
     }
