@@ -35,7 +35,7 @@ pub(crate) struct Binding {
 pub(crate) struct PackageImport {
     pub binding: Binding,
     pub local_name: String,
-    /// The full module path of an unaliased dotted import, which only binds its first component.
+    /// The full path of a dotted import without an alias, which binds only its first component.
     pub load: Option<String>,
 }
 
@@ -148,7 +148,7 @@ pub(crate) struct References {
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
     pub bindings: FxHashMap<String, Binding>,
-    /// The direct imports of a package initializer, including unaliased child loads.
+    /// The direct imports of a package initializer, including child loads without an alias.
     pub package_imports: Vec<PackageImport>,
     /// Package attributes deleted in its initializer.
     pub package_deletions: FxHashSet<String>,
