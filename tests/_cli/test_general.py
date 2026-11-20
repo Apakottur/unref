@@ -164,6 +164,22 @@ def test_undecodable(name: str, error: str) -> None:
     assert result.stdout == f"{path}:1:1: invalid-syntax '{error}'\n"
 
 
+def test_linked_module(tmp_path: Path) -> None:
+    # A link to a file is imported by its own name. What is used through it is used in the file that it
+    # links to as well, since they are one source.
+    (tmp_path / "impl.py").write_text("def run():\n    return 7\n\n\ndef unused():\n    return 0\n")
+    try:
+        (tmp_path / "api.py").symlink_to("impl.py")
+    except OSError:
+        pytest.skip("the file system does not support links")
+    (tmp_path / "main.py").write_text("from api import run\n\nrun()\n")
+
+    result = run(["."], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == "api.py:5:5: unused-function 'unused'\nimpl.py:5:5: unused-function 'unused'\n"
+
+
 @pytest.mark.parametrize("name", ["missing.py", "missing", "missing/module.py", "missing/../main.py"])
 def test_missing_path(name: str) -> None:
     # A given path that does not exist, whether a file or a directory, is reported as a file that

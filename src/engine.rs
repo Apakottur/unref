@@ -208,7 +208,8 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     // then used, and so is what it uses.
     let kept_used = graph.use_definitions(kept.iter().copied());
     let needed: Vec<DefinitionId> = ignored.into_iter().filter(|id| !kept_used[*id]).collect();
-    let all_used = graph.use_definitions(needed.iter().copied());
+    let mut all_used = graph.use_definitions(needed.iter().copied());
+    share_used(&project, &mut all_used);
     let unused: Vec<DefinitionId> = (0..project.definitions.len())
         .filter(|id| !all_used[*id])
         .collect();
@@ -1189,6 +1190,29 @@ fn transitive_definitions(
 ///
 /// Returns a finding for each unused definition, for each problem with an ignore comment, and for each
 /// file that does not parse, sorted by file, line and column.
+/// Mark a definition used if it is used in another file of the same source. A link to a file is a
+/// module of its own, with its own name, but deleting a definition from it deletes it from both.
+fn share_used(project: &Project, used: &mut [bool]) {
+    let mut by_source: FxHashMap<PathBuf, Vec<usize>> = FxHashMap::default();
+    for (file, path) in project.files.iter().enumerate() {
+        by_source.entry(resolve(path)).or_default().push(file);
+    }
+    for files in by_source.values().filter(|files| files.len() > 1) {
+        // The files have the same source, so they have the same definitions in the same order.
+        let starts: Vec<DefinitionId> = files
+            .iter()
+            .map(|&file| project.first_definition[file])
+            .collect();
+        for offset in 0..project.ids_of_file(files[0]).len() {
+            if starts.iter().any(|start| used[start + offset]) {
+                for start in &starts {
+                    used[start + offset] = true;
+                }
+            }
+        }
+    }
+}
+
 fn findings(
     project: &Project,
     discovered: &[Arc<Path>],
