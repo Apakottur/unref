@@ -40,4 +40,4 @@ def other():
     return 5
 
 
-print(used(), Used(), other())
+used(), Used(), other()

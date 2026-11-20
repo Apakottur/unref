@@ -3,7 +3,7 @@ name = "unref"
 # The release workflow sets the version from the tag that it releases.
 version = "0.1.1"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.98"
 description = "An extremely fast Python dead code finder, written in Rust."
 license = "MIT"
 repository = "https://github.com/Apakottur/unref"

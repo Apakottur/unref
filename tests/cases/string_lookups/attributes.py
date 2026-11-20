@@ -39,7 +39,7 @@ def read(value, name):
     )
 
 
-print(
+(
     getattr(helpers, "by_getattr")(),
     hasattr(helpers, "by_hasattr"),
     getattr(helpers, "missing", helpers.by_default)(),

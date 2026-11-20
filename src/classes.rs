@@ -8,9 +8,13 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::definitions::LOCALS;
 use crate::external::ExternalModules;
 use crate::references::Binding;
 use crate::symbols::ModuleSymbols;
+
+/// The most parts of a dotted name that is followed, far more than a name in real code has.
+const MAX_PARTS: usize = 32;
 
 /// A set of dotted names that is cached and shared.
 pub(crate) type Names = Rc<FxHashSet<String>>;
@@ -86,14 +90,26 @@ impl ClassHierarchy {
     /// `module` is the module of the class and `name` its name in the module.
     pub(crate) fn ancestors(&self, module: usize, name: &str) -> Names {
         cached(&self.ancestors, module, name, || {
-            let mut seen = FxHashSet::default();
             let mut found = FxHashSet::default();
             let symbols = self.module(module);
             for base in symbols.bases.get(name).into_iter().flatten() {
-                self.resolve_written(module, base, &mut seen, &mut found);
+                found.extend(self.resolve_in(module, name, base).iter().cloned());
             }
             found
         })
+    }
+
+    /// Check whether a class inherits from one of the given classes, by their dotted names, directly
+    /// or not.
+    pub(crate) fn inherits(&self, module: usize, name: &str, bases: &[impl AsRef<str>]) -> bool {
+        let ancestors = self.ancestors(module, name);
+        bases.iter().any(|base| ancestors.contains(base.as_ref()))
+    }
+
+    /// Check whether a name, as it is written in a module, resolves to one of the given dotted names.
+    pub(crate) fn resolves_to(&self, module: usize, written: &str, names: &[&str]) -> bool {
+        let resolved = self.resolve(module, written);
+        names.iter().any(|name| resolved.contains(*name))
     }
 
     /// Get the names of the members that a class inherits from the base classes outside the project.
@@ -127,7 +143,7 @@ impl ClassHierarchy {
             let mut found = FxHashSet::default();
             let symbols = self.module(module);
             for decorator in symbols.decorators.get(name).into_iter().flatten() {
-                found.extend(self.resolve(module, decorator).iter().cloned());
+                found.extend(self.resolve_in(module, name, decorator).iter().cloned());
             }
             found
         })
@@ -136,12 +152,33 @@ impl ClassHierarchy {
     /// Get the dotted names of a name as it is written in a module, such as the decorator of a
     /// function: `pytest.fixture` for `fixture` after `from pytest import fixture`. A name that is
     /// imported through several modules has the name of each.
+    ///
+    /// Where in the module the name is written is not known, so a name that the module neither
+    /// defines at its top level nor imports is each class or function of that name in its functions.
     pub(crate) fn resolve(&self, module: usize, written: &str) -> Names {
         cached(&self.resolved, module, written, || {
             let mut found = FxHashSet::default();
-            self.resolve_written(module, written, &mut FxHashSet::default(), &mut found);
+            self.resolve_written(module, "", written, &mut FxHashSet::default(), &mut found);
             found
         })
+    }
+
+    /// Get the dotted names of a name as it is written where a class or function of a module is
+    /// defined, such as a base class of the class. `scope` is the name of that class or function in
+    /// the module: one that is defined in a function sees the classes and functions of that function.
+    pub(crate) fn resolve_in(&self, module: usize, scope: &str, written: &str) -> Names {
+        if !scope.contains(LOCALS) {
+            return self.resolve(module, written);
+        }
+        let mut found = FxHashSet::default();
+        self.resolve_written(
+            module,
+            scope,
+            written,
+            &mut FxHashSet::default(),
+            &mut found,
+        );
+        Rc::new(found)
     }
 
     /// Get the dotted names that a dotted name stands for: the name itself, the origin of an imported
@@ -161,9 +198,14 @@ impl ClassHierarchy {
 
     /// Add the dotted names of a base class or decorator, as it is written in a module, and of the
     /// base classes of a base class.
+    ///
+    /// `scope` is the name in the module of the class or function that it is written for, or an empty
+    /// string at the top level of the module. The functions that it is defined in are looked in first,
+    /// from the nearest one.
     fn resolve_written(
         &self,
         module: usize,
+        scope: &str,
         written: &str,
         seen: &mut FxHashSet<String>,
         found: &mut FxHashSet<String>,
@@ -171,6 +213,17 @@ impl ClassHierarchy {
         let symbols = self.module(module);
         let (first, rest) = written.split_once('.').unwrap_or((written, ""));
 
+        let mut functions = scope;
+        while let Some((function, _)) = functions.rsplit_once(LOCALS) {
+            let local = format!("{function}{LOCALS}{first}");
+            if symbols.bases.contains_key(&local) {
+                // A class or function of a function that the scope is in.
+                let name = join(&symbols.name.name, &join(&local, rest));
+                self.follow(&name, seen, found);
+                return;
+            }
+            functions = function;
+        }
         if symbols.bases.contains_key(first) {
             // A class or function of the module itself.
             self.follow(&format!("{}.{written}", symbols.name.name), seen, found);
@@ -178,6 +231,15 @@ impl ClassHierarchy {
             // A name that the module imports.
             if let Some(imported) = imported(&symbols, binding) {
                 self.follow(&join(&imported, rest), seen, found);
+            }
+        } else if !scope.contains(LOCALS)
+            && let Some(locals) = symbols.locals.get(first)
+        {
+            // A name that is not written in a function of the module, or that is written where it is
+            // not known, is each class or function of that name that a function of the module defines.
+            for local in locals {
+                let name = join(&symbols.name.name, &join(local, rest));
+                self.follow(&name, seen, found);
             }
         } else {
             // A builtin, or a name that the module does not define at its top level.
@@ -191,7 +253,9 @@ impl ClassHierarchy {
     /// The names are added to one set as they are found, rather than returned and copied at each step
     /// of a long chain of imports.
     fn follow(&self, name: &str, seen: &mut FxHashSet<String>, found: &mut FxHashSet<String>) {
-        if !seen.insert(name.to_string()) {
+        // A package that imports a name from a submodule it does not have, as `from first.first import
+        // first` in `first`, makes the name longer at each step instead of repeating it.
+        if name.split('.').nth(MAX_PARTS).is_some() || !seen.insert(name.to_string()) {
             return;
         }
 
@@ -201,7 +265,7 @@ impl ClassHierarchy {
             let (first, rest) = symbol.split_once('.').unwrap_or((&symbol, ""));
             if let Some(bases) = symbols.bases.get(&symbol) {
                 for base in bases {
-                    self.resolve_written(file, base, seen, found);
+                    self.resolve_written(file, &symbol, base, seen, found);
                 }
             } else if let Some(binding) = symbols.bindings.get(first) {
                 if let Some(imported) = imported(&symbols, binding) {

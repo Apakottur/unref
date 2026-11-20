@@ -58,7 +58,11 @@ impl ModuleName {
 /// `roots` are the directories given to the check, resolved. A namespace package is only looked for
 /// under them, so that a package outside the project does not pull directories in.
 pub(crate) fn module_name(path: &Path, roots: &[PathBuf]) -> ModuleName {
-    let path = resolve(path);
+    // A link to a file is imported by its own name, so only the directory above it is resolved.
+    let path = match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => resolve(parent).join(name),
+        _ => resolve(path),
+    };
     let is_package = path.file_name().is_some_and(|name| name == INIT);
     let mut parts: Vec<String> = Vec::new();
     if !is_package {
@@ -111,8 +115,7 @@ pub(crate) fn import_root(path: &Path, name: &ModuleName) -> PathBuf {
 /// The name of a file without its last suffix.
 fn stem(path: &Path) -> String {
     path.file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_default()
+        .map_or_default(|stem| stem.to_string_lossy().into_owned())
 }
 
 /// Make a path absolute and resolve its links, as Python's `Path.resolve` does, also for a path that

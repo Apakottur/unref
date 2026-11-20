@@ -1,4 +1,4 @@
-//! What a module defines and imports at its top level.
+//! What a module defines, at its top level or not, and imports at its top level.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -9,8 +9,8 @@ use crate::definitions::{Definition, Kind};
 use crate::modules::ModuleName;
 use crate::references::{Binding, References};
 
-/// What a module defines and imports at its top level, as the base classes and decorators of its
-/// classes are followed through it, whether it is a module of the project or one outside it.
+/// What a module defines, at its top level or not, and imports at its top level, as the base classes
+/// and decorators of its classes are followed through it, whether it is a module of the project or one outside it.
 #[derive(Debug)]
 pub(crate) struct ModuleSymbols {
     /// The file of the module.
@@ -24,8 +24,13 @@ pub(crate) struct ModuleSymbols {
     /// The names that the module gives out from its `__getattr__`, each with the imports of it.
     pub lazy: FxHashMap<String, Vec<Binding>>,
     /// The classes and functions of the module, by their name in the module (`Outer.Inner` for a
-    /// nested class), with their base classes as they are written. A function has none.
+    /// nested class, `function.<locals>.Local` for a class in a function), with their base classes as
+    /// they are written. A function has none. Classes of one name in one scope, such as the two of an
+    /// `if` and its `else`, are one class with the base classes, decorators and members of each.
     pub bases: FxHashMap<String, Vec<String>>,
+    /// The classes and functions that are defined in the functions of the module, by their own name,
+    /// each with its names in the module.
+    pub locals: FxHashMap<String, Vec<String>>,
     /// The classes of the module, by their name in the module, with their decorators as they are
     /// written.
     pub decorators: FxHashMap<String, Vec<String>>,
@@ -34,7 +39,7 @@ pub(crate) struct ModuleSymbols {
 }
 
 impl ModuleSymbols {
-    /// Collect what a module defines and imports at its top level.
+    /// Collect what a module defines, and what it imports at its top level.
     pub(crate) fn of(
         path: Arc<Path>,
         name: ModuleName,
@@ -58,19 +63,32 @@ impl ModuleSymbols {
             stars,
             lazy,
             bases: FxHashMap::default(),
+            locals: FxHashMap::default(),
             decorators: FxHashMap::default(),
             members: FxHashMap::default(),
         };
         for definition in definitions {
             if matches!(definition.kind, Kind::Class | Kind::Function) {
+                let name = definition.qualified_name();
+                if definition.function.is_some() && !symbols.bases.contains_key(&name) {
+                    symbols
+                        .locals
+                        .entry(definition.name.clone())
+                        .or_default()
+                        .push(name.clone());
+                }
                 symbols
                     .bases
-                    .insert(definition.qualified_name(), definition.bases.clone());
+                    .entry(name)
+                    .or_default()
+                    .extend(definition.bases.iter().cloned());
             }
             if definition.kind == Kind::Class {
                 symbols
                     .decorators
-                    .insert(definition.qualified_name(), definition.decorators.clone());
+                    .entry(definition.qualified_name())
+                    .or_default()
+                    .extend(definition.decorators.iter().cloned());
             }
             if let Some(class) = &definition.class {
                 symbols

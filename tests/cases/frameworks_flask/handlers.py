@@ -41,4 +41,4 @@ def init_registry(registry: Registry):
         return None
 
 
-print(init_app, init_admin, init_blueprint, init_other, init_registry)
+init_app, init_admin, init_blueprint, init_other, init_registry

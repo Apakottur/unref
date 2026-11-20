@@ -13,4 +13,4 @@ class Other(pkg.slow.Base):
         return record
 
 
-print(Handler, Other)
+Handler, Other

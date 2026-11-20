@@ -312,15 +312,12 @@ fn standard_library_of(prefix: &Path, version: Option<&str>) -> Vec<PathBuf> {
             minor,
         )
     });
-    candidates
-        .pop()
-        .map(|directory| {
-            vec![directory.clone(), directory.join("lib-dynload")]
-                .into_iter()
-                .filter(|path| path.is_dir())
-                .collect()
-        })
-        .unwrap_or_default()
+    candidates.pop().map_or_default(|directory| {
+        vec![directory.clone(), directory.join("lib-dynload")]
+            .into_iter()
+            .filter(|path| path.is_dir())
+            .collect()
+    })
 }
 
 /// Read the `home` and the version of Python, such as `3.15`, of a virtual environment.

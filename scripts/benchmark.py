@@ -12,7 +12,6 @@ import contextlib
 import io
 import math
 import statistics
-import subprocess
 import sys
 import tarfile
 import tempfile
@@ -26,7 +25,7 @@ import typer
 
 _CPYTHON_TAG = "v3.15.0"
 _TOOLS = {
-    "unref": ("unref==0.3.1", []),
+    "unref": ("unref==0.3.2", []),
     "vulture": ("vulture==2.16", ["."]),
     "deadcode": ("deadcode==2.6.3", ["."]),
     "skylos": ("skylos==5.6.0", [".", "--no-upload", "--no-cache"]),
@@ -66,10 +65,8 @@ def _run(command: list[str], cwd: Path) -> float:
     """Run a command once and return how long it took, or infinity if it went over the time limit."""
     start = time.perf_counter()
     try:
-        subprocess.run(  # noqa: S603
-            command, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=_TIME_LIMIT, check=False
-        )
-    except subprocess.TimeoutExpired:
+        shpyx.run(command, exec_dir=cwd, timeout=_TIME_LIMIT, verify_return_code=False)
+    except shpyx.ShpyxTimeoutError:
         return math.inf
     return time.perf_counter() - start
 

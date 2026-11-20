@@ -102,6 +102,33 @@ jobs:
       - name: Run tests of the command
         run: pytest --showlocals -c tests/pytest.ini
 
+  # The oldest Rust that Cargo.toml supports, two releases behind the pinned toolchain, as ruff's.
+  minimum-rust:
+    name: Minimum Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the minimum Rust version
+        id: minimum
+        run: |
+          version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          rustup toolchain install "$version" --profile minimal
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: minimum-rust-${{ steps.minimum.outputs.version }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build the tests
+        env:
+          RUST_VERSION: ${{ steps.minimum.outputs.version }}
+        run: cargo "+$RUST_VERSION" test --locked --no-run
+
   compare:
     name: Compare with main
     runs-on: ubuntu-latest
@@ -212,7 +239,7 @@ jobs:
   check:
     name: Check All
     if: always()
-    needs: [linters, docs, type-check, unit-tests, compare]
+    needs: [linters, docs, type-check, unit-tests, minimum-rust, compare]
     runs-on: ubuntu-latest
     steps:
       - name: Decide whether the needed jobs succeeded or failed

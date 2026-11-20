@@ -53,8 +53,12 @@ pub(crate) struct Definition {
     /// arguments. A decorator that is not a dotted name is left out.
     pub decorators: Vec<String>,
     /// The class that the definition is in, by its name in the module (`Outer.Inner` for a nested
-    /// class), or None if it is not in a class.
+    /// class, `function.<locals>.Local` for a class in a function), or None if it is not in a class.
     pub class: Option<String>,
+    /// For a function or a class that is defined in a function and not in a class of it, the name of
+    /// that function in the module, or None otherwise. One that the function declares `global` is
+    /// defined in the module.
+    pub function: Option<String>,
     /// The function that the definition is in, by the line of its name, or None if it is not in a
     /// function. A class in a function is in it, and so are the methods of the class.
     pub owner: Owner,
@@ -85,20 +89,26 @@ pub(crate) struct Definition {
     pub wrapped_by: Option<String>,
 }
 
+/// What is between the name of a function and the name of what is defined in it, as in the
+/// qualified name that Python gives it.
+pub(crate) const LOCALS: &str = ".<locals>.";
+
 impl Definition {
-    /// The name of the definition in its module, such as `Outer.Inner` for a nested class.
+    /// The name of the definition in its module, such as `Outer.Inner` for a nested class, and
+    /// `function.<locals>.Local` for a class that is defined in a function.
     pub(crate) fn qualified_name(&self) -> String {
-        match &self.class {
-            None => self.name.clone(),
-            Some(class) => format!("{class}.{}", self.name),
+        match (&self.class, &self.function) {
+            (Some(class), _) => format!("{class}.{}", self.name),
+            (None, Some(function)) => format!("{function}{LOCALS}{}", self.name),
+            (None, None) => self.name.clone(),
         }
     }
 }
 
-/// The kind of expression that a dotted name is unwrapped from.
+/// The kind of expression that the outer end of a dotted name is unwrapped from.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Unwrap {
-    /// A decorator, such as `app.command` for `@app.command("name")`.
+    /// A decorator or what a call calls, such as `app.command` for `@app.command("name")`.
     Call,
     /// A base class or an annotation, such as `pydantic.BaseModel` for `pydantic.BaseModel[int]`.
     Subscript,
@@ -124,30 +134,35 @@ pub(crate) fn annotation_name(annotation: &Expr) -> String {
     dotted_name(annotation, Unwrap::Subscript).unwrap_or_default()
 }
 
-/// Get the dotted name of a decorator or a base class.
+/// Get the dotted name of an expression, such as a decorator, a base class, an annotation or what a
+/// call calls.
+///
+/// Only the outer call or subscript is unwrapped, so `@app().route` and `@registry["x"].route` are not
+/// dotted names.
 ///
 /// Returns None if the expression is not a dotted name, for example `@decorators[0]` or `make_base()`.
 pub(crate) fn dotted_name(expression: &Expr, unwrap: Unwrap) -> Option<String> {
+    let expression = match (expression, unwrap) {
+        (Expr::Call(call), Unwrap::Call) => &*call.func,
+        (Expr::Subscript(subscript), Unwrap::Subscript) => &*subscript.value,
+        _ => expression,
+    };
     let mut name = String::new();
-    push_dotted_name(expression, unwrap, &mut name).then_some(name)
+    push_dotted_name(expression, &mut name).then_some(name)
 }
 
 /// Add the dotted name of an expression to the end of a string, which is built in place since many
 /// calls and assignments are checked.
 ///
 /// Returns false if the expression is not a dotted name.
-fn push_dotted_name(expression: &Expr, unwrap: Unwrap, name: &mut String) -> bool {
+fn push_dotted_name(expression: &Expr, name: &mut String) -> bool {
     match expression {
-        Expr::Call(call) if unwrap == Unwrap::Call => push_dotted_name(&call.func, unwrap, name),
-        Expr::Subscript(subscript) if unwrap == Unwrap::Subscript => {
-            push_dotted_name(&subscript.value, unwrap, name)
-        }
         Expr::Name(root) => {
             name.push_str(root.id.as_str());
             true
         }
         Expr::Attribute(attribute) => {
-            if !push_dotted_name(&attribute.value, unwrap, name) {
+            if !push_dotted_name(&attribute.value, name) {
                 return false;
             }
             name.push('.');

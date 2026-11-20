@@ -9,4 +9,4 @@ class Premium(Account):
     plain = 1  # expect: 5 [unused-attribute]
 
 
-print(Premium)
+Premium

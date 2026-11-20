@@ -12,5 +12,5 @@ def function(limit=limit, kind: Kind = 2) -> Kind:
     return limit + kind + wrapper + Kind
 
 
-print(lambda limit=limit: limit)
+lambda limit=limit: limit
 function()

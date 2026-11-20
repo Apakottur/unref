@@ -66,7 +66,7 @@ def decorated(value=in_default()):  # expect: 5 [unused-function]
 
 
 # A lambda is part of the code that it is in.
-from_lambda = lambda: in_lambda()  # noqa: E731
+from_lambda = lambda: in_lambda()
 
 
 def in_lambda():
@@ -82,4 +82,4 @@ def from_class_body():
     return 7
 
 
-print(also_from_used(), Holder().used(), outer(), from_lambda)
+also_from_used(), Holder().used(), outer(), from_lambda

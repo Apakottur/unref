@@ -13,4 +13,4 @@ class Pair(NamedTuple):
     first: int  # expect: 5 [unused-attribute]
 
 
-print(Point, Pair)
+Point, Pair

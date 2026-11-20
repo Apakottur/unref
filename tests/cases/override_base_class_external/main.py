@@ -66,7 +66,7 @@ class Plain(str):
     VALUE = 1  # expect: 5 [unused-attribute]
 
 
-print(
+(
     Color,
     Size,
     Permission,

@@ -2,4 +2,4 @@
 from import_from_module_helpers import Class as Renamed
 from import_from_module_helpers import function
 
-print(function(), Renamed())
+function(), Renamed()

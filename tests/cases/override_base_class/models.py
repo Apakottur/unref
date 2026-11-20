@@ -91,7 +91,7 @@ class Computed(typing.cast("type", BaseModel)):
 # The override does not apply outside the class.
 table_name = {}  # expect: 1 [unused-variable]
 
-print(
+(
     Direct,
     ThroughModule,
     ThroughRenamedImport,

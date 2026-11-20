@@ -66,3 +66,21 @@ class Async(unittest.IsolatedAsyncioTestCase):
 class Plain:  # expect: 7 [unused-class]
     def test_method(self):  # expect: 9 [unused-method] transitive
         pass
+
+
+# unittest does not find a test case that is in a function, unless the function hands it over.
+def make_case():
+    class Local(unittest.TestCase):  # expect: 11 [unused-class]
+        def test_method(self):
+            pass
+
+    class Returned(unittest.TestCase):
+        def test_method(self):
+            pass
+
+    return Returned
+
+
+class UsesFactory(unittest.TestCase):
+    def test_method(self):
+        make_case()

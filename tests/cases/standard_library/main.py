@@ -11,4 +11,4 @@ class Handler(handlers.Base):
         return self
 
 
-print(Handler)
+Handler

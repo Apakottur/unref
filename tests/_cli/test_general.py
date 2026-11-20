@@ -1,3 +1,4 @@
+import os
 import shutil
 import warnings
 from pathlib import Path
@@ -16,6 +17,24 @@ def test_findings() -> None:
     assert result.exit_code == 1
     # The methods of the unused class are transitive, and not shown by default.
     assert result.stdout == f"{case}/main.py:1:7: unused-class 'Class'\n"
+
+
+@pytest.mark.parametrize("option", ["--exit-zero", "-e"])
+def test_exit_zero(option: str) -> None:
+    case = CASES_DIR / "function"
+
+    result = run([option, str(case)])
+
+    # The findings are still printed.
+    assert result.exit_code == 0
+    assert result.stdout == f"{case}/main.py:1:5: unused-function 'function'\n"
+
+
+def test_exit_zero_error() -> None:
+    # An error still exits with its own status.
+    result = run(["--exit-zero", "--jobs", "0", str(CASES_DIR / "function")])
+
+    assert result.exit_code == 2
 
 
 def test_file_path() -> None:
@@ -39,6 +58,46 @@ def test_default_path(tmp_path: Path) -> None:
     assert (
         result.stdout == "pkg/module.py:1:5: unused-function 'function'\npkg/sub/module.py:1:7: unused-class 'Class'\n"
     )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory permissions")
+@pytest.mark.parametrize(
+    ("args", "exit_code"),
+    [
+        (["."], 1),
+        (["private"], 1),
+        ([".", "private"], 1),
+        (["--exit-zero", "."], 0),
+        (["--show-files", "."], 1),
+        (["--show-files", "--exit-zero", "."], 0),
+    ],
+)
+def test_unreadable_directory(tmp_path: Path, args: list[str], exit_code: int) -> None:
+    private = tmp_path / "private"
+    private.mkdir()
+    (private / "hidden.py").write_text("def hidden(): pass\n")
+    (tmp_path / "visible.py").write_text("def visible(): pass\n")
+    private.chmod(0)
+    try:
+        try:
+            next(private.iterdir(), None)
+        except PermissionError as error:
+            diagnostic = f"private:1:1: io-error '{error.strerror} (os error {error.errno})'\n"
+        else:
+            pytest.skip("the current process can enumerate the directory")
+
+        result = run(args, cwd=tmp_path)
+    finally:
+        private.chmod(0o700)
+
+    assert result.exit_code == exit_code
+    if "--show-files" in args:
+        assert result.stdout == "visible.py\n"
+        assert result.stderr == diagnostic
+    else:
+        visible_finding = "visible.py:1:5: unused-function 'visible'\n" if "." in args else ""
+        assert result.stdout == diagnostic + visible_finding
+        assert result.stderr == ""
 
 
 def test_gitignored_given_directory() -> None:
@@ -103,6 +162,22 @@ def test_undecodable(name: str, error: str) -> None:
 
     assert result.exit_code == 1
     assert result.stdout == f"{path}:1:1: invalid-syntax '{error}'\n"
+
+
+def test_linked_module(tmp_path: Path) -> None:
+    # A link to a file is imported by its own name. What is used through it is used in the file that it
+    # links to as well, since they are one source.
+    (tmp_path / "impl.py").write_text("def run():\n    return 7\n\n\ndef unused():\n    return 0\n")
+    try:
+        (tmp_path / "api.py").symlink_to("impl.py")
+    except OSError:
+        pytest.skip("the file system does not support links")
+    (tmp_path / "main.py").write_text("from api import run\n\nrun()\n")
+
+    result = run(["."], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.stdout == "api.py:5:5: unused-function 'unused'\nimpl.py:5:5: unused-function 'unused'\n"
 
 
 @pytest.mark.parametrize("name", ["missing.py", "missing", "missing/module.py", "missing/../main.py"])

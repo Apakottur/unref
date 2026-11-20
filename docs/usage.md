@@ -16,8 +16,9 @@ src/project/utils.py:40:5: unused-function 'parse_date'
 uvx unref src scripts
 ```
 
-`unref` exits with a non-zero status if anything is found. See the [rules](rules.md) for what it reports
-and how to ignore a finding, and the [command line](configuration.md#command-line) for its options.
+`unref` exits with a non-zero status if anything is found, unless `--exit-zero` is given. See the
+[rules](rules.md) for what it reports and how to ignore a finding, and the
+[command line](configuration.md#command-line) for its options.
 
 ## pre-commit and prek
 
@@ -33,7 +34,7 @@ repos:
       - id: ruff-check
       - id: ruff-format
   - repo: https://github.com/Apakottur/unref
-    rev: v0.3.1
+    rev: v0.3.2
     hooks:
       - id: unref
 ```

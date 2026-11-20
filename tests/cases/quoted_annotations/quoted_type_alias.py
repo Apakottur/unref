@@ -34,7 +34,7 @@ class Unpacked:
 # The defaults of a `ParamSpec` and of a `TypeVarTuple` are types as well (PEP 696), and so is an
 # unpacked annotation of `*args`.
 def call[**P = ["SpecDefault"]](function: Callable[P, None]) -> None:
-    print(function)
+    function
 
 
 class Row[*Ts = *tuple["TupleDefault"]]:
@@ -42,7 +42,7 @@ class Row[*Ts = *tuple["TupleDefault"]]:
 
 
 def take(*args: *tuple["Unpacked"]) -> None:
-    print(args)
+    args
 
 
-print(JSONValue, Old, first, call, Row, take)
+JSONValue, Old, first, call, Row, take

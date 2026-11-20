@@ -129,4 +129,4 @@ class WithIgnoredMember:  # expect: 7 [unused-class]
     ignored_member = 14  # unref: ignore[unused-attribute]
 
 
-print(also_used())
+also_used()

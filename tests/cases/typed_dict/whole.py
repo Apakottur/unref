@@ -46,8 +46,8 @@ class Logged(TypedDict):
     logged: int
 
 
-class Printed(TypedDict):
-    printed: int
+class Stringified(TypedDict):
+    stringified: int
 
 
 # Passing the value to a function of the project or to a method of another object reads no key.
@@ -75,39 +75,39 @@ def keywords(keyword: int) -> int:
 
 
 def take(value: object) -> None:
-    print(value is None)
+    value
 
 
 class Client:
     def send(self, value: object) -> None:
-        print(value is None)
+        value
 
 
 def read(client: Client) -> None:
     event = RetryEvent(attempt=1, delay_ms=250)
-    print(json.dumps(dict(event)))
+    json.dumps(dict(event))
     spread = Spread(spread=1)
-    print({**spread} == {})
-    print(keywords(**Keywords(keyword=1)))
+    {**spread}
+    keywords(**Keywords(keyword=1))
     looped = Looped(looped=1)
     for key in looped:
-        print(key)
+        key
     comprehended = Comprehended(comprehended=1)
-    print([key for key in comprehended])
-    print(Items(item=1).items())
-    print(dumps(obj=Dumped(dumped=1)))
+    [key for key in comprehended]
+    Items(item=1).items()
+    dumps(obj=Dumped(dumped=1))
     logging.info("%s", Logged(logged=1))
-    printed = Printed(printed=1)
-    print(printed)
+    stringified = Stringified(stringified=1)
+    str(stringified)
     take(Passed(passed=1))
     helpers.send(Passed(imported=1))
     client.send(Passed(sent=1))
-    print(dict(UNKNOWN))
-    print(dict(Renamed(aliased=1)))
+    dict(UNKNOWN)
+    dict(Renamed(aliased=1))
 
 
 def unused() -> None:  # expect: 5 [unused-function]
-    print(dict(Unused(unused_field=1)))
+    dict(Unused(unused_field=1))
 
 
 read(Client())

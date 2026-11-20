@@ -3,11 +3,12 @@ Run the `unref` command as a user runs it, in a process of its own.
 """
 
 import os
-import subprocess
 import sysconfig
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+import shpyx
 
 # The command that the tests run: the one installed in the environment of the tests, or another one,
 # such as a debug build, that `UNREF_BINARY` names.
@@ -57,13 +58,5 @@ def run(
     Returns:
         What the run gives.
     """
-    environment = dict(os.environ)
-    for name, value in (env or {}).items():
-        if value is None:
-            environment.pop(name, None)
-        else:
-            environment[name] = value
-    completed = subprocess.run(  # noqa: S603
-        [binary, *args], capture_output=True, text=True, env=environment, cwd=cwd, check=False
-    )
-    return Result(exit_code=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)
+    result = shpyx.run([binary, *args], env=env, exec_dir=cwd, verify_return_code=False)
+    return Result(exit_code=result.return_code, stdout=result.stdout, stderr=result.stderr)

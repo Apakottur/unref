@@ -76,7 +76,7 @@ def emit(record):  # expect: 5 [unused-function]
     return record
 
 
-print(LogHandler, Encoder, Rotating, Renamed, Child, FromMissing, Plain)
+LogHandler, Encoder, Rotating, Renamed, Child, FromMissing, Plain
 
 
 # `json.encoder` is a module, not a package, so it has no `JSONEncoder` submodule.
@@ -85,7 +85,7 @@ class FromAttribute(json.encoder.JSONEncoder.Missing):
         return o
 
 
-print(FromAttribute)
+FromAttribute
 
 
 # A base class is found through a star import.
@@ -94,4 +94,4 @@ class FromStar(reexport.Handler):
         return record
 
 
-print(FromStar)
+FromStar

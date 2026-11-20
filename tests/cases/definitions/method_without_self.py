@@ -1,8 +1,7 @@
 class Class:  # expect: 7 [unused-class]
     @staticmethod
     def static_method():  # expect: 9 [unused-method] transitive
-        local = 1
-        return local
+        return 1
 
     def keyword_only(*, value):  # expect: 9 [unused-method] transitive
         value.attribute = 2

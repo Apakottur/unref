@@ -117,10 +117,9 @@ _OVERRIDE_WRONG_TYPE = "Option '{option}' in an override in the configuration fi
             'output-format = ["github"]',
             _WRONG_TYPE.format(option="output-format", expected="one of 'concise', 'github'"),
         ),
-        _invalid(
-            "show-transitive-string",
-            'show-transitive = "yes"',
-            _WRONG_TYPE.format(option="show-transitive", expected="a boolean"),
+        *(
+            _invalid(f"{option}-string", f'{option} = "yes"', _WRONG_TYPE.format(option=option, expected="a boolean"))
+            for option in ["show-transitive", "force-exclude", "respect-gitignore"]
         ),
         _invalid(
             "frameworks-list", 'frameworks = ["pytest"]', _WRONG_TYPE.format(option="frameworks", expected="a table")
@@ -271,7 +270,7 @@ _OVERRIDE_WRONG_TYPE = "Option '{option}' in an override in the configuration fi
         ),
     ],
 )
-def test_config_invalid(tmp_path: Path, name: str, content: str, error: str, partial: bool) -> None:  # noqa: FBT001
+def test_config_invalid(tmp_path: Path, name: str, content: str, error: str, *, partial: bool) -> None:
     config = write_config(tmp_path, f"{content}\n", name)
 
     # The run is in the directory of the file, so that nothing else would be checked if it were valid.

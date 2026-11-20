@@ -79,7 +79,7 @@ class Outer:
 # The override does not apply outside the class.
 field: int = 1  # expect: 1 [unused-variable]
 
-print(
+(
     Direct,
     WithArguments,
     ThroughModule,

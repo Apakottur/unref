@@ -111,5 +111,5 @@ class Plain:
     title: str = ""  # expect: 5 [unused-attribute]
 
 
-print(Point, Frozen, Ordered, Validated, Pair, Triple, Modern, FrozenModern, Mutable, Classic, AutoClassic)
-print(Next, FrozenNext, Point3D, Unmarked, Plain)
+Point, Frozen, Ordered, Validated, Pair, Triple, Modern, FrozenModern, Mutable, Classic, AutoClassic
+Next, FrozenNext, Point3D, Unmarked, Plain

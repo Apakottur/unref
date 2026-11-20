@@ -33,4 +33,4 @@ Constrained = TypeVar("Constrained", "First", "Second")
 Derived = NewType("Derived", "Base")
 Other = TypeVar("Named")
 
-print(Bounded, Constrained, Derived, Other)
+Bounded, Constrained, Derived, Other

@@ -31,6 +31,10 @@ pub(crate) struct Config {
     pub used_decorators: Vec<String>,
     /// The patterns of the files and directories that are not part of the project.
     pub exclude: Vec<String>,
+    /// Whether the files and directories that are given directly are left out too when excluded.
+    pub force_exclude: bool,
+    /// Whether the files and directories that git ignores are left out.
+    pub respect_gitignore: bool,
     /// The options that apply only to some of the files of the project.
     pub overrides: Vec<Override>,
     /// The Python environment or interpreter of the project, or None if there is none.
@@ -60,6 +64,8 @@ impl Default for Config {
             used_names: Vec::new(),
             used_decorators: Vec::new(),
             exclude: Vec::new(),
+            force_exclude: false,
+            respect_gitignore: true,
             overrides: Vec::new(),
             python: None,
             dummy_variable_rgx: DEFAULT_DUMMY_VARIABLE_RGX.to_string(),
@@ -262,6 +268,8 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
             "used-names",
             "used-decorators",
             "exclude",
+            "force-exclude",
+            "respect-gitignore",
             "overrides",
             "python",
             "dummy-variable-rgx",
@@ -304,6 +312,8 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
     };
 
     let show_transitive = bool_option(options, "show-transitive", &place)?.unwrap_or(false);
+    let force_exclude = bool_option(options, "force-exclude", &place)?.unwrap_or(false);
+    let respect_gitignore = bool_option(options, "respect-gitignore", &place)?.unwrap_or(true);
 
     let Frameworks {
         enabled: frameworks,
@@ -315,6 +325,8 @@ fn parse(options: &Table, path: &Path) -> Result<Config, String> {
         used_names: string_list(options, "used-names", &place)?,
         used_decorators: decorators(options, "used-decorators", &place)?,
         exclude: string_list(options, "exclude", &place)?,
+        force_exclude,
+        respect_gitignore,
         overrides: overrides
             .into_iter()
             .map(|table| parse_override(table, path))

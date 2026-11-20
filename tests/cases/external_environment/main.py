@@ -29,4 +29,4 @@ class App(flask.Flask):
         return self
 
 
-print(Upper, FromEditable, App)
+Upper, FromEditable, App
