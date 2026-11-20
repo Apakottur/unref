@@ -3,6 +3,7 @@ The options that select the files to check: `--exclude`, `--extend-exclude`, `--
 `--respect-gitignore` and `--show-files`.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,32 @@ def test_show_files_missing_path() -> None:
     assert result.exit_code == 1
     assert result.stdout == _files("single.py")
     assert result.stderr == "missing.py:1:1: io-error 'No such file or directory (os error 2)'\n"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory permissions")
+def test_show_files_unsearchable_directory(tmp_path: Path) -> None:
+    private = tmp_path / "private"
+    private.mkdir()
+    hidden = private / "hidden.py"
+    hidden.touch()
+    (tmp_path / "visible.py").touch()
+    private.chmod(0o444)
+    try:
+        assert list(private.iterdir()) == [hidden]
+        try:
+            hidden.stat()
+        except PermissionError as error:
+            diagnostic = f"private/hidden.py:1:1: io-error '{error.strerror} (os error {error.errno})'\n"
+        else:
+            pytest.skip("the current process can search the directory")
+
+        result = run(["--show-files", "."], cwd=tmp_path)
+    finally:
+        private.chmod(0o700)
+
+    assert result.exit_code == 1
+    assert result.stdout == _files("visible.py")
+    assert result.stderr == diagnostic
 
 
 def test_show_files_force_excluded_missing_path() -> None:

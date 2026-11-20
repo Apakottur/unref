@@ -42,6 +42,7 @@ type IgnoreFile = (PathBuf, Gitignore);
 pub(crate) struct Discovery {
     pub files: Vec<PathBuf>,
     pub errors: Vec<Finding>,
+    validate_paths: bool,
 }
 
 impl Discovery {
@@ -68,15 +69,18 @@ pub(crate) fn discover(paths: &[PathBuf], options: &Config) -> Discovery {
     discover_files(paths, options, false)
 }
 
-/// Find the files to list and diagnose explicit inputs that cannot be resolved.
+/// Find the files to list and diagnose selected paths that cannot be resolved.
 pub(crate) fn discover_for_listing(paths: &[PathBuf], options: &Config) -> Discovery {
     discover_files(paths, options, true)
 }
 
-fn discover_files(paths: &[PathBuf], options: &Config, validate_explicit: bool) -> Discovery {
+fn discover_files(paths: &[PathBuf], options: &Config, validate_paths: bool) -> Discovery {
     let excluded = Exclude::new(&options.exclude, &options.root);
     let gitignore = options.respect_gitignore;
-    let mut discovery = Discovery::default();
+    let mut discovery = Discovery {
+        validate_paths,
+        ..Discovery::default()
+    };
     for input in paths {
         // Cleaning removes suffixes such as `/.` that require a directory during lookup.
         let metadata = input.metadata();
@@ -87,7 +91,7 @@ fn discover_files(paths: &[PathBuf], options: &Config, validate_explicit: bool) 
         }
         match metadata {
             Ok(_) if is_directory => walk(&path, &excluded, gitignore, &mut discovery),
-            Err(error) if validate_explicit => discovery.record_error(input, &error),
+            Err(error) if validate_paths => discovery.record_error(input, &error),
             // A file that is given directly is checked unless `force_exclude` is set, as with ruff and
             // ty. A normal check reports failures when it tries to read the file.
             _ => discovery.files.push(path),
@@ -354,7 +358,14 @@ fn walk_directory(
             }
         } else if entry.file_name().to_string_lossy().ends_with(".py") && selected(false).is_some()
         {
-            discovery.files.push(path);
+            // A directory entry can provide its type even if its path cannot be looked up.
+            if discovery.validate_paths
+                && let Err(error) = path.metadata()
+            {
+                discovery.record_error(&path, &error);
+            } else {
+                discovery.files.push(path);
+            }
         }
     }
     for (child, absolute) in directories {
