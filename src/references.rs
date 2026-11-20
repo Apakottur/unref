@@ -96,6 +96,20 @@ pub(crate) struct WholeRead {
     pub local_import: Option<Binding>,
 }
 
+/// Calls already known to produce a value, or a name whose enclosing binding is not known yet.
+enum WholeValue<'a> {
+    Calls(Vec<String>),
+    Enclosing(&'a str),
+}
+
+#[derive(Debug)]
+struct PendingWholeRead {
+    name: String,
+    read: WholeRead,
+    /// Whether the read came from a nested function that can see assignments made after its definition.
+    captured: bool,
+}
+
 /// The methods of a mapping that read a key, given as their first argument.
 const KEY_METHODS: [&str; 3] = ["get", "pop", "setdefault"];
 /// The methods of a mapping that read every key.
@@ -250,6 +264,10 @@ struct Scope {
     /// In a function, the local variables that are assigned the result of a call, each with the
     /// dotted names of what they call as they are written.
     calls: FxHashMap<String, Vec<String>>,
+    /// Whole reads of unresolved names, resolved as their lexical scopes close.
+    pending_whole_reads: Vec<PendingWholeRead>,
+    /// Whether the function can read a binding from an enclosing function.
+    has_enclosing_function: bool,
     /// The scope a comprehension reads from when a name is not local to it.
     comprehension_parent: Option<usize>,
     /// In a class body, the nearest scope around it that is not a class body. The functions,
@@ -277,6 +295,8 @@ impl Scope {
             function_name: None,
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
+            pending_whole_reads: Vec::new(),
+            has_enclosing_function: false,
             comprehension_parent: None,
             outer: None,
         }
@@ -868,8 +888,10 @@ impl<'a> Walker<'_, '_> {
 
         // The body runs only when the function is called. A lambda has no name, and is part of the code
         // that it is in.
-        let (body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
+        let (mut body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
         let (scope, owner) = (self.scope, self.owner);
+        let target = self.reads_target(scope);
+        body_scope.has_enclosing_function = self.scopes[target].kind == ScopeKind::Function;
         self.scope = self.push_scope(body_scope);
         self.binder = self.scope;
         match body {
@@ -897,7 +919,9 @@ impl<'a> Walker<'_, '_> {
             .collect();
         // A variable that is assigned the result of a call is bound, so it is local unless declared
         // `global` or `nonlocal`.
-        let calls = std::mem::take(&mut inner_scope.calls);
+        local_names.extend(names.iter().map(|name| (*name).to_string()));
+        self.close(inner, &local_names, Target::Scope(target));
+        let calls = std::mem::take(&mut self.scopes[inner].calls);
         if line != 0 {
             let calls = calls
                 .into_iter()
@@ -906,9 +930,6 @@ impl<'a> Walker<'_, '_> {
                 .local_calls
                 .extend(calls.map(|(name, called)| ((line, name), called)));
         }
-        local_names.extend(names.iter().map(|name| (*name).to_string()));
-        let target = self.reads_target(scope);
-        self.close(inner, &local_names, Target::Scope(target));
     }
 
     /// Add a class, and what it defines and refers to.
@@ -1323,7 +1344,7 @@ impl<'a> Walker<'_, '_> {
         );
         for argument in passed {
             let values = self.value_calls(argument);
-            if values.is_empty() {
+            if values.is_none() {
                 continue;
             }
             if let Some(reader) =
@@ -1335,7 +1356,8 @@ impl<'a> Walker<'_, '_> {
     }
 
     /// Add a read of a value as a whole, given by the dotted names of what it is the result of calling.
-    fn add_whole_read(&mut self, values: Vec<String>, reader: Option<&str>) {
+    fn add_whole_read(&mut self, value: Option<WholeValue<'_>>, reader: Option<&str>) {
+        let Some(value) = value else { return };
         let owner = self.owner;
         let local_import = reader
             .filter(|_| self.scope != 0)
@@ -1344,38 +1366,93 @@ impl<'a> Walker<'_, '_> {
                 self.scopes[self.scope].imports.get(root)
             })
             .cloned();
-        self.references
-            .whole_reads
-            .extend(values.into_iter().map(|value| WholeRead {
-                owner,
-                value,
-                reader: reader.map(str::to_string),
-                local_import: local_import.clone(),
-            }));
+        let read = WholeRead {
+            owner,
+            value: String::new(),
+            reader: reader.map(str::to_string),
+            local_import,
+        };
+        match value {
+            WholeValue::Calls(values) => {
+                self.references
+                    .whole_reads
+                    .extend(values.into_iter().map(|value| WholeRead {
+                        value,
+                        ..read.clone()
+                    }));
+            }
+            WholeValue::Enclosing(name) => {
+                self.scopes[self.scope]
+                    .pending_whole_reads
+                    .push(PendingWholeRead {
+                        name: name.to_string(),
+                        read,
+                        captured: false,
+                    });
+            }
+        }
     }
 
     /// Get the dotted names of what a value is the result of calling, as they are written, if it is a
     /// call, or a local variable that is assigned one.
-    fn value_calls(&self, value: &Expr) -> Vec<String> {
+    fn value_calls<'b>(&self, value: &'b Expr) -> Option<WholeValue<'b>> {
         match value {
-            Expr::Call(call) => dotted_name(&call.func, Unwrap::Call).into_iter().collect(),
+            Expr::Call(call) => {
+                dotted_name(&call.func, Unwrap::Call).map(|name| WholeValue::Calls(vec![name]))
+            }
             Expr::Name(name) => self.variable_calls(name.id.as_str()),
-            _ => Vec::new(),
+            _ => None,
         }
     }
 
     /// Get the dotted names of what a local variable is assigned the result of calling, as they are
     /// written, looking through enclosing scopes for a comprehension.
-    fn variable_calls(&self, name: &str) -> Vec<String> {
-        let mut scope = Some(self.scope);
-        while let Some(index) = scope {
+    fn variable_calls<'b>(&self, name: &'b str) -> Option<WholeValue<'b>> {
+        let mut index = self.scope;
+        loop {
             let found = &self.scopes[index];
             if found.bound.contains(name) {
-                return found.calls.get(name).cloned().unwrap_or_default();
+                return found.calls.get(name).cloned().map(WholeValue::Calls);
             }
-            scope = found.comprehension_parent;
+            if let Some(parent) = found.comprehension_parent {
+                index = parent;
+            } else {
+                return found
+                    .has_enclosing_function
+                    .then_some(WholeValue::Enclosing(name));
+            }
         }
-        Vec::new()
+    }
+
+    /// Resolve whole reads that came from closures, or pass their free names on to the parent.
+    fn resolve_whole_reads(
+        &mut self,
+        inner: usize,
+        local_names: &FxHashSet<String>,
+        target: Target,
+    ) {
+        let pending = std::mem::take(&mut self.scopes[inner].pending_whole_reads);
+        for mut pending in pending {
+            let scope = &self.scopes[inner];
+            if local_names.contains(&pending.name) {
+                if pending.captured
+                    && let Some(values) = scope.calls.get(&pending.name)
+                {
+                    self.references
+                        .whole_reads
+                        .extend(values.iter().map(|value| WholeRead {
+                            value: value.clone(),
+                            ..pending.read.clone()
+                        }));
+                }
+            } else if let Target::Scope(parent) = target
+                && parent != 0
+                && !scope.global_names.contains(&pending.name)
+            {
+                pending.captured |= scope.has_enclosing_function;
+                self.scopes[parent].pending_whole_reads.push(pending);
+            }
+        }
     }
 
     /// Add a read of a key, if it is a string literal.
@@ -1424,6 +1501,7 @@ impl<'a> Walker<'_, '_> {
     /// function or class that is a local variable is a reference to the definitions of that name in
     /// the scope.
     fn close(&mut self, inner: usize, local_names: &FxHashSet<String>, target: Target) {
+        self.resolve_whole_reads(inner, local_names, target);
         let reads = std::mem::take(&mut self.scopes[inner].reads);
         let (defined, other): (FxHashMap<String, Vec<usize>>, FxHashMap<_, _>) =
             std::mem::take(&mut self.scopes[inner].functions_and_classes)
