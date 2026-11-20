@@ -45,6 +45,8 @@ pub(crate) struct Read {
     pub reads_object: bool,
     /// The attribute read from the result of calling the chain, such as `name` in `Class().name`.
     pub called: Option<Name>,
+    /// Whether the read occurs in the module body, where unconditional imports run in order.
+    in_module: bool,
 }
 
 /// A read of an imported name, or of a chain of attributes that starts with one.
@@ -193,8 +195,13 @@ pub(crate) fn walk_module(
         binder: 0,
         owner: None,
         in_signature: false,
+        direct_statement: false,
+        direct_imports: FxHashMap::default(),
     };
-    walker.visit_body(&module.body);
+    for statement in &module.body {
+        walker.direct_statement = true;
+        walker.visit_stmt(statement);
+    }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
@@ -316,15 +323,20 @@ struct Walker<'p, 'a> {
     owner: Owner,
     /// Whether the node is in the annotation of a parameter or the return of a function.
     in_signature: bool,
+    /// Whether the next statement runs directly in the module body.
+    direct_statement: bool,
+    /// The most recent unconditional module import of each name.
+    direct_imports: FxHashMap<String, Binding>,
 }
 
 impl<'a> Visitor<'a> for Walker<'_, '_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        let direct_statement = std::mem::take(&mut self.direct_statement);
         match stmt {
             Stmt::FunctionDef(function) => self.visit_function_def(function),
             Stmt::ClassDef(class) => self.visit_class(class),
-            Stmt::Import(import) => self.visit_import(import),
-            Stmt::ImportFrom(import) => self.visit_import_from(import),
+            Stmt::Import(import) => self.visit_import(import, direct_statement),
+            Stmt::ImportFrom(import) => self.visit_import_from(import, direct_statement),
             Stmt::Global(global) => {
                 // The names are not local variables.
                 let binder = self.binder;
@@ -577,6 +589,7 @@ impl<'a> Walker<'_, '_> {
             attributes,
             reads_object: !self.in_signature,
             called,
+            in_module: self.scope == 0 && self.owner.is_none(),
         };
         let scope = self.scope;
         self.scopes[scope].reads.push(read);
@@ -636,6 +649,7 @@ impl<'a> Walker<'_, '_> {
             attributes: Vec::new(),
             reads_object: true,
             called: None,
+            in_module: self.scope == 0 && self.owner.is_none(),
         });
     }
 
@@ -976,7 +990,7 @@ impl<'a> Walker<'_, '_> {
     }
 
     /// Bind the names that an `import` statement imports.
-    fn visit_import(&mut self, import: &ast::StmtImport) {
+    fn visit_import(&mut self, import: &ast::StmtImport, direct: bool) {
         let bindings = import.names.iter().map(|alias| match &alias.asname {
             // `import package.module` binds `package`.
             None => {
@@ -1000,11 +1014,11 @@ impl<'a> Walker<'_, '_> {
             ),
         });
         let bindings = bindings.collect();
-        self.bind_imports(bindings);
+        self.bind_imports(bindings, direct);
     }
 
     /// Add the names that a `from` import imports, and bind them.
-    fn visit_import_from(&mut self, import: &ast::StmtImportFrom) {
+    fn visit_import_from(&mut self, import: &ast::StmtImportFrom, direct: bool) {
         let module = import.module.as_ref().map(ToString::to_string);
         let mut bindings = FxHashMap::default();
         for alias in &import.names {
@@ -1024,7 +1038,7 @@ impl<'a> Walker<'_, '_> {
                 },
             );
         }
-        self.bind_imports(bindings);
+        self.bind_imports(bindings, direct);
     }
 
     /// Add the names listed in `__all__`. Only the `__all__` of the module, at its top level or
@@ -1041,6 +1055,7 @@ impl<'a> Walker<'_, '_> {
                 attributes: Vec::new(),
                 reads_object: true,
                 called: None,
+                in_module: false,
             });
         }
     }
@@ -1411,10 +1426,39 @@ impl<'a> Walker<'_, '_> {
     ///
     /// When a name is imported more than once, as by an `import` in a `try` and a fallback in its
     /// `except`, the first import is the one that counts. Within one statement, the last one does.
-    fn bind_imports(&mut self, statement: FxHashMap<String, Binding>) {
+    fn bind_imports(&mut self, statement: FxHashMap<String, Binding>, direct: bool) {
         for (name, binding) in statement {
             self.bind(&name);
             let binder = self.binder;
+            if direct
+                && let Some(previous) = self.direct_imports.insert(name.clone(), binding.clone())
+                && previous != binding
+            {
+                // Resolve earlier module-body reads before the next import replaces the alias.
+                self.scopes[0].reads.retain(|read| {
+                    if !read.in_module || read.root.as_str() != name {
+                        return true;
+                    }
+                    if read.attributes.is_empty() {
+                        self.references.reads.insert(Read {
+                            owner: read.owner,
+                            root: read.root.clone(),
+                            attributes: Vec::new(),
+                            reads_object: false,
+                            called: None,
+                            in_module: false,
+                        });
+                    }
+                    self.references.imported_reads.insert(ImportedRead {
+                        owner: read.owner,
+                        binding: previous.clone(),
+                        attributes: read.attributes.clone(),
+                        reads_object: read.reads_object,
+                        called: read.called.clone(),
+                    });
+                    false
+                });
+            }
             self.scopes[binder].imports.entry(name).or_insert(binding);
         }
     }
@@ -1453,8 +1497,12 @@ impl<'a> Walker<'_, '_> {
             .filter(|instance| !scope.bound.contains(instance))
             .zip(scope.class_name.clone());
         let mut passed = Vec::new();
-        for read in reads {
-            if let Some(binding) = self.scopes[inner].imports.get(read.root.as_str()) {
+        for mut read in reads {
+            let root = read.root.as_str();
+            let direct_binding = (inner == 0 && read.in_module)
+                .then(|| self.direct_imports.get(root))
+                .flatten();
+            if let Some(binding) = direct_binding.or_else(|| self.scopes[inner].imports.get(root)) {
                 // A plain read of a name that is not local, at the module or declared `global`, is also
                 // a read of the name of the enclosing scope, without reading the object.
                 if read.attributes.is_empty() && !local_names.contains(read.root.as_str()) {
@@ -1464,6 +1512,7 @@ impl<'a> Walker<'_, '_> {
                         attributes: Vec::new(),
                         reads_object: false,
                         called: None,
+                        in_module: false,
                     });
                 }
                 self.references.imported_reads.insert(ImportedRead {
@@ -1503,6 +1552,9 @@ impl<'a> Walker<'_, '_> {
                     .attributes
                     .extend(names.map(|name| (read.owner, name)));
             } else {
+                if inner == 0 {
+                    read.in_module = false;
+                }
                 passed.push(read);
             }
         }
