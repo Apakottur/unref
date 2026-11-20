@@ -194,11 +194,40 @@ pub(crate) fn walk_module(
         owner: None,
         in_signature: false,
     };
-    walker.visit_body(&module.body);
+    for statement in &module.body {
+        walker.visit_stmt(statement);
+        // A direct assignment replaces the binding other modules can import. The module's own
+        // reads may still refer to the earlier import, so keep the scope's import map separately.
+        let targets = match statement {
+            Stmt::Assign(assign) => assign.targets.as_slice(),
+            Stmt::AnnAssign(assign) if assign.value.is_some() => {
+                std::slice::from_ref(&*assign.target)
+            }
+            _ => &[],
+        };
+        for target in targets {
+            remove_exported_import(target, &mut walker.references.bindings);
+        }
+    }
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
-    walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
     (walker.definitions, walker.references)
+}
+
+/// Remove the imported names replaced by an assignment target.
+fn remove_exported_import(target: &Expr, bindings: &mut FxHashMap<String, Binding>) {
+    match target {
+        Expr::Name(name) => {
+            bindings.remove(name.id.as_str());
+        }
+        Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
+            for target in elts {
+                remove_exported_import(target, bindings);
+            }
+        }
+        Expr::Starred(starred) => remove_exported_import(&starred.value, bindings),
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1415,6 +1444,12 @@ impl<'a> Walker<'_, '_> {
         for (name, binding) in statement {
             self.bind(&name);
             let binder = self.binder;
+            if binder == 0 {
+                self.references
+                    .bindings
+                    .entry(name.clone())
+                    .or_insert_with(|| binding.clone());
+            }
             self.scopes[binder].imports.entry(name).or_insert(binding);
         }
     }
