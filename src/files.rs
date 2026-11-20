@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use regex::bytes::Regex;
 use ruff_python_ast::{CmpOp, Expr, ModModule, Stmt};
 use ruff_python_parser::Parsed;
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::FxHashMap;
 
 use crate::definitions::Definition;
@@ -162,13 +162,27 @@ pub(crate) fn decode_source(bytes: &[u8]) -> Result<String, DecodeError> {
                 format!("(unicode error) '{declared}' codec can't decode the source"),
             )),
         },
-        _ if is_cp437 => Ok(bytes
-            .iter()
-            .map(|&byte| match byte {
-                0..=0x7F => char::from(byte),
-                _ => CP437_HIGH[usize::from(byte - 0x80)],
-            })
-            .collect()),
+        _ if is_cp437 => {
+            let text: String = bytes
+                .iter()
+                .map(|&byte| match byte {
+                    0..=0x7F => char::from(byte),
+                    _ => CP437_HIGH[usize::from(byte - 0x80)],
+                })
+                .collect();
+            // Python rejects NUL anywhere in source, including comments the parser skips.
+            if let Some(offset) = text.find('\0') {
+                let (line, column) =
+                    SourcePositions::new(&text).line_column(TextSize::new(to_u32(offset)));
+                return Err(DecodeError {
+                    line,
+                    column,
+                    rule: Rule::InvalidSyntax,
+                    message: "source code cannot contain null bytes".to_owned(),
+                });
+            }
+            Ok(text)
+        }
         _ => {
             let encoding = encoding_rs::Encoding::for_label_no_replacement(name.as_bytes())
                 .ok_or_else(|| {

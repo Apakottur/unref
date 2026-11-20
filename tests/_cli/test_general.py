@@ -171,6 +171,19 @@ def test_encoding_declaration_after_non_utf8_comment(
     assert result.output == output
 
 
+def test_cp437_with_null_byte(tmp_path: Path) -> None:
+    source = "# Café project, coding: cp437\n# \0\nfrom helper import live\nlive()\n"
+    (tmp_path / "app.py").write_bytes(source.encode("cp437"))
+    (tmp_path / "helper.py").write_text("def live():\n    print(7)\n")
+
+    result = run(["."], cwd=tmp_path)
+
+    assert result.exit_code == 1
+    assert result.output == (
+        "app.py:2:3: invalid-syntax 'source code cannot contain null bytes'\nhelper.py:1:5: unused-function 'live'\n"
+    )
+
+
 @pytest.mark.parametrize("newline", ["\r", "\r\n"], ids=["cr", "crlf"])
 def test_cp437_second_line_declaration(tmp_path: Path, newline: str) -> None:
     source = newline.join(("", "# coding: cp437", "print('café')", ""))
