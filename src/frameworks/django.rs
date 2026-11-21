@@ -15,11 +15,10 @@ use std::path::PathBuf;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::classes::ClassHierarchy;
 use crate::definitions::{Definition, Kind};
-use crate::modules::{ModuleName, resolve};
+use crate::modules::resolve;
 
-use super::{FrameworkRules, ProjectFile, is_top_level};
+use super::{Context, Rules, Settings, is_top_level};
 
 /// The environment variable that names the settings module of Django, and `os.environ.setdefault`,
 /// which `startproject` sets it with.
@@ -74,9 +73,8 @@ const DJANGO_MIGRATION_ATTRIBUTES: [&str; 6] = [
     "atomic",
 ];
 
-/// The modules that Django reads by their names, by their indices.
-#[derive(Default)]
-pub(super) struct DjangoModules {
+/// The rules of Django, with the modules that it reads by their names, by their indices.
+pub(super) struct Django {
     /// The settings modules.
     settings: FxHashSet<usize>,
     /// The modules of the root URLs, which `ROOT_URLCONF` names.
@@ -85,11 +83,15 @@ pub(super) struct DjangoModules {
     included_urls: FxHashSet<usize>,
 }
 
-impl FrameworkRules<'_> {
+impl Rules for Django {
+    fn new(context: &Context, settings: &Settings) -> Self {
+        django_modules(context, settings.django_settings)
+    }
+
     /// Check whether Django or a server reads or calls a definition by itself.
-    pub(super) fn django_uses(&self, definition: &Definition, module: usize) -> bool {
+    fn uses(&self, context: &Context, definition: &Definition, module: usize) -> bool {
         let name = definition.name.as_str();
-        if let Some(class) = self.class_name(definition, module) {
+        if let Some(class) = context.class_name(definition, module) {
             if definition.kind == Kind::Class {
                 return false;
             }
@@ -100,40 +102,35 @@ impl FrameworkRules<'_> {
             };
             let migration_member =
                 definition.kind == Kind::Attribute && DJANGO_MIGRATION_ATTRIBUTES.contains(&name);
-            return (app_config_member && self.inherits(module, class, &DJANGO_APP_CONFIGS))
-                || (migration_member && self.inherits(module, class, &DJANGO_MIGRATIONS));
+            return (app_config_member && context.inherits(module, class, &DJANGO_APP_CONFIGS))
+                || (migration_member && context.inherits(module, class, &DJANGO_MIGRATIONS));
         }
         if definition.kind == Kind::Class {
             return definition.owner.is_none()
-                && (self.inherits(module, name, &DJANGO_APP_CONFIGS)
+                && (context.inherits(module, name, &DJANGO_APP_CONFIGS)
                     || (name == DJANGO_MIGRATION_CLASS
-                        && self.inherits(module, name, &DJANGO_MIGRATIONS)));
+                        && context.inherits(module, name, &DJANGO_MIGRATIONS)));
         }
         if definition.kind != Kind::Variable || definition.owner.is_some() {
             return false;
         }
-        let django = &self.django;
-        (django.settings.contains(&module) && is_uppercase(name))
-            || ((django.root_urls.contains(&module) || django.included_urls.contains(&module))
+        (self.settings.contains(&module) && is_uppercase(name))
+            || ((self.root_urls.contains(&module) || self.included_urls.contains(&module))
                 && DJANGO_URLS_VARIABLES.contains(&name))
-            || (django.root_urls.contains(&module) && DJANGO_ROOT_URLS_VARIABLES.contains(&name))
-            || (django.included_urls.contains(&module)
+            || (self.root_urls.contains(&module) && DJANGO_ROOT_URLS_VARIABLES.contains(&name))
+            || (self.included_urls.contains(&module)
                 && DJANGO_INCLUDED_URLS_VARIABLES.contains(&name))
             || definition
                 .call
                 .as_ref()
-                .is_some_and(|call| self.resolves_to(module, call, &DJANGO_APPLICATIONS))
+                .is_some_and(|call| context.resolves_to(module, call, &DJANGO_APPLICATIONS))
     }
 }
 
 /// Find the modules that Django reads by their names, given the settings modules that are given by
 /// their resolved paths.
-pub(super) fn django_modules(
-    files: &[ProjectFile],
-    module_names: &[ModuleName],
-    hierarchy: &ClassHierarchy,
-    given: &FxHashSet<PathBuf>,
-) -> DjangoModules {
+fn django_modules(context: &Context, given: &FxHashSet<PathBuf>) -> Django {
+    let (files, module_names, hierarchy) = (context.files, context.module_names, context.hierarchy);
     let mut by_name: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
     for (module, name) in module_names.iter().enumerate() {
         by_name.entry(name.name.as_str()).or_default().push(module);
@@ -142,11 +139,11 @@ pub(super) fn django_modules(
 
     let mut pending: Vec<usize> = Vec::new();
     let mut included_urls = FxHashSet::default();
-    for (module, (path, _, references)) in files.iter().enumerate() {
-        if !given.is_empty() && given.contains(&resolve(path)) {
+    for (module, file) in files.iter().enumerate() {
+        if !given.is_empty() && given.contains(&resolve(file.path)) {
             pending.push(module);
         }
-        for (called, arguments) in &references.string_calls {
+        for (called, arguments) in &file.hints.string_calls {
             let resolves_to = |names: &[&str]| hierarchy.resolves_to(module, called, names);
             match arguments.as_slice() {
                 [variable, settings, ..]
@@ -167,7 +164,7 @@ pub(super) fn django_modules(
         if !settings.insert(module) {
             continue;
         }
-        for import in &files[module].2.imports {
+        for import in &files[module].references.imports {
             if import.name == "*"
                 && let Some(name) =
                     module_names[module].resolve(import.module.as_deref(), import.level)
@@ -179,7 +176,7 @@ pub(super) fn django_modules(
 
     let mut root_urls = FxHashSet::default();
     for &module in &settings {
-        for definition in files[module].1 {
+        for definition in files[module].definitions {
             if definition.kind == Kind::Variable
                 && is_top_level(definition)
                 && definition.name == DJANGO_ROOT_URLCONF
@@ -189,7 +186,7 @@ pub(super) fn django_modules(
             }
         }
     }
-    DjangoModules {
+    Django {
         settings,
         root_urls,
         included_urls,

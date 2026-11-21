@@ -7,7 +7,7 @@
 
 use crate::definitions::{Definition, Kind};
 
-use super::{FrameworkRules, has_any};
+use super::{Context, Rules, Settings, has_any};
 
 /// The decorators that make a dataclass, as `dataclasses`, Pydantic and attrs give them out, and
 /// where they are defined. `attrs` gives out the decorators of `attr`.
@@ -42,28 +42,35 @@ const ATTRS_FIELDS: [&str; 7] = [
     "attrs.field",
 ];
 
-impl FrameworkRules<'_> {
+/// The rules of the dataclasses, the named tuples and the classes of attrs.
+pub(super) struct Dataclasses;
+
+impl Rules for Dataclasses {
+    fn new(_context: &Context, _settings: &Settings) -> Self {
+        Self
+    }
+
     /// Check whether a dataclass, a named tuple or a class of attrs reads a definition by itself: one
     /// of its fields.
-    pub(super) fn dataclasses_uses(&self, definition: &Definition, module: usize) -> bool {
-        let Some(class) = self.class_name(definition, module) else {
+    fn uses(&self, context: &Context, definition: &Definition, module: usize) -> bool {
+        let Some(class) = context.class_name(definition, module) else {
             return false;
         };
         if definition.kind != Kind::Attribute {
             return false;
         }
-        let decorators = self.hierarchy.decorators(module, class);
+        let decorators = context.hierarchy.decorators(module, class);
         if !has_any(&decorators, &DATACLASS_DECORATORS)
-            && !self.inherits(module, class, &NAMED_TUPLES)
+            && !context.inherits(module, class, &NAMED_TUPLES)
         {
             return false;
         }
-        self.is_field(definition, module)
+        context.is_field(definition, module)
             // A field of attrs without an annotation.
             || (definition.annotation.is_none()
                 && definition
                     .call
                     .as_ref()
-                    .is_some_and(|call| self.resolves_to(module, call, &ATTRS_FIELDS)))
+                    .is_some_and(|call| context.resolves_to(module, call, &ATTRS_FIELDS)))
     }
 }

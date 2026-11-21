@@ -96,7 +96,7 @@ pub(crate) struct WholeRead {
     pub local_import: Option<Binding>,
 }
 
-/// What a Python module refers to.
+/// What a Python module refers to, which the engine follows to find what is used.
 ///
 /// Each reference is made from an owner: the function that it is in, or the module itself.
 #[derive(Debug, Default)]
@@ -138,16 +138,24 @@ pub(crate) struct References {
     /// each with the index of the definition in the definitions of the module and the attributes read
     /// from it, in order, as in `Color.parse` for an enum.
     pub local_objects: FxHashSet<(Owner, usize, Vec<Name>)>,
+}
+
+/// What a Python module reveals about its values that only the rules of frameworks read, such as the
+/// variables that hold an application of a web framework, or the modules that Django names by a
+/// string. The walk finds them with the references, and the engine leaves them to the frameworks.
+#[derive(Debug, Default)]
+pub(crate) struct Hints {
     /// The local variables of the functions that are assigned the result of a call.
     pub local_calls: LocalCalls,
-    /// The annotated parameters of the functions, by the function and the name of the parameter, each with the dotted name of its annotation as it is written, without
-    /// its type arguments, such as `Flask` for `app: Flask`.
+    /// The annotated parameters of the functions, by the function and the name of the parameter, each
+    /// with the dotted name of its annotation as it is written, without its type arguments, such as
+    /// `Flask` for `app: Flask`.
     pub annotated_parameters: FxHashMap<(Index, String), String>,
     /// The parameters of the functions, by the function and the name of the parameter.
     pub parameters: FxHashSet<(Index, String)>,
     /// The functions that return or yield the result of a call, or a local variable that is assigned
-    /// one, each with the dotted names of what they call as
-    /// they are written, such as `Flask` for `return Flask(__name__)`.
+    /// one, each with the dotted names of what they call as they are written, such as `Flask` for
+    /// `return Flask(__name__)`.
     pub returned_calls: FxHashMap<Index, Vec<String>>,
     /// The calls of the functions and methods whose string arguments frameworks read, each by the
     /// dotted name of what it calls as it is written, such as `os.environ.setdefault`, and its leading
@@ -156,6 +164,6 @@ pub(crate) struct References {
 }
 
 /// The local variables of each function of a module that are assigned the result of a call, by the
-/// function and the name of the variable, each with the dotted names of what
-/// they call as they are written, such as `FastAPI` for `app = FastAPI()`.
+/// function and the name of the variable, each with the dotted names of what they call as they are
+/// written, such as `FastAPI` for `app = FastAPI()`.
 pub(crate) type LocalCalls = FxHashMap<(Index, String), Vec<String>>;

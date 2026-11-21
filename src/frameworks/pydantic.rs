@@ -5,7 +5,7 @@
 
 use crate::definitions::{Definition, Kind};
 
-use super::FrameworkRules;
+use super::{Context, Rules, Settings};
 
 /// `pydantic.BaseModel` as `pydantic` gives it out, and where it is defined, also in the Pydantic 1 API
 /// of `pydantic.v1`. Packages such as `pydantic_settings` import it from where it is defined.
@@ -41,40 +41,47 @@ const PYDANTIC_CONFIG: &str = "model_config";
 /// The configuration class of a model in Pydantic 1.
 const PYDANTIC_V1_CONFIG: &str = "Config";
 
-impl FrameworkRules<'_> {
+/// The rules of Pydantic.
+pub(super) struct Pydantic;
+
+impl Rules for Pydantic {
+    fn new(_context: &Context, _settings: &Settings) -> Self {
+        Self
+    }
+
     /// Check whether Pydantic calls or reads a definition by itself.
-    pub(super) fn pydantic_uses(&self, definition: &Definition, module: usize) -> bool {
-        let Some(class) = self.class_name(definition, module) else {
+    fn uses(&self, context: &Context, definition: &Definition, module: usize) -> bool {
+        let Some(class) = context.class_name(definition, module) else {
             return false;
         };
         if definition.kind == Kind::Method {
             // A decorator registers the method with Pydantic, in a model or a Pydantic dataclass.
-            return self.is_decorated(definition, module, &PYDANTIC_DECORATORS);
+            return context.is_decorated(definition, module, &PYDANTIC_DECORATORS);
         }
         if definition.kind == Kind::Class {
-            return definition.name == PYDANTIC_V1_CONFIG && self.is_model(module, class);
+            return definition.name == PYDANTIC_V1_CONFIG && is_model(context, module, class);
         }
 
         // An attribute, which a decorator applied by hand can register as it does a method.
         if definition
             .wrapped_by
             .as_ref()
-            .is_some_and(|decorator| self.resolves_to(module, decorator, &PYDANTIC_DECORATORS))
+            .is_some_and(|decorator| context.resolves_to(module, decorator, &PYDANTIC_DECORATORS))
         {
             return true;
         }
         let (model, last) = class.rsplit_once('.').unwrap_or(("", class));
-        if last == PYDANTIC_V1_CONFIG && !model.is_empty() && self.is_model(module, model) {
+        if last == PYDANTIC_V1_CONFIG && !model.is_empty() && is_model(context, module, model) {
             return true;
         }
-        self.is_model(module, class)
+        is_model(context, module, class)
             && (definition.name == PYDANTIC_CONFIG
                 // A field that is not a private attribute.
-                || (!definition.name.starts_with('_') && self.is_field(definition, module)))
+                || (!definition.name.starts_with('_') && context.is_field(definition, module)))
     }
+}
 
-    /// Check whether a class of a module is a subclass of `pydantic.BaseModel`.
-    fn is_model(&self, module: usize, name: &str) -> bool {
-        self.inherits(module, name, &PYDANTIC_MODELS)
-    }
+/// Check whether a class of a module is a subclass of `pydantic.BaseModel`.
+fn is_model(context: &Context, module: usize, name: &str) -> bool {
+    context.inherits(module, name, &PYDANTIC_MODELS)
 }
