@@ -17,6 +17,7 @@ mod dataclasses;
 mod django;
 mod fastapi;
 mod flask;
+mod flask_restful;
 mod pydantic;
 mod pytest;
 mod sphinx;
@@ -35,8 +36,8 @@ use crate::modules::ModuleName;
 use crate::references::{Hints, Index, References};
 use crate::resolver::Names;
 
-/// The HTTP methods, which name methods of FastAPI's applications and routers, and of Flask's
-/// `MethodView`.
+/// The HTTP methods, which name methods of FastAPI's applications and routers, of Flask's
+/// `MethodView`, and of the resources of Flask-RESTful and Flask-RESTX.
 const HTTP_METHODS: [&str; 8] = [
     "get", "put", "post", "delete", "options", "head", "patch", "trace",
 ];
@@ -118,6 +119,7 @@ fn make(framework: Framework, context: &Context, settings: &Settings) -> Box<dyn
         Framework::Sqlalchemy => Box::new(sqlalchemy::Sqlalchemy::new(context, settings)),
         Framework::Fastapi => Box::new(fastapi::Fastapi::new(context, settings)),
         Framework::Flask => Box::new(flask::Flask::new(context, settings)),
+        Framework::FlaskRestful => Box::new(flask_restful::FlaskRestful::new(context, settings)),
         Framework::Sphinx => Box::new(sphinx::Sphinx::new(context, settings)),
         Framework::Django => Box::new(django::Django::new(context, settings)),
         Framework::Celery => Box::new(celery::Celery::new(context, settings)),
@@ -226,9 +228,18 @@ impl<'a> Context<'a> {
         instances: &Instances,
         methods: &[&[&str]],
     ) -> bool {
-        if !definition.kind.is_function() {
-            return false;
-        }
+        definition.kind.is_function() && self.decorated_by(definition, module, instances, methods)
+    }
+
+    /// Check whether a definition, a function or a class, has a decorator that is a method of one of
+    /// the given instances, with a method of one of the given lists.
+    fn decorated_by(
+        &self,
+        definition: &Definition,
+        module: usize,
+        instances: &Instances,
+        methods: &[&[&str]],
+    ) -> bool {
         // Check the instance that a decorator is a method of, such as `app` for `app.route`. A method
         // can be that of an attribute of the instance, such as `cli.command`.
         let any_instance = |name: &str, check: &dyn Fn(&str) -> bool| {

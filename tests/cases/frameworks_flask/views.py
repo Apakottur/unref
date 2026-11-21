@@ -25,6 +25,13 @@ def check_token():
 
 # Flask calls the methods of a method view named after HTTP methods.
 class Items(MethodView):
+    # Flask reads the class attributes of a view that configure it.
+    decorators = [print]
+    init_every_request = False
+
+    # Not an attribute of Flask's views.
+    method_decorators = [print]  # expect: 5 [unused-attribute]
+
     def get(self):
         return ""
 
@@ -37,6 +44,8 @@ class Items(MethodView):
 
 # Flask calls the `dispatch_request` method of a view.
 class Page(View):
+    methods = ["GET", "POST"]
+
     def dispatch_request(self):
         return ""
 
