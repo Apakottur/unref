@@ -81,7 +81,9 @@ force-exclude = true
 ### `respect-gitignore`
 
 Leave out the files and directories that git ignores, as
-[Ruff's option](https://docs.astral.sh/ruff/settings/#respect-gitignore). Defaults to `true`.
+[Ruff's option](https://docs.astral.sh/ruff/settings/#respect-gitignore): those of the `.gitignore` files,
+the `.git/info/exclude` file of the repository and the global ignore file of `core.excludesFile`. Defaults
+to `true`.
 
 ```toml
 [tool.unref]

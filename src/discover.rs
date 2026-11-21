@@ -4,7 +4,7 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use ignore::Match;
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use ignore::gitignore::{Gitignore, GitignoreBuilder, gitconfig_excludes_path};
 
 use crate::config::Config;
 use crate::models::{Finding, Rule};
@@ -34,7 +34,8 @@ const DEFAULT_EXCLUDE: [&str; 20] = [
     "**/venv/",
 ];
 
-/// The patterns of a `.gitignore` file, with the absolute directory that they are relative to.
+/// The patterns of an ignore file, such as a `.gitignore` file, with the absolute directory that they
+/// are relative to.
 type IgnoreFile = (PathBuf, Gitignore);
 
 /// The files selected for the check and the I/O errors encountered while finding them.
@@ -302,7 +303,7 @@ fn walk_directory(
     discovery: &mut Discovery,
 ) {
     if gitignore {
-        ignore_files.extend(read_ignore_file(directory));
+        ignore_files.extend(read_ignore_file(&directory.join(".gitignore"), directory));
     }
     let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
@@ -370,8 +371,10 @@ fn walk_directory(
     }
 }
 
-/// Read the `.gitignore` files that apply to a directory from above it: those of its parents, up to
-/// the root of its git repository. Outside a git repository no `.gitignore` file applies, as with git.
+/// Read the ignore files that apply to a directory from above it: the global one of `core.excludesFile`
+/// and the `info/exclude` file of its git repository, then the `.gitignore` files of its parents, up to
+/// the root of the repository. They are in the order of git's precedence, the last one that matches a
+/// path decides. Outside a git repository no ignore file applies, as with git.
 fn ignore_files_above(directory: &Path) -> Vec<IgnoreFile> {
     let absolute = resolve(directory);
     let Some(root) = repository_root(&absolute) else {
@@ -384,7 +387,35 @@ fn ignore_files_above(directory: &Path) -> Vec<IgnoreFile> {
         .take_while(|parent| parent.starts_with(root))
         .collect();
     parents.reverse();
-    parents.into_iter().filter_map(read_ignore_file).collect()
+    let global = gitconfig_excludes_path();
+    let exclude = git_directory(root).map(|git| git.join("info").join("exclude"));
+    // Their patterns are relative to the root of the repository, as those of its `.gitignore` file.
+    [global, exclude]
+        .into_iter()
+        .flatten()
+        .filter_map(|file| read_ignore_file(&file, root))
+        .chain(
+            parents
+                .into_iter()
+                .filter_map(|parent| read_ignore_file(&parent.join(".gitignore"), parent)),
+        )
+        .collect()
+}
+
+/// The directory that holds the files of the git repository at a root, that of its `info/exclude`.
+/// That is `.git` itself, or for a worktree or a submodule, whose `.git` is a file that points to its
+/// own directory, the directory that its `commondir` file names if it has one, as git reads it.
+fn git_directory(root: &Path) -> Option<PathBuf> {
+    let dot_git = root.join(".git");
+    if dot_git.is_dir() {
+        return Some(dot_git);
+    }
+    let content = std::fs::read_to_string(&dot_git).ok()?;
+    let own = root.join(content.lines().next()?.strip_prefix("gitdir:")?.trim());
+    match std::fs::read_to_string(own.join("commondir")) {
+        Ok(common) => Some(own.join(common.lines().next()?.trim())),
+        Err(_) => Some(own),
+    }
 }
 
 /// The root of the git repository that a resolved path is in, or None if it is in none.
@@ -394,14 +425,13 @@ fn repository_root(absolute: &Path) -> Option<&Path> {
         .find(|candidate| candidate.join(".git").exists())
 }
 
-/// Read the `.gitignore` file of a directory, if it has one. An invalid line, such as a lone `!`, is
-/// skipped and the other lines of the file still apply, as with git and ruff.
-fn read_ignore_file(directory: &Path) -> Option<IgnoreFile> {
-    let path = directory.join(".gitignore");
+/// Read an ignore file, if it exists, whose patterns are relative to a directory. An invalid line, such
+/// as a lone `!`, is skipped and the other lines of the file still apply, as with git and ruff.
+fn read_ignore_file(path: &Path, directory: &Path) -> Option<IgnoreFile> {
     if !path.is_file() {
         return None;
     }
-    let bytes = std::fs::read(&path).ok()?;
+    let bytes = std::fs::read(path).ok()?;
     let mut builder = GitignoreBuilder::new(".");
     for line in String::from_utf8_lossy(&bytes)
         .lines()

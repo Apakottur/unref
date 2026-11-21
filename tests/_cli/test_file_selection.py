@@ -229,3 +229,92 @@ def test_force_exclude_without_respect_gitignore(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert result.stdout == _files("scratch_one.py")
+
+
+def _repository(directory: Path, git: Path | None = None) -> Path:
+    """
+    Make a git repository with a file to check and a scratch file, and return its root.
+
+    Args:
+        directory: The directory to make it in.
+        git: The directory that holds the files of the repository, or None for its `.git` directory.
+    """
+    root = directory / "repository"
+    (root / "pkg").mkdir(parents=True)
+    for name in ["main.py", "scratch.py", "pkg/scratch.py"]:
+        (root / name).write_text("")
+    write_config(root)
+    if git is None:
+        git = root / ".git"
+    (git / "info").mkdir(parents=True)
+    return root
+
+
+def _global_ignore(directory: Path, content: str) -> dict[str, str | None]:
+    """
+    Write a global ignore file, the `core.excludesFile` of a git configuration of its own.
+
+    Returns:
+        The environment variables that make git, and unref, read it.
+    """
+    ignore = directory / "global_ignore"
+    ignore.write_text(content)
+    config = directory / "gitconfig"
+    config.write_text(f'[core]\n\texcludesFile = "{ignore.as_posix()}"\n')
+    return {"GIT_CONFIG_GLOBAL": str(config), "XDG_CONFIG_HOME": str(directory), "HOME": str(directory)}
+
+
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [
+        pytest.param("scratch.py\n", ["main.py"], id="any-depth"),
+        # Its patterns are relative to the root of the repository.
+        pytest.param("/scratch.py\n", ["main.py", "pkg/scratch.py"], id="anchored"),
+    ],
+)
+def test_respect_info_exclude(tmp_path: Path, pattern: str, expected: list[str]) -> None:
+    root = _repository(tmp_path)
+    (root / ".git/info/exclude").write_text(pattern)
+
+    result = run(["--show-files"], env=_global_ignore(tmp_path, ""), cwd=root)
+
+    assert result.exit_code == 0
+    assert result.stdout == _files(*expected)
+
+
+def test_respect_info_exclude_of_worktree(tmp_path: Path) -> None:
+    # The `.git` of a worktree is a file that points to its own directory, whose `commondir` names the
+    # directory of the main repository, which holds `info/exclude`.
+    common = tmp_path / "main.git"
+    root = _repository(tmp_path, git=common)
+    own = common / "worktrees/repository"
+    own.mkdir(parents=True)
+    (own / "commondir").write_text("../..\n")
+    (root / ".git").write_text(f"gitdir: {own}\n")
+    (common / "info/exclude").write_text("scratch.py\n")
+
+    result = run(["--show-files"], env=_global_ignore(tmp_path, ""), cwd=root)
+
+    assert result.exit_code == 0
+    assert result.stdout == _files("main.py")
+
+
+def test_respect_global_ignore(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    result = run(["--show-files"], env=_global_ignore(tmp_path, "scratch.py\n"), cwd=root)
+
+    assert result.exit_code == 0
+    assert result.stdout == _files("main.py")
+
+
+def test_gitignore_overrides_info_exclude_and_global_ignore(tmp_path: Path) -> None:
+    # As in git, `.gitignore` comes before `info/exclude`, which comes before the global ignore file.
+    root = _repository(tmp_path)
+    (root / ".git/info/exclude").write_text("!scratch.py\nmain.py\n")
+    (root / "pkg/.gitignore").write_text("!scratch.py\n")
+
+    result = run(["--show-files"], env=_global_ignore(tmp_path, "*.py\n"), cwd=root)
+
+    assert result.exit_code == 0
+    assert result.stdout == _files("pkg/scratch.py", "scratch.py")
