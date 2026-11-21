@@ -22,6 +22,7 @@ use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::models::{Finding, Framework};
 use crate::modules::{ModuleName, module_name, resolve};
 use crate::symbols::ModuleSymbols;
+use crate::timings::Timings;
 
 use class_members::Classes;
 use findings::{findings, transitive_definitions};
@@ -62,8 +63,13 @@ struct Project {
 /// are those that nothing references.
 ///
 /// Returns a finding for each unused definition, for each problem with an ignore comment, and for each
-/// file that does not parse or path that cannot be read, sorted by path, line and column.
-pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
+/// file that does not parse or path that cannot be read, sorted by path, line and column. Measures the
+/// wall time of each phase in the timings.
+pub(crate) fn find_unused(
+    options: &Config,
+    paths: &[PathBuf],
+    timings: &mut Timings,
+) -> Vec<Finding> {
     let enabled: FxHashSet<Framework> = Framework::ALL
         .into_iter()
         .filter(|framework| options.frameworks.get(framework).copied().unwrap_or(true))
@@ -71,6 +77,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
 
     let discovery = discover(paths, options);
     let discovered: Vec<Arc<Path>> = discovery.files.into_iter().map(Arc::from).collect();
+    timings.end("discovery");
     let mut syntax_errors: FxHashMap<Arc<Path>, Finding> = FxHashMap::default();
     let mut files = Vec::new();
     let mut facts = Vec::new();
@@ -85,6 +92,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             }
         }
     }
+    timings.end("parse and walk");
 
     // Only a directory can have a namespace package under it. A hook of prek or pre-commit gives every
     // file of the project, and checking each directory against each of them takes quadratic time.
@@ -103,6 +111,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     }
     let mut external = ExternalModules::new(search_path(&files, &names, options.python.as_deref()));
     import_siblings(&mut facts, &names, &files_by_name, &mut external);
+    timings.end("module names and sibling imports");
 
     let mut definitions = Vec::new();
     let mut definition_files = Vec::new();
@@ -136,6 +145,9 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         })
         .collect();
     let hierarchy = ClassHierarchy::new(modules, project.files_by_name.clone(), external);
+    // The hierarchy resolves the bases of each class when first asked, so the time to do it lands in
+    // whichever of the phases below asks first.
+    timings.end("symbols and class hierarchy");
     let typed_dicts = subclass_attributes(&project, &hierarchy, &TYPED_DICTS);
     let enums = subclass_attributes(&project, &hierarchy, &ENUMS);
     let fields: FxHashSet<DefinitionId> = typed_dicts.values().flatten().copied().collect();
@@ -144,7 +156,9 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         .into_iter()
         .map(|((file, class), fields)| (join(&project.names[file].name, &class), fields))
         .collect();
+    timings.end("TypedDict and enum attributes, classes");
     let uses = find_uses(&project, &classes, &typed_dicts);
+    timings.end("uses");
 
     let file_definitions: Vec<ProjectFile> = (0..project.files.len())
         .map(|index| {
@@ -172,7 +186,9 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
         sphinx_configuration.as_ref(),
         &django_settings,
     );
+    timings.end("framework rules");
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
+    timings.end("roots");
 
     let implementations = classes.implementations(&project);
     let mut graph = Graph::new(&project, &uses, &fields, enums, implementations);
@@ -186,7 +202,9 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
     let unused: Vec<DefinitionId> = (0..project.definitions.len())
         .filter(|id| !all_used[*id])
         .collect();
+    timings.end("graph reachability");
     let is_transitive = transitive_definitions(&project, &graph, &unused);
+    timings.end("transitive findings");
 
     let mut findings = findings(
         &project,
@@ -202,6 +220,7 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             (&left.path, left.line, left.column).cmp(&(&right.path, right.line, right.column))
         });
     }
+    timings.end("findings");
 
     // The command exits after the check, and the system frees its memory at once, which is faster than
     // dropping the many small parts of these one by one, as clang does too. A caller that checks many

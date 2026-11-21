@@ -261,3 +261,29 @@ def test_pattern_through_given_directory(tmp_path: Path, ignore_file: str, confi
 
     assert given.stdout == "generated/module.py:1:5: unused-function 'function'\n"
     assert whole.stdout == ""
+
+
+def test_timings() -> None:
+    # The hidden option prints the wall time of each phase to the standard error, and changes nothing else.
+    case = CASES_DIR / "method"
+
+    result = run(["--timings", str(case)])
+
+    assert result.exit_code == 1
+    assert result.stdout == f"{case}/main.py:1:7: unused-class 'Class'\n"
+    phases = [line.rsplit(maxsplit=2)[0] for line in result.stderr.splitlines()]
+    assert phases == [
+        "discovery",
+        "parse and walk",
+        "module names and sibling imports",
+        "symbols and class hierarchy",
+        "TypedDict and enum attributes, classes",
+        "uses",
+        "framework rules",
+        "roots",
+        "graph reachability",
+        "transitive findings",
+        "findings",
+        "total",
+    ]
+    assert all(line.endswith(" ms") for line in result.stderr.splitlines())
