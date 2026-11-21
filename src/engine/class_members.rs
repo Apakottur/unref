@@ -4,8 +4,9 @@ use std::cell::OnceCell;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::classes::{ClassHierarchy, join};
+use crate::classes::ClassHierarchy;
 use crate::definitions::Kind;
+use crate::resolver::join;
 
 use super::{DefinitionId, Project};
 
