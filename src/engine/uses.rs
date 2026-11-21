@@ -1,7 +1,7 @@
 //! What the code of each owner of a project uses: the names, attributes, keys and objects it reads.
 
 use ruff_python_ast::name::Name;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 
 use crate::references::Receiver;
 use crate::resolver::{Resolver, imported_name, join};
@@ -71,19 +71,13 @@ impl AllUses {
 /// any other attribute of an object by name only. A TypedDict of the project that is read as a whole,
 /// or passed to a function from outside the project, has all its fields used, and those of the
 /// TypedDicts that it inherits from.
-///
-/// `typed_dicts` are the fields of each TypedDict of the project, by its dotted name.
-pub(super) fn find_uses(
-    project: &Project,
-    classes: &Classes,
-    typed_dicts: &FxHashMap<String, Vec<DefinitionId>>,
-) -> AllUses {
+pub(super) fn find_uses(project: &Project, classes: &Classes) -> AllUses {
     let mut uses = AllUses::new(project.files.len() + project.definitions.len());
     let resolver = classes.hierarchy.resolver();
     // The names of the TypedDicts, so that a value that cannot be one is not resolved.
-    let typed_dict_names: FxHashSet<&str> = typed_dicts
-        .keys()
-        .map(|dotted| dotted.rsplit('.').next().unwrap_or(dotted))
+    let typed_dict_names: FxHashSet<&str> = classes
+        .typed_dicts()
+        .map(|(class, _)| project.definitions[class].name.as_str())
         .collect();
     for (file, file_facts) in project.facts.iter().enumerate() {
         let references = &file_facts.references;
@@ -198,7 +192,7 @@ pub(super) fn find_uses(
                 .hierarchy
                 .resolve(file, &read.value)
                 .iter()
-                .flat_map(|dotted| typed_dicts.get(dotted).into_iter().flatten().copied())
+                .flat_map(|dotted| classes.fields_of(dotted))
                 .collect();
             if !fields.is_empty()
                 && read

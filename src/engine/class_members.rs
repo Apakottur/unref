@@ -1,4 +1,5 @@
-//! The classes of a project with their members, to match a member read from an object of a class.
+//! The classes of a project with their members, to match a member read from an object of a class, and
+//! the TypedDicts and enums among them.
 
 use std::cell::OnceCell;
 
@@ -14,12 +15,19 @@ use super::{DefinitionId, Project};
 /// inheriting from it.
 const PROTOCOLS: [&str; 2] = ["typing.Protocol", "typing_extensions.Protocol"];
 const ABSTRACT_METHOD: &str = "abc.abstractmethod";
+/// `TypedDict`, as `typing` and `typing_extensions` give it out.
+const TYPED_DICTS: [&str; 2] = ["typing.TypedDict", "typing_extensions.TypedDict"];
+/// `Enum`, which `IntEnum`, `StrEnum`, `Flag` and the other enums of `enum` inherit from.
+const ENUMS: [&str; 1] = ["enum.Enum"];
 
 /// A class of the project, by its index among the classes.
 pub(super) type ClassId = usize;
 
 /// The classes of the project, with their members, so that a member read from an object whose class
 /// is plain is matched in the classes that the object can be an instance of.
+///
+/// The fields of a TypedDict are read as keys rather than as attributes, and the members of an enum
+/// are all used by a read of the enum as a whole, so the attributes of those classes are kept too.
 pub(super) struct Classes<'a> {
     pub(super) hierarchy: &'a ClassHierarchy,
     /// The class of each definition of a class, by its id, or `NONE` for another definition. Classes
@@ -35,6 +43,12 @@ pub(super) struct Classes<'a> {
     descendants: Vec<Vec<ClassId>>,
     /// Whether each class is a metaclass, whose instances are classes of their own.
     metaclasses: Vec<bool>,
+    /// Whether each class inherits from `TypedDict`, directly or not.
+    typed_dicts: Vec<bool>,
+    /// Whether each class inherits from `Enum`, directly or not.
+    enums: Vec<bool>,
+    /// The attributes of each TypedDict and enum, and none for another class.
+    attributes: Vec<Vec<DefinitionId>>,
     /// The classes that a member read from the first parameter of a method of each class can be in,
     /// and from `super()` in it, found when first needed.
     lineages: Vec<[OnceCell<Vec<ClassId>>; 2]>,
@@ -51,11 +65,7 @@ pub(super) struct Classes<'a> {
 impl<'a> Classes<'a> {
     const NONE: u32 = u32::MAX;
 
-    pub(super) fn new(
-        project: &Project,
-        hierarchy: &'a ClassHierarchy,
-        fields: &FxHashSet<DefinitionId>,
-    ) -> Self {
+    pub(super) fn new(project: &Project, hierarchy: &'a ClassHierarchy) -> Self {
         let mut ids = vec![Self::NONE; project.definitions.len()];
         let mut definitions = Vec::new();
         let mut by_dotted: FxHashMap<String, Vec<ClassId>> = FxHashMap::default();
@@ -76,6 +86,8 @@ impl<'a> Classes<'a> {
         }
         let mut ancestors = Vec::new();
         let mut metaclasses = Vec::new();
+        let mut typed_dicts = Vec::new();
+        let mut enums = Vec::new();
         let mut protocols = vec![false; definitions.len()];
         let mut unknown_bases = vec![false; definitions.len()];
         for (definition_id, file, definition) in project.definitions_by_file() {
@@ -97,6 +109,8 @@ impl<'a> Classes<'a> {
             let dotted =
                 hierarchy.ancestors(file, &project.definitions[definition_id].qualified_name);
             metaclasses.push(dotted.contains("type"));
+            typed_dicts.push(TYPED_DICTS.iter().any(|base| dotted.contains(*base)));
+            enums.push(ENUMS.iter().any(|base| dotted.contains(*base)));
             let mut found: Vec<ClassId> = dotted
                 .iter()
                 .flat_map(|ancestor| by_dotted.get(ancestor).into_iter().flatten().copied())
@@ -129,11 +143,17 @@ impl<'a> Classes<'a> {
         let mut by_member: FxHashMap<String, FxHashMap<ClassId, Vec<DefinitionId>>> =
             FxHashMap::default();
         let mut loose: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
+        let mut attributes = vec![Vec::new(); definitions.len()];
         for (id, definition) in project.definitions.iter().enumerate() {
-            if let Some(class) = project.class_of(id)
-                && !fields.contains(&id)
-            {
+            if let Some(class) = project.class_of(id) {
                 let class = ids[class] as usize;
+                if definition.kind == Kind::Attribute && (typed_dicts[class] || enums[class]) {
+                    attributes[class].push(id);
+                    // A field of a TypedDict is read as a key instead.
+                    if typed_dicts[class] {
+                        continue;
+                    }
+                }
                 by_member
                     .entry(definition.name.clone())
                     .or_default()
@@ -156,9 +176,51 @@ impl<'a> Classes<'a> {
                 .collect(),
             descendants,
             metaclasses,
+            typed_dicts,
+            enums,
+            attributes,
             by_member,
             loose,
         }
+    }
+
+    /// Check whether a definition is a field of a TypedDict.
+    pub(super) fn is_field(&self, project: &Project, id: DefinitionId) -> bool {
+        project.definitions[id].kind == Kind::Attribute
+            && project
+                .class_of(id)
+                .is_some_and(|class| self.typed_dicts[self.ids[class] as usize])
+    }
+
+    /// Get the TypedDicts that have fields, each with its definition and its fields.
+    pub(super) fn typed_dicts(&self) -> impl Iterator<Item = (DefinitionId, &[DefinitionId])> {
+        self.with_attributes(&self.typed_dicts)
+    }
+
+    /// Get the enums that have members, each with its definition and its members.
+    pub(super) fn enums(&self) -> impl Iterator<Item = (DefinitionId, &[DefinitionId])> {
+        self.with_attributes(&self.enums)
+    }
+
+    /// Get the fields of the TypedDicts of a dotted name, such as `package.module.Event`.
+    pub(super) fn fields_of(&self, dotted: &str) -> impl Iterator<Item = DefinitionId> {
+        self.by_dotted
+            .get(dotted)
+            .into_iter()
+            .flatten()
+            .filter(|&&class| self.typed_dicts[class])
+            .flat_map(|&class| self.attributes[class].iter().copied())
+    }
+
+    /// Get the classes of a kind that have attributes, each with its definition and its attributes.
+    fn with_attributes<'s>(
+        &'s self,
+        kind: &'s [bool],
+    ) -> impl Iterator<Item = (DefinitionId, &'s [DefinitionId])> {
+        kind.iter()
+            .enumerate()
+            .filter(|&(class, &is_kind)| is_kind && !self.attributes[class].is_empty())
+            .map(|(class, _)| (self.definitions[class], &*self.attributes[class]))
     }
 
     /// Find the members of a name in classes and their base classes.
