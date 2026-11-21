@@ -122,3 +122,53 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes dist/*
+
+  # Opens a pull request that points the docs, the benchmark and the package at the release, once PyPI serves it.
+  update-version:
+    name: Update the version
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      # Required to start CI on the pull request, as one opened with this token does not.
+      actions: write
+    steps:
+      - name: Wait for the release on PyPI
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for _ in $(seq 60); do
+            if curl --fail --silent --show-error --output /dev/null "https://pypi.org/pypi/unref/$version/json"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "unref $version is not on PyPI after 10 minutes."
+          exit 1
+
+      # The pull request is opened against main, not the tagged commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Set the version from the tag
+        run: uv run --only-group dev scripts/set_version.py "${GITHUB_REF_NAME#v}"
+
+      - name: Open or update the pull request
+        id: pr
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
+        with:
+          branch: update-version
+          commit-message: Point the docs, the benchmark and the package at the latest release of unref
+          title: Point the docs, the benchmark and the package at the latest release of unref
+          body: The docs, the benchmark and the package name an older release than the latest on PyPI.
+
+      - name: Start CI
+        if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref update-version
