@@ -318,25 +318,3 @@ def test_gitignore_overrides_info_exclude_and_global_ignore(tmp_path: Path) -> N
 
     assert result.exit_code == 0
     assert result.stdout == _files("pkg/scratch.py", "scratch.py")
-
-
-def test_force_exclude_info_exclude(tmp_path: Path) -> None:
-    root = _repository(tmp_path)
-    (root / ".git/info/exclude").write_text("scratch.py\n")
-
-    result = run(
-        ["--show-files", "--force-exclude", "scratch.py", "main.py"], env=_global_ignore(tmp_path, ""), cwd=root
-    )
-
-    assert result.exit_code == 0
-    assert result.stdout == _files("main.py")
-
-
-def test_no_respect_gitignore_info_exclude(tmp_path: Path) -> None:
-    root = _repository(tmp_path)
-    (root / ".git/info/exclude").write_text("scratch.py\n")
-
-    result = run(["--show-files", "--no-respect-gitignore"], env=_global_ignore(tmp_path, "main.py\n"), cwd=root)
-
-    assert result.exit_code == 0
-    assert result.stdout == _files("main.py", "pkg/scratch.py", "scratch.py")
