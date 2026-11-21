@@ -18,8 +18,8 @@ _ROOT = Path(__file__).parent.parent
 # Each file, with the pattern of the version in it. The part before the version is kept. A checkout on
 # Windows has CRLF line endings.
 _RELEASES = {
-    "README.md": r"(repo: https://github\.com/Apakottur/unref\s+rev: v)[0-9.]+",
-    "docs/usage.md": r"(repo: https://github\.com/Apakottur/unref\s+rev: v)[0-9.]+",
+    "README.md": r"(repo: https://github\.com/Apakottur/unref-pre-commit\s+rev: v)[0-9.]+",
+    "docs/usage.md": r"(repo: https://github\.com/Apakottur/unref-pre-commit\s+rev: v)[0-9.]+",
     "scripts/benchmark.py": r"(\"unref==)[0-9.]+",
     "Cargo.toml": r'(?m)(^version = ")[^"]*',
     "Cargo.lock": r'(name = "unref"\r?\nversion = ")[^"]*',

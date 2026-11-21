@@ -33,14 +33,17 @@ repos:
     hooks:
       - id: ruff-check
       - id: ruff-format
-  - repo: https://github.com/Apakottur/unref
+  - repo: https://github.com/Apakottur/unref-pre-commit
     rev: v0.4.0
     hooks:
       - id: unref
 ```
 
-Set `rev` to the [latest release](https://github.com/Apakottur/unref/releases), or let `pre-commit autoupdate`
-or `prek autoupdate` fill it in.
+Set `rev` to the [latest release](https://github.com/Apakottur/unref-pre-commit/releases), or let
+`pre-commit autoupdate` or `prek autoupdate` fill it in. The hook lives in
+[unref-pre-commit](https://github.com/Apakottur/unref-pre-commit), which installs the prebuilt wheel of `unref`
+from PyPI, rather than building it from source. Each release of `unref` is mirrored there as a tag of the same
+version.
 
 The hook checks the whole project, not only the changed files: a definition is unused only if no file
 references it.
