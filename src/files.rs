@@ -14,7 +14,7 @@ use crate::definitions::{Definition, Kind};
 use crate::ignores::{IgnoreComment, find_ignore_comments};
 use crate::models::{Finding, Rule};
 use crate::positions::{SourcePositions, to_u32};
-use crate::references::{Binding, Index, References, walk_module};
+use crate::references::{Binding, Hints, Index, References, walk_module};
 
 /// The encoding declaration of a module (PEP 263), on one of its first two lines.
 static CODING: LazyLock<Regex> = LazyLock::new(|| {
@@ -28,6 +28,8 @@ pub(crate) struct FileFacts {
     pub definitions: Vec<Definition>,
     /// What the file refers to.
     pub references: References,
+    /// What the file reveals that only the rules of frameworks read.
+    pub hints: Hints,
     /// The ignore comments of the file that parse.
     pub ignore_comments: Vec<IgnoreComment>,
     /// The findings about the ignore comments of the file, which they can ignore themselves.
@@ -64,13 +66,14 @@ pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
         syntax_error(line, column, error.error.to_string())
     })?;
 
-    let (definitions, references) = walk_module(parsed.syntax(), &positions);
+    let (definitions, references, hints) = walk_module(parsed.syntax(), &positions);
     let (ignore_comments, ignore_findings) =
         find_ignore_comments(&text, parsed.tokens(), &positions, path);
     let lazy = lazy_imports(&parsed, &positions, &definitions, &references);
     Ok(FileFacts {
         definitions,
         references,
+        hints,
         ignore_comments,
         ignore_findings,
         lazy,

@@ -6,10 +6,12 @@
 
 use std::path::Path;
 
+use rustc_hash::FxHashSet;
+
 use crate::definitions::{Definition, Kind};
 use crate::models::fnmatch;
 
-use super::{FrameworkRules, file_name};
+use super::{Context, Rules, Settings, file_name};
 
 const PYTEST_FILES: [&str; 2] = ["test_*.py", "*_test.py"];
 const PYTEST_CONFTEST: &str = "conftest.py";
@@ -43,14 +45,37 @@ const PYTEST_MODULE_VARIABLES: [&str; 2] = ["pytestmark", "pytest_plugins"];
 /// The variables that pytest reads from `conftest.py` only.
 const PYTEST_CONFTEST_VARIABLES: [&str; 2] = ["collect_ignore", "collect_ignore_glob"];
 
-impl FrameworkRules<'_> {
+/// The rules of pytest.
+#[derive(Default)]
+pub(super) struct Pytest {
+    /// The classes that the test classes inherit from, by their dotted names.
+    bases: FxHashSet<String>,
+}
+
+impl Rules for Pytest {
+    fn new(_context: &Context, _settings: &Settings) -> Self {
+        Self::default()
+    }
+
+    fn class(&mut self, context: &Context, module: usize, class: &Definition) {
+        let name = &class.qualified_name;
+        if is_pytest_class(context.path(module), name) {
+            self.bases
+                .extend(context.hierarchy.ancestors(module, name).iter().cloned());
+        }
+    }
+
     /// Check whether pytest finds and calls a definition by itself.
-    pub(super) fn pytest_uses(&self, definition: &Definition, module: usize) -> bool {
-        let (kind, name, path) = (definition.kind, definition.name.as_str(), self.path(module));
+    fn uses(&self, context: &Context, definition: &Definition, module: usize) -> bool {
+        let (kind, name, path) = (
+            definition.kind,
+            definition.name.as_str(),
+            context.path(module),
+        );
         // The hooks of a plugin, which can be any module or object that pytest registers, and the
         // fixtures.
         if (kind.is_function() && name.starts_with("pytest_"))
-            || self.is_decorated(definition, module, &PYTEST_FIXTURES)
+            || context.is_decorated(definition, module, &PYTEST_FIXTURES)
         {
             return true;
         }
@@ -60,7 +85,7 @@ impl FrameworkRules<'_> {
             return false;
         }
 
-        let Some(class) = self.class_name(definition, module) else {
+        let Some(class) = context.class_name(definition, module) else {
             if file_name(path) == PYTEST_CONFTEST {
                 return kind == Kind::Variable
                     && (PYTEST_MODULE_VARIABLES.contains(&name)
@@ -80,7 +105,7 @@ impl FrameworkRules<'_> {
             && (name.starts_with("test") || PYTEST_CLASS_METHODS.contains(&name)))
             || (kind == Kind::Attribute && name == "pytestmark"))
             && (is_pytest_class(path, class)
-                || self.pytest_bases.contains(&self.dotted_name(module, class)))
+                || self.bases.contains(&context.dotted_name(module, class)))
     }
 }
 
@@ -93,6 +118,6 @@ fn is_pytest_file(path: &Path) -> bool {
 
 /// Check whether pytest collects a class of a module: a class of a test file whose name starts with
 /// `Test`, at the top level or in such a class.
-pub(super) fn is_pytest_class(path: &Path, name: &str) -> bool {
+fn is_pytest_class(path: &Path, name: &str) -> bool {
     is_pytest_file(path) && name.split('.').all(|part| part.starts_with("Test"))
 }

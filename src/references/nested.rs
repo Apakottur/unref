@@ -101,7 +101,7 @@ impl<'a> Walker<'_, '_> {
             for parameter in parameters {
                 names.push(parameter.name().as_str());
                 if let Some((_, function)) = &defined {
-                    self.references
+                    self.hints
                         .parameters
                         .insert((*function, parameter.name().to_string()));
                 }
@@ -113,7 +113,7 @@ impl<'a> Walker<'_, '_> {
                     if let Some((_, function)) = &defined {
                         let name = annotation_name(annotation);
                         if !name.is_empty() {
-                            self.references
+                            self.hints
                                 .annotated_parameters
                                 .insert((*function, parameter.name().to_string()), name);
                         }
@@ -180,7 +180,7 @@ impl<'a> Walker<'_, '_> {
             let calls = calls
                 .into_iter()
                 .filter(|(name, _)| local_names.contains(name));
-            self.references
+            self.hints
                 .local_calls
                 .extend(calls.map(|(name, called)| ((function, name), called)));
         }

@@ -1,6 +1,6 @@
-//! What a module reveals about its values beyond the names it reads: the string keys it reads, the
-//! values it reads whole, the calls whose string arguments frameworks read, and what its functions
-//! return.
+//! What a module reveals about its values beyond the names it reads: the string keys it reads and the
+//! values it reads whole, which are references, and the calls whose string arguments frameworks read
+//! and what its functions return, which are hints for frameworks.
 
 use ruff_python_ast::{self as ast, Expr};
 
@@ -10,9 +10,11 @@ use super::{Walker, WholeRead};
 
 /// The methods of a mapping that read every key.
 const WHOLE_METHODS: [&str; 3] = ["items", "keys", "values"];
-/// The functions and methods whose string arguments frameworks read: Django's `include`, which names a
-/// module of URLs, and `os.environ.setdefault`, which can set `DJANGO_SETTINGS_MODULE`.
-const STRING_CALLS: [&str; 2] = ["include", "setdefault"];
+/// A hint for frameworks: the last names of the functions and methods whose string arguments a
+/// framework reads, which the walk keeps the calls of. They are Django's `include`, which names a
+/// module of URLs, and `os.environ.setdefault`, which can set `DJANGO_SETTINGS_MODULE`. The rules of
+/// Django, in `frameworks/django.rs`, check what each call resolves to.
+const FRAMEWORK_STRING_CALLS: [&str; 2] = ["include", "setdefault"];
 
 impl Walker<'_, '_> {
     /// Add a call of a function or method whose string arguments frameworks read, with its leading
@@ -28,7 +30,7 @@ impl Walker<'_, '_> {
             Expr::Attribute(attribute) => attribute.attr.as_str(),
             _ => return,
         };
-        if !STRING_CALLS.contains(&last) {
+        if !FRAMEWORK_STRING_CALLS.contains(&last) {
             return;
         }
         let Some(called) = dotted_name(&call.func, Unwrap::Call) else {
@@ -43,7 +45,7 @@ impl Walker<'_, '_> {
                 _ => None,
             })
             .collect();
-        self.references.string_calls.insert((called, arguments));
+        self.hints.string_calls.insert((called, arguments));
     }
 
     /// Add the values that a call reads as a whole, `f(**value)` and `value.items()`, and those that
@@ -106,7 +108,7 @@ impl Walker<'_, '_> {
         if let Some(function) = self.owner
             && !calls.is_empty()
         {
-            self.references
+            self.hints
                 .returned_calls
                 .entry(function)
                 .or_default()

@@ -27,7 +27,7 @@ use reads::attribute_chain;
 use scopes::{Scope, ScopeKind, Target};
 
 pub(crate) use types::{
-    Binding, Import, ImportedRead, Index, Owner, Read, Receiver, References, WholeRead,
+    Binding, Hints, Import, ImportedRead, Index, Owner, Read, Receiver, References, WholeRead,
 };
 
 /// Find what a Python module defines and refers to.
@@ -39,16 +39,17 @@ pub(crate) use types::{
 /// The definitions are the functions, classes, methods, variables and attributes of the module. Local
 /// variables and imports are left out.
 ///
-/// Returns the definitions, in the order of the file, and the references.
+/// Returns the definitions, in the order of the file, the references, and the hints for frameworks.
 pub(crate) fn walk_module(
     module: &ast::ModModule,
     positions: &SourcePositions,
-) -> (Vec<Definition>, References) {
+) -> (Vec<Definition>, References, Hints) {
     let mut walker = Walker {
         positions,
         definitions: Vec::new(),
         classes: FxHashMap::default(),
         references: References::default(),
+        hints: Hints::default(),
         scopes: vec![Scope {
             defined_in: Some(0),
             ..Scope::new(ScopeKind::Module)
@@ -62,7 +63,7 @@ pub(crate) fn walk_module(
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
-    (walker.definitions, walker.references)
+    (walker.definitions, walker.references, walker.hints)
 }
 
 /// Walk a module once, and add what it defines and refers to.
@@ -75,6 +76,8 @@ struct Walker<'p, 'a> {
     classes: FxHashMap<String, Index>,
     /// The references to add to.
     references: References,
+    /// The hints for frameworks to add to.
+    hints: Hints,
     /// Every scope that was entered, by its index.
     scopes: Vec<Scope>,
     /// The scope that the node being walked is in.

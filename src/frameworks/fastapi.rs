@@ -5,11 +5,11 @@
 
 use crate::definitions::Definition;
 
-use super::{FrameworkRules, HTTP_METHODS};
+use super::{Call, Context, HTTP_METHODS, Instances, Rules, Settings, has_any};
 
 /// The classes of FastAPI's applications and routers, as `fastapi` gives them out, and where they are
 /// defined.
-pub(super) const FASTAPI_ROUTERS: [&str; 4] = [
+const FASTAPI_ROUTERS: [&str; 4] = [
     "fastapi.FastAPI",
     "fastapi.applications.FastAPI",
     "fastapi.APIRouter",
@@ -25,13 +25,41 @@ const FASTAPI_DECORATORS: [&str; 5] = [
     "exception_handler",
 ];
 
-impl FrameworkRules<'_> {
+/// The rules of FastAPI.
+pub(super) struct Fastapi {
+    /// The applications and routers.
+    routers: Instances,
+}
+
+impl Rules for Fastapi {
+    fn new(context: &Context, _settings: &Settings) -> Self {
+        Self {
+            routers: Instances {
+                locals: context.local_instances(&FASTAPI_ROUTERS),
+                ..Instances::default()
+            },
+        }
+    }
+
+    fn variable_call(
+        &mut self,
+        context: &Context,
+        module: usize,
+        variable: &Definition,
+        call: &Call,
+    ) {
+        if has_any(call.resolved(context, module), &FASTAPI_ROUTERS) {
+            let router = context.dotted_name(module, &variable.qualified_name);
+            self.routers.variables.insert(router);
+        }
+    }
+
     /// Check whether FastAPI calls a definition by itself.
-    pub(super) fn fastapi_uses(&self, definition: &Definition, module: usize) -> bool {
-        self.registers(
+    fn uses(&self, context: &Context, definition: &Definition, module: usize) -> bool {
+        context.registers(
             definition,
             module,
-            &self.fastapi_routers,
+            &self.routers,
             &[&HTTP_METHODS, &FASTAPI_DECORATORS],
         )
     }

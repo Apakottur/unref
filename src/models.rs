@@ -6,56 +6,49 @@ use std::path::PathBuf;
 /// The default of the `dummy-variable-rgx` option, the same as Ruff's.
 pub(crate) const DEFAULT_DUMMY_VARIABLE_RGX: &str = r"^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$";
 
-/// A framework whose built-in rules can apply, by its name in the `frameworks` option.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum Framework {
-    Pytest,
-    Unittest,
-    Pydantic,
-    Dataclasses,
-    Sqlalchemy,
-    Fastapi,
-    Flask,
-    Sphinx,
-    Django,
-    Celery,
+/// Define `Framework`, with a variant for each framework and its name in the `frameworks` option, and
+/// `Framework::ALL`, in the order given.
+macro_rules! frameworks {
+    ($($framework:ident => $name:literal,)*) => {
+        /// A framework whose built-in rules can apply, by its name in the `frameworks` option.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub(crate) enum Framework {
+            $($framework,)*
+        }
+
+        impl Framework {
+            /// Every framework, each enabled by default.
+            pub(crate) const ALL: &[Framework] = &[$(Framework::$framework,)*];
+
+            /// The name of the framework in the `frameworks` option.
+            pub(crate) fn name(self) -> &'static str {
+                match self {
+                    $(Framework::$framework => $name,)*
+                }
+            }
+        }
+    };
+}
+
+frameworks! {
+    Pytest => "pytest",
+    Unittest => "unittest",
+    Pydantic => "pydantic",
+    Dataclasses => "dataclasses",
+    Sqlalchemy => "sqlalchemy",
+    Fastapi => "fastapi",
+    Flask => "flask",
+    Sphinx => "sphinx",
+    Django => "django",
+    Celery => "celery",
 }
 
 impl Framework {
-    /// Every framework, each enabled by default.
-    pub(crate) const ALL: [Framework; 10] = [
-        Framework::Pytest,
-        Framework::Unittest,
-        Framework::Pydantic,
-        Framework::Dataclasses,
-        Framework::Sqlalchemy,
-        Framework::Fastapi,
-        Framework::Flask,
-        Framework::Sphinx,
-        Framework::Django,
-        Framework::Celery,
-    ];
-
-    /// The name of the framework in the `frameworks` option.
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            Framework::Pytest => "pytest",
-            Framework::Unittest => "unittest",
-            Framework::Pydantic => "pydantic",
-            Framework::Dataclasses => "dataclasses",
-            Framework::Sqlalchemy => "sqlalchemy",
-            Framework::Fastapi => "fastapi",
-            Framework::Flask => "flask",
-            Framework::Sphinx => "sphinx",
-            Framework::Django => "django",
-            Framework::Celery => "celery",
-        }
-    }
-
     /// The framework of a name in the `frameworks` option.
     pub(crate) fn from_name(name: &str) -> Option<Framework> {
         Framework::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .find(|framework| framework.name() == name)
     }
 }

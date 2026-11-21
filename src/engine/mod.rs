@@ -18,7 +18,7 @@ use crate::definitions::Definition;
 use crate::discover::discover;
 use crate::external::ExternalModules;
 use crate::files::{FileFacts, analyze_files};
-use crate::frameworks::{FrameworkRules, ProjectFile};
+use crate::frameworks::{FrameworkRules, ProjectFile, Settings};
 use crate::models::{Finding, Framework};
 use crate::modules::{ModuleName, module_name, resolve};
 use crate::references::{Index, Owner};
@@ -70,7 +70,8 @@ pub(crate) fn find_unused(
     timings: &mut Timings,
 ) -> Vec<Finding> {
     let enabled: FxHashSet<Framework> = Framework::ALL
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|framework| options.frameworks.get(framework).copied().unwrap_or(true))
         .collect();
 
@@ -154,12 +155,11 @@ pub(crate) fn find_unused(
     timings.end("uses");
 
     let file_definitions: Vec<ProjectFile> = (0..project.files.len())
-        .map(|index| {
-            (
-                &*project.files[index],
-                project.file_definitions(index),
-                &project.facts[index].references,
-            )
+        .map(|index| ProjectFile {
+            path: &project.files[index],
+            definitions: project.file_definitions(index),
+            references: &project.facts[index].references,
+            hints: &project.facts[index].hints,
         })
         .collect();
     let sphinx_configuration: Option<FxHashSet<PathBuf>> = options
@@ -176,8 +176,10 @@ pub(crate) fn find_unused(
         &file_definitions,
         &project.names,
         &hierarchy,
-        sphinx_configuration.as_ref(),
-        &django_settings,
+        &Settings {
+            sphinx_configuration: sphinx_configuration.as_ref(),
+            django_settings: &django_settings,
+        },
     );
     timings.end("framework rules");
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
