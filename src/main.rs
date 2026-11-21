@@ -42,10 +42,6 @@ static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 #[global_allocator]
 static ALLOCATOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-/// The stack of the thread that runs the check. Following base classes and imports recurses, so it is
-/// larger than the default.
-const STACK_SIZE: usize = 64 * 1024 * 1024;
-
 /// An extremely fast Python dead code finder, written in Rust.
 ///
 /// Exits with a non-zero status if anything is found.
@@ -147,14 +143,6 @@ struct Cli {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let thread = std::thread::Builder::new()
-        .stack_size(STACK_SIZE)
-        .spawn(move || run(cli))
-        .expect("the thread of the check starts");
-    thread.join().unwrap_or(ExitCode::from(2))
-}
-
-fn run(cli: Cli) -> ExitCode {
     let mut options = match load_config(cli.config.as_deref()) {
         Ok(options) => options,
         Err(error) => return fail(&error),
