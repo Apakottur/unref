@@ -39,6 +39,20 @@ repos:
       - id: unref
 ```
 
+prek also reads `.pre-commit-config.yaml`, or the same hooks from its own `prek.toml`:
+
+```toml
+[[repos]]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.17.4"
+hooks = [{ id = "ruff-check" }, { id = "ruff-format" }]
+
+[[repos]]
+repo = "https://github.com/Apakottur/unref-pre-commit"
+rev = "v0.4.0"
+hooks = [{ id = "unref" }]
+```
+
 Set `rev` to the [latest release](https://github.com/Apakottur/unref-pre-commit/releases), or let
 `pre-commit autoupdate` or `prek autoupdate` fill it in. The hook lives in
 [unref-pre-commit](https://github.com/Apakottur/unref-pre-commit), which installs the prebuilt wheel of `unref`
