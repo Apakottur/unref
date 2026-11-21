@@ -14,6 +14,7 @@ mod modules;
 mod positions;
 mod references;
 mod symbols;
+mod timings;
 mod transitive;
 
 use std::io::Write;
@@ -29,6 +30,7 @@ use crate::engine::find_unused;
 use crate::external::interpreter_environment;
 use crate::models::Finding;
 use crate::modules::resolve;
+use crate::timings::Timings;
 
 // The check makes many small allocations, which these serve faster than the allocator of the system.
 #[cfg(not(all(target_os = "linux", target_arch = "aarch64", target_env = "gnu")))]
@@ -136,6 +138,10 @@ struct Cli {
         help_heading = "File selection"
     )]
     no_respect_gitignore: bool,
+
+    /// Print the wall time of each phase of the check to the standard error, after the findings.
+    #[arg(long, hide = true)]
+    timings: bool,
 }
 
 fn main() -> ExitCode {
@@ -224,7 +230,8 @@ fn run(cli: Cli) -> ExitCode {
     };
 
     options.python = environment;
-    let findings = pool.install(|| find_unused(&options, &paths));
+    let mut timings = Timings::new(cli.timings);
+    let findings = pool.install(|| find_unused(&options, &paths, &mut timings));
 
     let output_format = cli.output_format.unwrap_or(options.output_format);
     let show_transitive = flag(
@@ -246,6 +253,7 @@ fn run(cli: Cli) -> ExitCode {
         }
     }
     let _ = stdout.flush();
+    timings.print();
 
     // A transitive finding is reached from another unused definition, so there are findings exactly
     // when some are printed.
