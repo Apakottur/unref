@@ -14,6 +14,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::definitions::{Definition, Kind};
+use crate::references::Index;
 
 use super::pytest::PYTEST_FIXTURES;
 use super::{FrameworkRules, HTTP_METHODS, Instances, ProjectFile, is_top_level, local_instances};
@@ -86,7 +87,7 @@ impl FrameworkRules<'_> {
     /// Check whether Flask calls a definition by itself.
     pub(super) fn flask_uses(&self, definition: &Definition, module: usize) -> bool {
         if definition.kind == Kind::Method
-            && let Some(class) = &definition.class
+            && let Some(class) = self.class_name(definition, module)
         {
             let name = definition.name.as_str();
             if (HTTP_METHODS.contains(&name) && self.inherits(module, class, &[FLASK_METHOD_VIEW]))
@@ -125,18 +126,18 @@ impl FrameworkRules<'_> {
     /// Find the factories of Flask's applications that the Flask CLI finds: the functions at the top
     /// level of a module that are named as one, and set a local variable to an application.
     pub(super) fn flask_factories(&self, files: &[ProjectFile]) -> FxHashSet<String> {
-        let applications: FxHashSet<(usize, u32)> =
+        let applications: FxHashSet<(usize, Index)> =
             local_instances(files, self.hierarchy, &FLASK_APPLICATIONS)
                 .into_iter()
                 .map(|(module, function, _)| (module, function))
                 .collect();
         let mut factories = FxHashSet::default();
         for (module, (_, definitions, _)) in files.iter().enumerate() {
-            for definition in *definitions {
+            for (index, definition) in definitions.iter().enumerate() {
                 if definition.kind == Kind::Function
                     && is_top_level(definition)
                     && FLASK_FACTORIES.contains(&definition.name.as_str())
-                    && applications.contains(&(module, definition.line))
+                    && applications.contains(&(module, Index::new(index)))
                 {
                     factories.insert(self.dotted_name(module, &definition.name));
                 }
@@ -150,26 +151,24 @@ impl FrameworkRules<'_> {
     pub(super) fn flask_fixture_parameters(
         &self,
         files: &[ProjectFile],
-    ) -> FxHashSet<(usize, u32, String)> {
+    ) -> FxHashSet<(usize, Index, String)> {
         let mut fixtures: FxHashSet<&str> = FxHashSet::default();
-        // The tests and the fixtures, which pytest passes fixtures to, by their module and line.
-        let mut tests_and_fixtures: FxHashSet<(usize, u32)> = FxHashSet::default();
+        // The tests and the fixtures, which pytest passes fixtures to, by their module and index.
+        let mut tests_and_fixtures: FxHashSet<(usize, Index)> = FxHashSet::default();
         for (module, (_, definitions, references)) in files.iter().enumerate() {
-            for definition in *definitions {
+            for (index, definition) in definitions.iter().enumerate() {
+                let index = Index::new(index);
                 if definition.kind.is_function() && self.pytest_uses(definition, module) {
-                    tests_and_fixtures.insert((module, definition.line));
+                    tests_and_fixtures.insert((module, index));
                 }
                 if definition.kind == Kind::Function
                     && self.is_decorated(definition, module, &PYTEST_FIXTURES)
-                    && references
-                        .returned_calls
-                        .get(&definition.line)
-                        .is_some_and(|calls| {
-                            calls.iter().any(|call| {
-                                self.resolves_to(module, call, &FLASK_APPS)
-                                    || self.is_flask_factory(module, call)
-                            })
+                    && references.returned_calls.get(&index).is_some_and(|calls| {
+                        calls.iter().any(|call| {
+                            self.resolves_to(module, call, &FLASK_APPS)
+                                || self.is_flask_factory(module, call)
                         })
+                    })
                 {
                     fixtures.insert(&definition.name);
                 }

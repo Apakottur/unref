@@ -13,9 +13,26 @@ pub(crate) struct Binding {
     pub name: Option<String>,
 }
 
-/// The code that a reference or a definition is in: the line of the name of the function that it is
-/// in, or None for code that runs when the module is imported.
-pub(crate) type Owner = Option<u32>;
+/// A definition of a module, by its index in the definitions of the module, in the order of the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct Index(pub u32);
+
+impl Index {
+    /// Make the index of a definition from its position in the definitions of its module, which has
+    /// fewer than `u32::MAX` of them.
+    pub(crate) fn new(index: usize) -> Self {
+        Self(u32::try_from(index).expect("fewer definitions in a module than u32::MAX"))
+    }
+
+    /// The index, to look the definition up in the definitions of its module.
+    pub(crate) fn get(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// The code that a reference or a definition is in: the function that it is in, or None for code that
+/// runs when the module is imported.
+pub(crate) type Owner = Option<Index>;
 
 /// A read of a name, or of a chain of attributes that starts with one (`package.module.name`).
 ///
@@ -42,15 +59,13 @@ pub(crate) struct ImportedRead {
     pub called: Option<Name>,
 }
 
-/// The object that a member is read from, when the class that it is in is plain.
+/// The object that a member is read from, when the class that it is in is plain, with the class.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Receiver {
-    /// The first parameter of a method of the class, as `self.name` or `cls.name`, by the name of the
-    /// class in the module.
-    Own(String),
-    /// `super()` in a method of the class, or `super(Class, self)`, by the name of the class in the
-    /// module.
-    Super(String),
+    /// The first parameter of a method of the class, as `self.name` or `cls.name`.
+    Own(Index),
+    /// `super()` in a method of the class, or `super(Class, self)`.
+    Super(Index),
 }
 
 /// A name that is imported from another module (`from module import name`).
@@ -125,17 +140,15 @@ pub(crate) struct References {
     pub local_objects: FxHashSet<(Owner, usize, Vec<Name>)>,
     /// The local variables of the functions that are assigned the result of a call.
     pub local_calls: LocalCalls,
-    /// The annotated parameters of the functions, by the line of the name of the function and the
-    /// name of the parameter, each with the dotted name of its annotation as it is written, without
+    /// The annotated parameters of the functions, by the function and the name of the parameter, each with the dotted name of its annotation as it is written, without
     /// its type arguments, such as `Flask` for `app: Flask`.
-    pub annotated_parameters: FxHashMap<(u32, String), String>,
-    /// The parameters of the functions, by the line of the name of the function and the name of the
-    /// parameter.
-    pub parameters: FxHashSet<(u32, String)>,
+    pub annotated_parameters: FxHashMap<(Index, String), String>,
+    /// The parameters of the functions, by the function and the name of the parameter.
+    pub parameters: FxHashSet<(Index, String)>,
     /// The functions that return or yield the result of a call, or a local variable that is assigned
-    /// one, by the line of the name of the function, each with the dotted names of what they call as
+    /// one, each with the dotted names of what they call as
     /// they are written, such as `Flask` for `return Flask(__name__)`.
-    pub returned_calls: FxHashMap<u32, Vec<String>>,
+    pub returned_calls: FxHashMap<Index, Vec<String>>,
     /// The calls of the functions and methods whose string arguments frameworks read, each by the
     /// dotted name of what it calls as it is written, such as `os.environ.setdefault`, and its leading
     /// positional arguments that are string literals.
@@ -143,6 +156,6 @@ pub(crate) struct References {
 }
 
 /// The local variables of each function of a module that are assigned the result of a call, by the
-/// line of the name of the function and the name of the variable, each with the dotted names of what
+/// function and the name of the variable, each with the dotted names of what
 /// they call as they are written, such as `FastAPI` for `app = FastAPI()`.
-pub(crate) type LocalCalls = FxHashMap<(u32, String), Vec<String>>;
+pub(crate) type LocalCalls = FxHashMap<(Index, String), Vec<String>>;

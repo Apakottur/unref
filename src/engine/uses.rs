@@ -3,10 +3,10 @@
 use ruff_python_ast::name::Name;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::references::{Owner, Receiver};
+use crate::references::Receiver;
 use crate::resolver::{Resolver, imported_name, join};
 
-use super::{Classes, DefinitionId, Project, is_external, is_external_import};
+use super::{Classes, CodeId, DefinitionId, Project, is_external, is_external_import};
 
 /// What the code of an owner uses.
 #[derive(Default)]
@@ -28,6 +28,41 @@ pub(super) struct Uses {
     pub(super) definitions: FxHashSet<DefinitionId>,
 }
 
+/// What the code of each module and function of a project uses, by its code. Most functions use
+/// nothing that is kept here, so the uses are packed and each code has the position of its own.
+pub(super) struct AllUses {
+    /// The position of the uses of each code, or `NONE` if it uses nothing.
+    slots: Vec<u32>,
+    uses: Vec<Uses>,
+}
+
+impl AllUses {
+    const NONE: u32 = u32::MAX;
+
+    fn new(codes: usize) -> Self {
+        Self {
+            slots: vec![Self::NONE; codes],
+            uses: Vec::new(),
+        }
+    }
+
+    /// Get the uses of a code, to add to them.
+    fn entry(&mut self, code: CodeId) -> &mut Uses {
+        let slot = &mut self.slots[code];
+        if *slot == Self::NONE {
+            *slot = u32::try_from(self.uses.len()).expect("fewer codes than u32::MAX");
+            self.uses.push(Uses::default());
+        }
+        &mut self.uses[*slot as usize]
+    }
+
+    /// Get the uses of a code, or None if it uses nothing.
+    pub(super) fn get(&self, code: CodeId) -> Option<&Uses> {
+        let slot = self.slots[code];
+        (slot != Self::NONE).then(|| &self.uses[slot as usize])
+    }
+}
+
 /// Find what the code of each owner uses.
 ///
 /// A plain name refers to the module that it is read in, and an imported name to the module that it
@@ -42,8 +77,8 @@ pub(super) fn find_uses(
     project: &Project,
     classes: &Classes,
     typed_dicts: &FxHashMap<String, Vec<DefinitionId>>,
-) -> FxHashMap<(usize, Owner), Uses> {
-    let mut uses: FxHashMap<(usize, Owner), Uses> = FxHashMap::default();
+) -> AllUses {
+    let mut uses = AllUses::new(project.files.len() + project.definitions.len());
     let resolver = classes.hierarchy.resolver();
     // The names of the TypedDicts, so that a value that cannot be one is not resolved.
     let typed_dict_names: FxHashSet<&str> = typed_dicts
@@ -54,7 +89,7 @@ pub(super) fn find_uses(
         let references = &file_facts.references;
         let module = &project.names[file].name;
         for read in &references.reads {
-            let owner_uses = uses.entry((file, read.owner)).or_default();
+            let owner_uses = uses.entry(project.code(file, read.owner));
             owner_uses.names.insert((file, read.root.clone()));
             let mut parts = vec![read.root.clone()];
             parts.extend(read.attributes.iter().cloned());
@@ -69,7 +104,7 @@ pub(super) fn find_uses(
         }
 
         for read in &references.imported_reads {
-            let owner_uses = uses.entry((file, read.owner)).or_default();
+            let owner_uses = uses.entry(project.code(file, read.owner));
             let Some(imported) = imported_name(&project.names[file], &read.binding) else {
                 owner_uses
                     .attributes
@@ -120,7 +155,7 @@ pub(super) fn find_uses(
                 .resolve(import.module.as_deref(), import.level)
                 .unwrap_or_default();
             for &imported in project.files_by_name.get(&module).into_iter().flatten() {
-                let owner_uses = uses.entry((file, import.owner)).or_default();
+                let owner_uses = uses.entry(project.code(file, import.owner));
                 if import.name == "*" {
                     owner_uses.stars.insert(imported);
                 } else {
@@ -130,22 +165,19 @@ pub(super) fn find_uses(
         }
 
         for (owner, name) in &references.attributes {
-            uses.entry((file, *owner))
-                .or_default()
+            uses.entry(project.code(file, *owner))
                 .attributes
                 .insert(name.clone());
         }
         for (owner, receiver, name) in &references.members {
-            let (Receiver::Own(class) | Receiver::Super(class)) = receiver;
+            let (Receiver::Own(class) | Receiver::Super(class)) = *receiver;
             let is_super = matches!(receiver, Receiver::Super(_));
-            let found = classes.read_from_own(file, class, name, is_super);
-            uses.entry((file, *owner))
-                .or_default()
+            let found = classes.read_from_own(project.id(file, class), name, is_super);
+            uses.entry(project.code(file, *owner))
                 .add_member(found, name);
         }
         for (owner, name) in &references.keys {
-            uses.entry((file, *owner))
-                .or_default()
+            uses.entry(project.code(file, *owner))
                 .keys
                 .insert(name.clone());
         }
@@ -177,25 +209,22 @@ pub(super) fn find_uses(
                         None => is_external(project, resolver, file, reader),
                     })
             {
-                uses.entry((file, read.owner))
-                    .or_default()
+                uses.entry(project.code(file, read.owner))
                     .definitions
                     .extend(fields);
             }
         }
         for (owner, index) in &references.local_reads {
-            uses.entry((file, *owner))
-                .or_default()
+            uses.entry(project.code(file, *owner))
                 .definitions
                 .insert(project.first_definition[file] + index);
         }
         // An object of a function is read by its name in the module, such as an enum in a function.
         for (owner, index, attributes) in &references.local_objects {
             let definition = &project.definitions[project.first_definition[file] + index];
-            let mut parts = vec![Name::new(definition.qualified_name())];
+            let mut parts = vec![Name::new(&definition.qualified_name)];
             parts.extend(attributes.iter().cloned());
-            uses.entry((file, *owner))
-                .or_default()
+            uses.entry(project.code(file, *owner))
                 .objects
                 .insert((file, parts));
         }

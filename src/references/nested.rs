@@ -7,8 +7,8 @@ use rustc_hash::FxHashSet;
 
 use crate::definitions::{Definition, Kind, Unwrap, annotation_name, decorator_names, dotted_name};
 
-use super::Walker;
 use super::scopes::{Scope, ScopeKind, Target};
+use super::{Index, Walker};
 
 /// The body of a function or lambda.
 #[derive(Clone, Copy)]
@@ -68,8 +68,7 @@ impl<'a> Walker<'_, '_> {
     }
 
     pub(super) fn visit_function_def(&mut self, function: &'a ast::StmtFunctionDef) {
-        let index = self.definitions.len();
-        let (body_scope, line) = self.define_function(function);
+        let (body_scope, index) = self.define_function(function);
         // The bounds and defaults of the type parameters are read where the function is defined.
         if let Some(type_params) = &function.type_params {
             self.visit_type_params(type_params);
@@ -78,20 +77,21 @@ impl<'a> Walker<'_, '_> {
             Some(&function.parameters),
             &function.decorator_list,
             function.returns.as_deref(),
-            Some((body_scope, line)),
+            Some((body_scope, index)),
             FunctionBody::Statements(&function.body),
         );
         // The name is bound once the function is defined, after its decorators are evaluated.
-        self.bind_definition(function.name.as_str(), index);
+        self.bind_definition(function.name.as_str(), index.get());
     }
 
-    /// Add what a function or lambda refers to.
+    /// Add what a function or lambda refers to, with the scope of its body and the function, or None
+    /// for a lambda.
     pub(super) fn visit_function(
         &mut self,
         parameters: Option<&'a Parameters>,
         decorators: &'a [ast::Decorator],
         returns: Option<&'a Expr>,
-        defined: Option<(Scope, u32)>,
+        defined: Option<(Scope, Index)>,
         body: FunctionBody<'a>,
     ) {
         let mut names: Vec<&str> = Vec::new();
@@ -100,22 +100,22 @@ impl<'a> Walker<'_, '_> {
         if let Some(parameters) = parameters {
             for parameter in parameters {
                 names.push(parameter.name().as_str());
-                if let Some((_, line)) = &defined {
+                if let Some((_, function)) = &defined {
                     self.references
                         .parameters
-                        .insert((*line, parameter.name().to_string()));
+                        .insert((*function, parameter.name().to_string()));
                 }
                 if let Some(default) = parameter.default() {
                     defaults.push(default);
                 }
                 if let Some(annotation) = parameter.annotation() {
                     annotations.push(annotation);
-                    if let Some((_, line)) = &defined {
+                    if let Some((_, function)) = &defined {
                         let name = annotation_name(annotation);
                         if !name.is_empty() {
                             self.references
                                 .annotated_parameters
-                                .insert((*line, parameter.name().to_string()), name);
+                                .insert((*function, parameter.name().to_string()), name);
                         }
                     }
                 }
@@ -142,7 +142,10 @@ impl<'a> Walker<'_, '_> {
 
         // The body runs only when the function is called. A lambda has no name, and is part of the code
         // that it is in.
-        let (mut body_scope, line) = defined.unwrap_or((Scope::new(ScopeKind::Function), 0));
+        let (mut body_scope, function) = match defined {
+            Some((body_scope, function)) => (body_scope, Some(function)),
+            None => (Scope::new(ScopeKind::Function), None),
+        };
         let (scope, owner) = (self.scope, self.owner);
         body_scope.function_parent = Some(self.reads_target(scope));
         self.scope = self.push_scope(body_scope);
@@ -150,7 +153,7 @@ impl<'a> Walker<'_, '_> {
         match body {
             FunctionBody::Lambda(expr) => self.visit_expr(expr),
             FunctionBody::Statements(statements) => {
-                self.owner = Some(line);
+                self.owner = function;
                 self.visit_body(statements);
             }
         }
@@ -173,13 +176,13 @@ impl<'a> Walker<'_, '_> {
         // A variable that is assigned the result of a call is bound, so it is local unless declared
         // `global` or `nonlocal`.
         let calls = std::mem::take(&mut inner_scope.calls);
-        if line != 0 {
+        if let Some(function) = function {
             let calls = calls
                 .into_iter()
                 .filter(|(name, _)| local_names.contains(name));
             self.references
                 .local_calls
-                .extend(calls.map(|(name, called)| ((line, name), called)));
+                .extend(calls.map(|(name, called)| ((function, name), called)));
         }
         local_names.extend(names.iter().map(|name| (*name).to_string()));
         let target = self.reads_target(scope);
@@ -193,12 +196,12 @@ impl<'a> Walker<'_, '_> {
     pub(super) fn visit_class(&mut self, class: &'a ast::StmtClassDef) {
         let binder = &self.scopes[self.binder];
         let (enclosing_class, function) = if binder.kind == ScopeKind::Class {
-            (binder.class_name.clone(), None)
+            (binder.class, None)
         } else if binder.global_names.contains(class.name.as_str()) {
             // A class that a function declares `global` is a class of the module.
             (None, None)
         } else {
-            (None, binder.function_name.clone())
+            (None, binder.function)
         };
         let written_bases = class
             .arguments
@@ -209,18 +212,30 @@ impl<'a> Walker<'_, '_> {
             .filter_map(|base| dotted_name(base, Unwrap::Subscript))
             .collect();
         let other_bases = bases.len() < written_bases.len();
-        let definition = Definition {
+        let index = self.definitions.len();
+        let mut definition = Definition {
             decorators: decorator_names(&class.decorator_list),
-            class: enclosing_class,
-            function,
             bases,
             other_bases,
-            ..self.definition(Kind::Class, &class.name, class.name.start())
+            ..self.definition(
+                Kind::Class,
+                &class.name,
+                class.name.start(),
+                enclosing_class,
+                function,
+            )
         };
+        // A class of the name of one before it is one class with it.
+        let first = *self
+            .classes
+            .entry(definition.qualified_name.clone())
+            .or_insert(Index::new(index));
+        if first.get() != index {
+            definition.merged_into = Some(first);
+        }
         let mut class_scope = Scope::new(ScopeKind::Class);
-        class_scope.class_name = Some(definition.qualified_name());
+        class_scope.class = Some(first);
         class_scope.outer = Some(self.reads_target(self.scope));
-        let index = self.definitions.len();
         self.definitions.push(definition);
 
         let (scope, binder) = (self.scope, self.binder);

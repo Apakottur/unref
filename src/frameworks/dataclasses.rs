@@ -46,7 +46,7 @@ impl FrameworkRules<'_> {
     /// Check whether a dataclass, a named tuple or a class of attrs reads a definition by itself: one
     /// of its fields.
     pub(super) fn dataclasses_uses(&self, definition: &Definition, module: usize) -> bool {
-        let Some(class) = &definition.class else {
+        let Some(class) = self.class_name(definition, module) else {
             return false;
         };
         if definition.kind != Kind::Attribute {

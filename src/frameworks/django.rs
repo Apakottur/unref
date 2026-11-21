@@ -89,7 +89,7 @@ impl FrameworkRules<'_> {
     /// Check whether Django or a server reads or calls a definition by itself.
     pub(super) fn django_uses(&self, definition: &Definition, module: usize) -> bool {
         let name = definition.name.as_str();
-        if let Some(class) = &definition.class {
+        if let Some(class) = self.class_name(definition, module) {
             if definition.kind == Kind::Class {
                 return false;
             }

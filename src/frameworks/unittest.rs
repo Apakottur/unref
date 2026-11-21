@@ -27,14 +27,14 @@ impl FrameworkRules<'_> {
         // methods of a test case in a function still count, since the function can return the class.
         if definition.kind == Kind::Class {
             return definition.owner.is_none()
-                && self.is_test_case(module, &definition.qualified_name());
+                && self.is_test_case(module, &definition.qualified_name);
         }
         let name = definition.name.as_str();
-        let Some(class) = &definition.class else {
+        let Some(class) = self.class_name(definition, module) else {
             return definition.kind == Kind::Function
                 && definition.owner.is_none()
                 && UNITTEST_MODULE_FUNCTIONS.contains(&name)
-                && fnmatch(file_name(&definition.path), UNITTEST_FILES);
+                && fnmatch(file_name(self.path(module)), UNITTEST_FILES);
         };
         definition.kind == Kind::Method
             && (name.starts_with("test") || UNITTEST_METHODS.contains(&name))

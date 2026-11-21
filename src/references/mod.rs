@@ -9,9 +9,6 @@ mod scopes;
 mod type_strings;
 mod types;
 
-use std::path::Path;
-use std::sync::Arc;
-
 use ruff_python_ast::visitor::{
     Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt, walk_type_param,
     walk_with_item,
@@ -19,7 +16,7 @@ use ruff_python_ast::visitor::{
 use ruff_python_ast::{
     self as ast, CmpOp, ExceptHandler, Expr, ExprContext, Pattern, Stmt, TypeParam,
 };
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::definitions::Definition;
 use crate::positions::SourcePositions;
@@ -30,7 +27,7 @@ use reads::attribute_chain;
 use scopes::{Scope, ScopeKind, Target};
 
 pub(crate) use types::{
-    Binding, Import, ImportedRead, Owner, Read, Receiver, References, WholeRead,
+    Binding, Import, ImportedRead, Index, Owner, Read, Receiver, References, WholeRead,
 };
 
 /// Find what a Python module defines and refers to.
@@ -44,14 +41,13 @@ pub(crate) use types::{
 ///
 /// Returns the definitions, in the order of the file, and the references.
 pub(crate) fn walk_module(
-    path: &Arc<Path>,
     module: &ast::ModModule,
     positions: &SourcePositions,
 ) -> (Vec<Definition>, References) {
     let mut walker = Walker {
-        path: path.clone(),
         positions,
         definitions: Vec::new(),
+        classes: FxHashMap::default(),
         references: References::default(),
         scopes: vec![Scope {
             defined_in: Some(0),
@@ -71,12 +67,12 @@ pub(crate) fn walk_module(
 
 /// Walk a module once, and add what it defines and refers to.
 struct Walker<'p, 'a> {
-    /// The file of the module.
-    path: Arc<Path>,
     /// The positions in the source of the module.
     positions: &'p SourcePositions<'a>,
     /// The definitions to add to.
     definitions: Vec<Definition>,
+    /// The classes found so far, by their name in the module, each the first class of that name.
+    classes: FxHashMap<String, Index>,
     /// The references to add to.
     references: References,
     /// Every scope that was entered, by its index.

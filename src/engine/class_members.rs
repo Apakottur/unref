@@ -22,9 +22,10 @@ pub(super) type ClassId = usize;
 /// is plain is matched in the classes that the object can be an instance of.
 pub(super) struct Classes<'a> {
     pub(super) hierarchy: &'a ClassHierarchy,
-    /// Each class by its file and its name in the module.
-    ids: FxHashMap<(usize, String), ClassId>,
-    /// The definition of each class.
+    /// The class of each definition of a class, by its id, or `NONE` for another definition. Classes
+    /// of one name in a module are one class.
+    ids: Vec<u32>,
+    /// The definition of each class, the first of its name in its module.
     pub(super) definitions: Vec<DefinitionId>,
     /// The classes by their dotted names, such as `package.module.Class`.
     by_dotted: FxHashMap<String, Vec<ClassId>>,
@@ -48,49 +49,53 @@ pub(super) struct Classes<'a> {
 }
 
 impl<'a> Classes<'a> {
+    const NONE: u32 = u32::MAX;
+
     pub(super) fn new(
         project: &Project,
         hierarchy: &'a ClassHierarchy,
         fields: &FxHashSet<DefinitionId>,
     ) -> Self {
-        let mut keys: Vec<(usize, String)> = Vec::new();
-        let mut ids = FxHashMap::default();
+        let mut ids = vec![Self::NONE; project.definitions.len()];
         let mut definitions = Vec::new();
         let mut by_dotted: FxHashMap<String, Vec<ClassId>> = FxHashMap::default();
         for (definition_id, file, definition) in project.definitions_by_file() {
-            if definition.kind == Kind::Class {
-                let key = (file, definition.qualified_name());
-                if ids.contains_key(&key) {
-                    continue;
-                }
-                let id = keys.len();
-                ids.insert(key.clone(), id);
-                definitions.push(definition_id);
-                let dotted = join(&project.names[file].name, &key.1);
-                by_dotted.entry(dotted).or_default().push(id);
-                keys.push(key);
+            if definition.kind != Kind::Class {
+                continue;
             }
+            // A class merged into one before it has the id of that one.
+            if let Some(first) = definition.merged_into {
+                ids[definition_id] = ids[project.id(file, first)];
+                continue;
+            }
+            let id = definitions.len();
+            ids[definition_id] = u32::try_from(id).expect("fewer classes than u32::MAX");
+            definitions.push(definition_id);
+            let dotted = join(&project.names[file].name, &definition.qualified_name);
+            by_dotted.entry(dotted).or_default().push(id);
         }
         let mut ancestors = Vec::new();
         let mut metaclasses = Vec::new();
-        let mut protocols = vec![false; keys.len()];
-        let mut unknown_bases = vec![false; keys.len()];
-        for (_, file, definition) in project.definitions_by_file() {
+        let mut protocols = vec![false; definitions.len()];
+        let mut unknown_bases = vec![false; definitions.len()];
+        for (definition_id, file, definition) in project.definitions_by_file() {
             if definition.kind != Kind::Class {
                 continue;
             }
             // The loop above gave an id to every class.
-            let name = definition.qualified_name();
-            let id = ids[&(file, name.clone())];
+            let id = ids[definition_id] as usize;
+            let name = &definition.qualified_name;
             unknown_bases[id] |= definition.other_bases;
             for base in &definition.bases {
-                let names = hierarchy.resolve_in(file, &name, base);
+                let names = hierarchy.resolve_in(file, name, base);
                 protocols[id] |= PROTOCOLS.iter().any(|protocol| names.contains(*protocol));
                 unknown_bases[id] |= is_unknown_class(project, &by_dotted, file, base, &names);
             }
         }
-        for (file, name) in &keys {
-            let dotted = hierarchy.ancestors(*file, name);
+        for &definition_id in &definitions {
+            let file = project.definition_files[definition_id];
+            let dotted =
+                hierarchy.ancestors(file, &project.definitions[definition_id].qualified_name);
             metaclasses.push(dotted.contains("type"));
             let mut found: Vec<ClassId> = dotted
                 .iter()
@@ -100,7 +105,7 @@ impl<'a> Classes<'a> {
             found.dedup();
             ancestors.push(found);
         }
-        let mut descendants = vec![Vec::new(); keys.len()];
+        let mut descendants = vec![Vec::new(); definitions.len()];
         for (id, found) in ancestors.iter().enumerate() {
             for &ancestor in found {
                 if ancestor != id {
@@ -124,11 +129,11 @@ impl<'a> Classes<'a> {
         let mut by_member: FxHashMap<String, FxHashMap<ClassId, Vec<DefinitionId>>> =
             FxHashMap::default();
         let mut loose: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
-        for (id, file, definition) in project.definitions_by_file() {
-            if let Some(class_name) = &definition.class
+        for (id, definition) in project.definitions.iter().enumerate() {
+            if let Some(class) = project.class_of(id)
                 && !fields.contains(&id)
-                && let Some(&class) = ids.get(&(file, class_name.clone()))
             {
+                let class = ids[class] as usize;
                 by_member
                     .entry(definition.name.clone())
                     .or_default()
@@ -208,12 +213,11 @@ impl<'a> Classes<'a> {
     /// Returns None if the class is a metaclass, or if none of those classes has such a member.
     pub(super) fn read_from_own(
         &self,
-        file: usize,
-        class: &str,
+        class: DefinitionId,
         name: &str,
         skip_own: bool,
     ) -> Option<Vec<DefinitionId>> {
-        let &id = self.ids.get(&(file, class.to_string()))?;
+        let id = self.ids[class] as usize;
         if self.metaclasses[id] || !self.by_member.contains_key(name) {
             return None;
         }
@@ -242,18 +246,16 @@ impl<'a> Classes<'a> {
     ) -> FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>> {
         let mut implementations = FxHashMap::default();
         for (id, file, definition) in project.definitions_by_file() {
-            let Some(class_name) = &definition.class else {
+            let Some(class) = project.class_of(id) else {
                 continue;
             };
             if !definition.kind.is_function() || definition.decorators.is_empty() {
                 continue;
             }
-            let (Some(&class), Some(by_class)) = (
-                self.ids.get(&(file, class_name.clone())),
-                self.by_member.get(&definition.name),
-            ) else {
+            let Some(by_class) = self.by_member.get(&definition.name) else {
                 continue;
             };
+            let class = self.ids[class] as usize;
             let found: Vec<(DefinitionId, DefinitionId)> = self.descendants[class]
                 .iter()
                 .flat_map(|&subclass| {

@@ -3,7 +3,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{Binding, ImportedRead, Read, Receiver, Walker};
+use super::{Binding, ImportedRead, Index, Read, Receiver, Walker};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ScopeKind {
@@ -44,10 +44,10 @@ pub(super) struct Scope {
     pub(super) defined: FxHashMap<String, usize>,
     /// In a method, the name of its first parameter, usually `self` or `cls`.
     pub(super) instance: Option<String>,
-    /// In a class or a method, the name of the class in the module.
-    pub(super) class_name: Option<String>,
-    /// In a function or a method, its name in the module.
-    pub(super) function_name: Option<String>,
+    /// In a class or a method, the class.
+    pub(super) class: Option<Index>,
+    /// In a function or a method, the function.
+    pub(super) function: Option<Index>,
     /// In a class body, the attributes, methods and classes that it defines so far, by their name,
     /// each with its index in the definitions of the module.
     pub(super) members: FxHashMap<String, Vec<usize>>,
@@ -79,8 +79,8 @@ impl Scope {
             defined_in: None,
             defined: FxHashMap::default(),
             instance: None,
-            class_name: None,
-            function_name: None,
+            class: None,
+            function: None,
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
             comprehension_parent: None,
@@ -213,7 +213,7 @@ impl Walker<'_, '_> {
             .instance
             .clone()
             .filter(|instance| !scope.bound.contains(instance))
-            .zip(scope.class_name.clone());
+            .zip(scope.class);
         let mut passed = Vec::new();
         for read in reads {
             if let Some(binding) = self.scopes[inner].imports.get(read.root.as_str()) {
@@ -252,10 +252,10 @@ impl Walker<'_, '_> {
                 if let Some(class) = own_class
                     .as_ref()
                     .filter(|(instance, _)| *instance == read.root)
-                    .map(|(_, class)| class)
+                    .map(|(_, class)| *class)
                     && let Some(first) = attributes.next()
                 {
-                    let receiver = Receiver::Own(class.clone());
+                    let receiver = Receiver::Own(class);
                     self.references
                         .members
                         .insert((read.owner, receiver, first));

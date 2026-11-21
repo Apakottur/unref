@@ -66,6 +66,7 @@ pub(super) fn find_roots(
         let ignored_in_file = ignored_codes(&project.facts[file].ignore_comments);
         for id in project.ids_of_file(file) {
             let definition = &project.definitions[id];
+            let class = project.class_name(id);
             let name = definition.name.as_str();
             let is_kept = name == "_"
                 || is_dunder(name)
@@ -76,28 +77,22 @@ pub(super) fn find_roots(
                         .as_ref()
                         .is_some_and(|pattern| pattern.is_match(name).unwrap_or(false)))
                 // A member that a base class outside the project defines is used by its code.
-                || definition
-                    .class
-                    .as_ref()
-                    .is_some_and(|class| hierarchy.external_members(file, class).contains(name))
+                || class.is_some_and(|class| hierarchy.external_members(file, class).contains(name))
                 // A method of a node visitor of `ast`, which its `visit` calls by the name of the node.
                 || (definition.kind == Kind::Method
                     && name.starts_with(NODE_VISITOR_PREFIX)
-                    && definition
-                        .class
-                        .as_ref()
-                        .is_some_and(|class| hierarchy.inherits(file, class, &NODE_VISITORS)))
+                    && class.is_some_and(|class| hierarchy.inherits(file, class, &NODE_VISITORS)))
                 // The objects that the entry points name.
                 || entry_objects
                     .get(&file)
-                    .is_some_and(|objects| objects.contains(&definition.qualified_name()))
+                    .is_some_and(|objects| objects.contains(&definition.qualified_name))
                 // What the test frameworks find and call by themselves.
                 || rules.uses(definition, file)
                 // The options of a definition are those of the project, plus those of every override
                 // that covers it.
                 || matches_options(definition, &options.used_names, &used_decorators)
                 || file_overrides.iter().any(|(_, item, decorators)| {
-                    covers(item, file, definition, hierarchy) && matches_options(definition, &item.used_names, decorators)
+                    covers(item, file, class, hierarchy) && matches_options(definition, &item.used_names, decorators)
                 });
             if is_kept {
                 kept.push(id);
@@ -109,21 +104,15 @@ pub(super) fn find_roots(
     (kept, ignored)
 }
 
-/// Check whether an override that applies to a file covers a definition of it: whether the definition
-/// matches the base classes and the class decorators of the override.
-fn covers(
-    item: &Override,
-    file: usize,
-    definition: &Definition,
-    hierarchy: &ClassHierarchy,
-) -> bool {
+/// Check whether an override that applies to a file covers a definition of it, given by the name in
+/// the module of the class that it is in: whether the definition matches the base classes and the
+/// class decorators of the override.
+fn covers(item: &Override, file: usize, class: Option<&str>, hierarchy: &ClassHierarchy) -> bool {
     // An override with base classes applies to what is defined in a class that inherits from one of
     // them.
     if !item.base_classes.is_empty() {
-        let inherits = definition
-            .class
-            .as_ref()
-            .is_some_and(|class| hierarchy.inherits(file, class, &item.base_classes));
+        let inherits =
+            class.is_some_and(|class| hierarchy.inherits(file, class, &item.base_classes));
         if !inherits {
             return false;
         }
@@ -131,7 +120,7 @@ fn covers(
     // An override with class names applies to what is defined in a class whose own name, without the
     // classes it is nested in, matches one of the patterns.
     if !item.class_names.is_empty() {
-        let named = definition.class.as_ref().is_some_and(|class| {
+        let named = class.is_some_and(|class| {
             let name = class.rsplit('.').next().unwrap_or(class);
             item.class_names
                 .iter()
@@ -143,7 +132,7 @@ fn covers(
     }
     // An override with class decorators applies to what is defined in a class that has one of them.
     item.class_decorators.is_empty()
-        || definition.class.as_ref().is_some_and(|class| {
+        || class.is_some_and(|class| {
             let decorators = hierarchy.decorators(file, class);
             item.class_decorators
                 .iter()

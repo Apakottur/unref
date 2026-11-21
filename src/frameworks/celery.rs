@@ -43,7 +43,7 @@ impl FrameworkRules<'_> {
     /// Check whether Celery runs or calls a definition by itself.
     pub(super) fn celery_uses(&self, definition: &Definition, module: usize) -> bool {
         if definition.kind == Kind::Method
-            && let Some(class) = &definition.class
+            && let Some(class) = self.class_name(definition, module)
             && CELERY_TASK_METHODS.contains(&definition.name.as_str())
             && self.inherits(module, class, &CELERY_TASKS)
         {

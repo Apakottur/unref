@@ -46,7 +46,7 @@ const PYTEST_CONFTEST_VARIABLES: [&str; 2] = ["collect_ignore", "collect_ignore_
 impl FrameworkRules<'_> {
     /// Check whether pytest finds and calls a definition by itself.
     pub(super) fn pytest_uses(&self, definition: &Definition, module: usize) -> bool {
-        let (kind, name, path) = (definition.kind, definition.name.as_str(), &*definition.path);
+        let (kind, name, path) = (definition.kind, definition.name.as_str(), self.path(module));
         // The hooks of a plugin, which can be any module or object that pytest registers, and the
         // fixtures.
         if (kind.is_function() && name.starts_with("pytest_"))
@@ -60,7 +60,7 @@ impl FrameworkRules<'_> {
             return false;
         }
 
-        let Some(class) = &definition.class else {
+        let Some(class) = self.class_name(definition, module) else {
             if file_name(path) == PYTEST_CONFTEST {
                 return kind == Kind::Variable
                     && (PYTEST_MODULE_VARIABLES.contains(&name)
@@ -74,7 +74,7 @@ impl FrameworkRules<'_> {
         };
 
         if kind == Kind::Class {
-            return is_pytest_class(path, &definition.qualified_name());
+            return is_pytest_class(path, &definition.qualified_name);
         }
         ((kind == Kind::Method
             && (name.starts_with("test") || PYTEST_CLASS_METHODS.contains(&name)))

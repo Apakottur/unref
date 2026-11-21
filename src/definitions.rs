@@ -1,12 +1,9 @@
 //! What a Python module defines.
 
-use std::path::Path;
-use std::sync::Arc;
-
 use ruff_python_ast::{Decorator, Expr};
 
 use crate::models::Rule;
-use crate::references::Owner;
+use crate::references::{Index, Owner};
 
 /// What is defined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,8 +36,6 @@ impl Kind {
 /// Something that a Python module defines.
 #[derive(Debug, Clone)]
 pub(crate) struct Definition {
-    /// The file that holds the definition.
-    pub path: Arc<Path>,
     /// The line of the name of the definition in the file, starting at 1.
     pub line: u32,
     /// The column of the name of the definition in its line, in characters, starting at 1.
@@ -49,19 +44,25 @@ pub(crate) struct Definition {
     pub kind: Kind,
     /// The name of the definition.
     pub name: String,
+    /// The name of the definition in its module, such as `Outer.Inner` for a nested class, and
+    /// `function.<locals>.Local` for a class that is defined in a function.
+    pub qualified_name: String,
     /// The dotted names of the decorators of the definition, such as `app.command`, without their
     /// arguments. A decorator that is not a dotted name is left out.
     pub decorators: Vec<String>,
-    /// The class that the definition is in, by its name in the module (`Outer.Inner` for a nested
-    /// class, `function.<locals>.Local` for a class in a function), or None if it is not in a class.
-    pub class: Option<String>,
-    /// For a function or a class that is defined in a function and not in a class of it, the name of
-    /// that function in the module, or None otherwise. One that the function declares `global` is
-    /// defined in the module.
-    pub function: Option<String>,
-    /// The function that the definition is in, by the line of its name, or None if it is not in a
-    /// function. A class in a function is in it, and so are the methods of the class.
+    /// The class that the definition is in, or None if it is not in a class. Classes of one name in
+    /// the module, such as the two of an `if` and its `else`, are one class, the first of them, with
+    /// the base classes, decorators and members of each.
+    pub class: Option<Index>,
+    /// For a function or a class that is defined in a function and not in a class of it, that
+    /// function, or None otherwise. One that the function declares `global` is defined in the module.
+    pub function: Option<Index>,
+    /// The function that the definition is in, or None if it is not in a function. A class in a
+    /// function is in it, and so are the methods of the class.
     pub owner: Owner,
+    /// For a class that has the name in the module of a class before it, that first class, which it
+    /// is one class with, or None otherwise.
+    pub merged_into: Option<Index>,
     /// For a class, the dotted names of its base classes as they are written, without their type
     /// arguments. A base class that is not a dotted name is left out.
     pub bases: Vec<String>,
@@ -92,18 +93,6 @@ pub(crate) struct Definition {
 /// What is between the name of a function and the name of what is defined in it, as in the
 /// qualified name that Python gives it.
 pub(crate) const LOCALS: &str = ".<locals>.";
-
-impl Definition {
-    /// The name of the definition in its module, such as `Outer.Inner` for a nested class, and
-    /// `function.<locals>.Local` for a class that is defined in a function.
-    pub(crate) fn qualified_name(&self) -> String {
-        match (&self.class, &self.function) {
-            (Some(class), _) => format!("{class}.{}", self.name),
-            (None, Some(function)) => format!("{function}{LOCALS}{}", self.name),
-            (None, None) => self.name.clone(),
-        }
-    }
-}
 
 /// The kind of expression that the outer end of a dotted name is unwrapped from.
 #[derive(Clone, Copy, PartialEq, Eq)]
