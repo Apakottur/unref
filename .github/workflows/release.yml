@@ -146,6 +146,35 @@ jobs:
           echo "unref $version is not on PyPI after 10 minutes."
           exit 1
 
+      # The docs name the tag of the release in unref-pre-commit, so its mirror is started rather than left to its
+      # schedule, as ruff's release does. The token of the GitHub App can only start the workflows of that repository.
+      - name: Get a token for unref-pre-commit
+        id: mirror-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.MIRROR_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MIRROR_APP_PRIVATE_KEY }}
+          repositories: unref-pre-commit
+          permission-actions: write
+
+      - name: Start the mirror of unref-pre-commit
+        env:
+          GH_TOKEN: ${{ steps.mirror-token.outputs.token }}
+        run: gh workflow run mirror.yml --repo Apakottur/unref-pre-commit --ref main
+
+      - name: Wait for the release in unref-pre-commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 60); do
+            if gh api "repos/Apakottur/unref-pre-commit/git/ref/tags/$GITHUB_REF_NAME" --silent 2>/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "unref-pre-commit has no $GITHUB_REF_NAME after 10 minutes."
+          exit 1
+
       # The pull request is opened against main, not the tagged commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
