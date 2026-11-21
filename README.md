@@ -44,7 +44,7 @@ Or as a [pre-commit](https://pre-commit.com/) or [prek](https://prek.j178.dev/) 
 ```yaml
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.4
+    rev: v0.17.5
     hooks:
       - id: ruff-check
       - id: ruff-format
