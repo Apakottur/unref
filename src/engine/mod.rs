@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::classes::{ClassHierarchy, join};
+use crate::classes::ClassHierarchy;
 use crate::config::Config;
 use crate::definitions::{Definition, Kind};
 use crate::discover::discover;
@@ -21,14 +21,13 @@ use crate::files::{FileFacts, analyze_files};
 use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::models::{Finding, Framework};
 use crate::modules::{ModuleName, module_name, resolve};
+use crate::resolver::{Resolver, join};
 use crate::symbols::ModuleSymbols;
 
 use class_members::Classes;
 use findings::{findings, transitive_definitions};
 use graph::Graph;
-use imports::{
-    import_siblings, imported_objects, is_external, is_external_import, resolve_import, search_path,
-};
+use imports::{import_siblings, is_external, is_external_import, search_path};
 use roots::find_roots;
 use uses::{Uses, find_uses};
 
@@ -135,7 +134,8 @@ pub(crate) fn find_unused(options: &Config, paths: &[PathBuf]) -> Vec<Finding> {
             ))
         })
         .collect();
-    let hierarchy = ClassHierarchy::new(modules, project.files_by_name.clone(), external);
+    let resolver = Resolver::new(modules, project.files_by_name.clone(), external);
+    let hierarchy = ClassHierarchy::new(resolver);
     let typed_dicts = subclass_attributes(&project, &hierarchy, &TYPED_DICTS);
     let enums = subclass_attributes(&project, &hierarchy, &ENUMS);
     let fields: FxHashSet<DefinitionId> = typed_dicts.values().flatten().copied().collect();

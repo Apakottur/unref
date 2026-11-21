@@ -3,13 +3,10 @@
 use ruff_python_ast::name::Name;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::classes::join;
 use crate::references::{Owner, Receiver};
+use crate::resolver::{Resolver, imported_name, join};
 
-use super::{
-    Classes, DefinitionId, Project, imported_objects, is_external, is_external_import,
-    resolve_import,
-};
+use super::{Classes, DefinitionId, Project, is_external, is_external_import};
 
 /// What the code of an owner uses.
 #[derive(Default)]
@@ -47,6 +44,7 @@ pub(super) fn find_uses(
     typed_dicts: &FxHashMap<String, Vec<DefinitionId>>,
 ) -> FxHashMap<(usize, Owner), Uses> {
     let mut uses: FxHashMap<(usize, Owner), Uses> = FxHashMap::default();
+    let resolver = classes.hierarchy.resolver();
     // The names of the TypedDicts, so that a value that cannot be one is not resolved.
     let typed_dict_names: FxHashSet<&str> = typed_dicts
         .keys()
@@ -72,19 +70,16 @@ pub(super) fn find_uses(
 
         for read in &references.imported_reads {
             let owner_uses = uses.entry((file, read.owner)).or_default();
-            let Some(resolved) = resolve_import(
-                &project.names[file],
-                &read.binding,
-                &read.attributes,
-                &project.files_by_name,
-            ) else {
+            let Some(imported) = imported_name(&project.names[file], &read.binding) else {
                 owner_uses
                     .attributes
                     .extend(read.attributes.iter().chain(&read.called).cloned());
                 continue;
             };
+            let mut parts: Vec<Name> = imported.split('.').map(Name::new).collect();
+            parts.extend(read.attributes.iter().cloned());
             if read.reads_object || !read.attributes.is_empty() {
-                let objects = imported_objects(&resolved, project);
+                let objects = imported_objects(project, resolver, &parts.join("."));
                 if !read.attributes.is_empty() {
                     // An imported module can be reached through a re-export. Its attributes
                     // are names of the original module, just as they are for a direct import.
@@ -99,16 +94,19 @@ pub(super) fn find_uses(
                 }
             }
             if let Some(called) = &read.called {
-                owner_uses.add_member_of(classes, "", &resolved.0, called);
+                owner_uses.add_member_of(classes, "", &parts, called);
             }
             if read.attributes.is_empty() {
                 continue;
             }
-            let (parts, starts) = &resolved;
             // What follows the last name that a module of the project holds is read from an object.
-            let first_of_object = starts
-                .iter()
-                .map(|(index, _)| index + 1)
+            let first_of_object = (1..parts.len())
+                .filter(|&index| {
+                    project
+                        .files_by_name
+                        .contains_key(&parts[..index].join("."))
+                })
+                .map(|index| index + 1)
                 .chain([parts.len() - read.attributes.len()])
                 .max()
                 .unwrap_or(0);
@@ -176,7 +174,7 @@ pub(super) fn find_uses(
                     .as_ref()
                     .is_none_or(|reader| match &read.local_import {
                         Some(binding) => is_external_import(project, file, binding, reader),
-                        None => is_external(project, classes.hierarchy, file, reader),
+                        None => is_external(project, resolver, file, reader),
                     })
             {
                 uses.entry((file, read.owner))
@@ -203,6 +201,33 @@ pub(super) fn find_uses(
         }
     }
     uses
+}
+
+/// Find the objects of the modules of the project that a dotted name stands for, through the modules
+/// that import it in turn, star import it or give it out from their `__getattr__`.
+///
+/// Returns each object with each module of the project that a start of one of the names of it is, and
+/// the rest of that name.
+fn imported_objects(
+    project: &Project,
+    resolver: &Resolver,
+    name: &str,
+) -> FxHashSet<(usize, Vec<Name>)> {
+    let mut found = FxHashSet::default();
+    for alias in resolver.project_aliases(name).iter() {
+        for (index, _) in alias.match_indices('.') {
+            for &module in project
+                .files_by_name
+                .get(&alias[..index])
+                .into_iter()
+                .flatten()
+            {
+                let rest = alias[index + 1..].split('.').map(Name::new).collect();
+                found.insert((module, rest));
+            }
+        }
+    }
+    found
 }
 
 impl Uses {

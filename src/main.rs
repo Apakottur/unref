@@ -13,6 +13,7 @@ mod models;
 mod modules;
 mod positions;
 mod references;
+mod resolver;
 mod symbols;
 mod transitive;
 

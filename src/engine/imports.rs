@@ -1,17 +1,17 @@
-//! What the imports of a project stand for, and whether a name is from outside the project.
+//! Whether a name is from outside the project, where the modules outside it are looked for, and what
+//! the imports of the scripts of a package stand for.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ruff_python_ast::name::Name;
 use ruff_python_stdlib::builtins::is_python_builtin;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::classes::ClassHierarchy;
 use crate::external::{ExternalModules, environment_paths, standard_library};
 use crate::files::FileFacts;
 use crate::modules::{ModuleName, import_root, resolve};
 use crate::references::Binding;
+use crate::resolver::{Resolver, imported_name, join};
 
 use super::Project;
 
@@ -20,7 +20,7 @@ use super::Project;
 /// variable, is not known.
 pub(super) fn is_external(
     project: &Project,
-    hierarchy: &ClassHierarchy,
+    resolver: &Resolver,
     file: usize,
     written: &str,
 ) -> bool {
@@ -29,8 +29,8 @@ pub(super) fn is_external(
     let is_known = project.facts[file].references.bindings.contains_key(root)
         || is_python_builtin(root, u8::MAX, false);
     is_known
-        && hierarchy
-            .resolve(file, written)
+        && resolver
+            .aliases_written(file, written)
             .iter()
             .all(|name| !project.holds(name))
 }
@@ -43,88 +43,11 @@ pub(super) fn is_external_import(
     binding: &Binding,
     written: &str,
 ) -> bool {
-    let attributes: Vec<Name> = written.split('.').skip(1).map(Name::new).collect();
-    resolve_import(
-        &project.names[file],
-        binding,
-        &attributes,
-        &project.files_by_name,
-    )
-    .is_some_and(|(parts, _)| !project.holds(&parts.join(".")))
-}
-
-/// The dotted name that an imported name and the attributes read from it stand for, as its parts,
-/// and each shorter start of it that is a module of the project, shortest first, as its number of
-/// parts with its files.
-pub(super) type Resolved = (Vec<Name>, Vec<(usize, Vec<usize>)>);
-
-/// Find the dotted name that an imported name, and the attributes read from it, stand for.
-///
-/// Returns None if it is imported from beyond the root.
-pub(super) fn resolve_import(
-    module: &ModuleName,
-    binding: &Binding,
-    attributes: &[Name],
-    files_by_name: &FxHashMap<String, Vec<usize>>,
-) -> Option<Resolved> {
-    let resolved = module.resolve(binding.module.as_deref(), binding.level)?;
-    let mut parts: Vec<Name> = resolved.split('.').map(Name::new).collect();
-    if let Some(name) = binding.name.as_ref().filter(|name| !name.is_empty()) {
-        parts.push(Name::new(name));
-    }
-    parts.extend(attributes.iter().cloned());
-    let starts = (1..parts.len())
-        .filter_map(|index| {
-            files_by_name
-                .get(&parts[..index].join("."))
-                .map(|files| (index, files.clone()))
-        })
-        .collect();
-    Some((parts, starts))
-}
-
-/// Find the objects of the modules of the project that an imported name, and the attributes read from
-/// it, stand for, through the modules that import the name in turn.
-///
-/// Returns each object with its module, and its name in the module followed by the attributes.
-pub(super) fn imported_objects(
-    resolved: &Resolved,
-    project: &Project,
-) -> FxHashSet<(usize, Vec<Name>)> {
-    let mut found = FxHashSet::default();
-    // Each binding that is followed is followed once, which ends a cycle of modules that import the
-    // names of each other.
-    let mut followed: FxHashSet<(usize, Name)> = FxHashSet::default();
-    let mut pending = vec![resolved.clone()];
-    while let Some((parts, starts)) = pending.pop() {
-        let Some((index, modules)) = starts.last() else {
-            continue;
-        };
-        for (start, start_modules) in &starts {
-            found.extend(
-                start_modules
-                    .iter()
-                    .map(|&module| (module, parts[*start..].to_vec())),
-            );
-        }
-        // A module that imports the name in turn, such as a package that re-exports it. Only the
-        // longest module is followed, as `package.module.name` reads `name` from `package.module`.
-        for &module in modules {
-            let name = &parts[*index];
-            if let Some(binding) = project.facts[module].references.bindings.get(name.as_str())
-                && followed.insert((module, name.clone()))
-                && let Some(next) = resolve_import(
-                    &project.names[module],
-                    binding,
-                    &parts[index + 1..],
-                    &project.files_by_name,
-                )
-            {
-                pending.push(next);
-            }
-        }
-    }
-    found
+    let attributes = written
+        .split_once('.')
+        .map_or("", |(_, attributes)| attributes);
+    imported_name(&project.names[file], binding)
+        .is_some_and(|imported| !project.holds(&join(&imported, attributes)))
 }
 
 /// Get the directories that a module from outside the project is looked for in.
