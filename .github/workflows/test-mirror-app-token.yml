@@ -1,0 +1,27 @@
+name: Test Mirror App Token
+
+# Temporary: checks that the GitHub App can start the mirror of unref-pre-commit. Removed with its pull request.
+on:
+  pull_request:
+    paths: [.github/workflows/test-mirror-app-token.yml]
+
+permissions: {}
+
+jobs:
+  test:
+    name: Start the mirror with the App token
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get a token for unref-pre-commit
+        id: mirror-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.MIRROR_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MIRROR_APP_PRIVATE_KEY }}
+          repositories: unref-pre-commit
+          permission-actions: write
+
+      - name: Start the mirror of unref-pre-commit
+        env:
+          GH_TOKEN: ${{ steps.mirror-token.outputs.token }}
+        run: gh workflow run mirror.yml --repo Apakottur/unref-pre-commit --ref main
