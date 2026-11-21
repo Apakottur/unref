@@ -1,6 +1,6 @@
 [package]
 name = "unref"
-# The latest release, set by the release and the update-version workflows.
+# The latest release, set by the release workflow.
 version = "0.3.2"
 edition = "2024"
 rust-version = "1.98"
