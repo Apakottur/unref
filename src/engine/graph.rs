@@ -3,7 +3,7 @@
 use ruff_python_ast::name::Name;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{AllUses, CodeId, DefinitionId, Project, Uses};
+use super::{AllUses, Classes, CodeId, DefinitionId, Project, Uses};
 
 /// The definitions of a project and what the code of each module and function uses.
 ///
@@ -42,13 +42,7 @@ struct Seen {
 }
 
 impl<'a> Graph<'a> {
-    pub(super) fn new(
-        project: &'a Project,
-        uses: &'a AllUses,
-        fields: &FxHashSet<DefinitionId>,
-        enums: FxHashMap<DefinitionId, Vec<DefinitionId>>,
-        implementations: FxHashMap<DefinitionId, Vec<(DefinitionId, DefinitionId)>>,
-    ) -> Self {
+    pub(super) fn new(project: &'a Project, uses: &'a AllUses, classes: &Classes) -> Self {
         let mut by_name: FxHashMap<(usize, Name), Vec<DefinitionId>> = FxHashMap::default();
         let mut by_attribute: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
         let mut by_key: FxHashMap<String, Vec<DefinitionId>> = FxHashMap::default();
@@ -69,7 +63,7 @@ impl<'a> Graph<'a> {
             }
             // A field of a TypedDict is read as a key, and only a method or another attribute is read
             // as an attribute of an object.
-            if fields.contains(&id) {
+            if classes.is_field(project, id) {
                 by_key.entry(definition.name.clone()).or_default().push(id);
             } else if definition.class.is_some() {
                 by_attribute
@@ -89,8 +83,8 @@ impl<'a> Graph<'a> {
                 public.entry(file).or_default().push(id);
             }
         }
-        let enums = enums
-            .into_iter()
+        let enums = classes
+            .enums()
             .map(|(class, members)| {
                 let names = members
                     .iter()
@@ -100,7 +94,7 @@ impl<'a> Graph<'a> {
                     project.definition_files[class],
                     project.definitions[class].qualified_name.clone(),
                 );
-                (key, (members, names))
+                (key, (members.to_vec(), names))
             })
             .collect();
 
@@ -112,7 +106,7 @@ impl<'a> Graph<'a> {
             by_attribute,
             by_key,
             public,
-            implementations,
+            implementations: classes.implementations(project),
             waiting: FxHashMap::default(),
             used: vec![false; project.definitions.len()],
             // The code of every module runs.

@@ -14,7 +14,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::ClassHierarchy;
 use crate::config::Config;
-use crate::definitions::{Definition, Kind};
+use crate::definitions::Definition;
 use crate::discover::discover;
 use crate::external::ExternalModules;
 use crate::files::{FileFacts, analyze_files};
@@ -22,7 +22,7 @@ use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::models::{Finding, Framework};
 use crate::modules::{ModuleName, module_name, resolve};
 use crate::references::{Index, Owner};
-use crate::resolver::{Resolver, join};
+use crate::resolver::Resolver;
 use crate::symbols::ModuleSymbols;
 use crate::timings::Timings;
 
@@ -32,11 +32,6 @@ use graph::Graph;
 use imports::{import_siblings, is_external, is_external_import, search_path};
 use roots::find_roots;
 use uses::{AllUses, Uses, find_uses};
-
-/// `TypedDict`, as `typing` and `typing_extensions` give it out.
-const TYPED_DICTS: [&str; 2] = ["typing.TypedDict", "typing_extensions.TypedDict"];
-/// `Enum`, which `IntEnum`, `StrEnum`, `Flag` and the other enums of `enum` inherit from.
-const ENUMS: [&str; 1] = ["enum.Enum"];
 
 /// A definition of the project, by its index among the definitions of every file in order.
 type DefinitionId = usize;
@@ -153,22 +148,9 @@ pub(crate) fn find_unused(
     // The hierarchy resolves the bases of each class when first asked, so the time to do it lands in
     // whichever of the phases below asks first.
     timings.end("symbols and class hierarchy");
-    let typed_dicts = subclass_attributes(&project, &hierarchy, &TYPED_DICTS);
-    let enums = subclass_attributes(&project, &hierarchy, &ENUMS);
-    let fields: FxHashSet<DefinitionId> = typed_dicts.values().flatten().copied().collect();
-    let classes = Classes::new(&project, &hierarchy, &fields);
-    let typed_dicts: FxHashMap<String, Vec<DefinitionId>> = typed_dicts
-        .into_iter()
-        .map(|(class, fields)| {
-            let module = &project.names[project.definition_files[class]].name;
-            (
-                join(module, &project.definitions[class].qualified_name),
-                fields,
-            )
-        })
-        .collect();
+    let classes = Classes::new(&project, &hierarchy);
     timings.end("TypedDict and enum attributes, classes");
-    let uses = find_uses(&project, &classes, &typed_dicts);
+    let uses = find_uses(&project, &classes);
     timings.end("uses");
 
     let file_definitions: Vec<ProjectFile> = (0..project.files.len())
@@ -201,8 +183,7 @@ pub(crate) fn find_unused(
     let (kept, ignored) = find_roots(&project, &hierarchy, options, &rules);
     timings.end("roots");
 
-    let implementations = classes.implementations(&project);
-    let mut graph = Graph::new(&project, &uses, &fields, enums, implementations);
+    let mut graph = Graph::new(&project, &uses, &classes);
 
     // An ignore comment is needed for a definition that is unused without it. Such a definition is
     // then used, and so is what it uses.
@@ -309,32 +290,6 @@ impl Project {
         name.match_indices('.')
             .any(|(index, _)| self.files_by_name.contains_key(&name[..index]))
     }
-}
-
-/// Find the attributes of the classes of a project that inherit from given base classes, such as the
-/// fields of the TypedDicts, which are read as keys rather than as attributes, or the members of the
-/// enums.
-///
-/// Returns the attributes of each class that inherits from one of them, directly or not, by the
-/// definition of the class.
-fn subclass_attributes(
-    project: &Project,
-    hierarchy: &ClassHierarchy,
-    bases: &[&str],
-) -> FxHashMap<DefinitionId, Vec<DefinitionId>> {
-    let mut attributes: FxHashMap<DefinitionId, Vec<DefinitionId>> = FxHashMap::default();
-    for (id, definition) in project.definitions.iter().enumerate() {
-        if definition.kind == Kind::Attribute
-            && let Some(class) = project.class_of(id)
-        {
-            attributes.entry(class).or_default().push(id);
-        }
-    }
-    attributes.retain(|&class, _| {
-        let file = project.definition_files[class];
-        hierarchy.inherits(file, &project.definitions[class].qualified_name, bases)
-    });
-    attributes
 }
 
 /// Mark a definition used if it is used in another file of the same source. A link to a file is a
