@@ -10,11 +10,11 @@ use ruff_python_parser::Parsed;
 use ruff_text_size::Ranged;
 use rustc_hash::FxHashMap;
 
-use crate::definitions::Definition;
+use crate::definitions::{Definition, Kind};
 use crate::ignores::{IgnoreComment, find_ignore_comments};
 use crate::models::{Finding, Rule};
 use crate::positions::{SourcePositions, to_u32};
-use crate::references::{Binding, References, walk_module};
+use crate::references::{Binding, Index, References, walk_module};
 
 /// The encoding declaration of a module (PEP 263), on one of its first two lines.
 static CODING: LazyLock<Regex> = LazyLock::new(|| {
@@ -64,10 +64,10 @@ pub(crate) fn analyze_file(path: &Arc<Path>) -> Result<FileFacts, Finding> {
         syntax_error(line, column, error.error.to_string())
     })?;
 
-    let (definitions, references) = walk_module(path, parsed.syntax(), &positions);
+    let (definitions, references) = walk_module(parsed.syntax(), &positions);
     let (ignore_comments, ignore_findings) =
         find_ignore_comments(&text, parsed.tokens(), &positions, path);
-    let lazy = lazy_imports(&parsed, &positions, &references);
+    let lazy = lazy_imports(&parsed, &positions, &definitions, &references);
     Ok(FileFacts {
         definitions,
         references,
@@ -204,6 +204,7 @@ fn utf8(bytes: &[u8]) -> Result<String, DecodeError> {
 fn lazy_imports(
     parsed: &Parsed<ModModule>,
     positions: &SourcePositions,
+    definitions: &[Definition],
     references: &References,
 ) -> FxHashMap<String, Vec<Binding>> {
     // The last definition of `__getattr__` at the top level of the module is the one that counts.
@@ -219,11 +220,19 @@ fn lazy_imports(
             _ => None,
         });
     let mut lazy: FxHashMap<String, Vec<Binding>> = FxHashMap::default();
-    let Some(line) = line else {
+    // No two functions of a module have their name at the same place.
+    let Some(function) = line.and_then(|line| {
+        definitions.iter().position(|definition| {
+            definition.kind == Kind::Function
+                && definition.line == line
+                && definition.name == "__getattr__"
+        })
+    }) else {
         return lazy;
     };
+    let function = Index::new(function);
     for import in &references.imports {
-        if import.owner == Some(line) && import.name != "*" {
+        if import.owner == Some(function) && import.name != "*" {
             lazy.entry(import.name.clone()).or_default().push(Binding {
                 module: import.module.clone(),
                 level: import.level,

@@ -69,8 +69,8 @@ impl ModuleSymbols {
         };
         for definition in definitions {
             if matches!(definition.kind, Kind::Class | Kind::Function) {
-                let name = definition.qualified_name();
-                if definition.function.is_some() && !symbols.bases.contains_key(&name) {
+                let name = &definition.qualified_name;
+                if definition.function.is_some() && !symbols.bases.contains_key(name) {
                     symbols
                         .locals
                         .entry(definition.name.clone())
@@ -79,21 +79,21 @@ impl ModuleSymbols {
                 }
                 symbols
                     .bases
-                    .entry(name)
+                    .entry(name.clone())
                     .or_default()
                     .extend(definition.bases.iter().cloned());
             }
             if definition.kind == Kind::Class {
                 symbols
                     .decorators
-                    .entry(definition.qualified_name())
+                    .entry(definition.qualified_name.clone())
                     .or_default()
                     .extend(definition.decorators.iter().cloned());
             }
-            if let Some(class) = &definition.class {
+            if let Some(class) = definition.class {
                 symbols
                     .members
-                    .entry(class.clone())
+                    .entry(definitions[class.get()].qualified_name.clone())
                     .or_default()
                     .insert(definition.name.clone());
             }

@@ -21,6 +21,7 @@ use crate::files::{FileFacts, analyze_files};
 use crate::frameworks::{FrameworkRules, ProjectFile};
 use crate::models::{Finding, Framework};
 use crate::modules::{ModuleName, module_name, resolve};
+use crate::references::{Index, Owner};
 use crate::resolver::{Resolver, join};
 use crate::symbols::ModuleSymbols;
 use crate::timings::Timings;
@@ -30,7 +31,7 @@ use findings::{findings, transitive_definitions};
 use graph::Graph;
 use imports::{import_siblings, is_external, is_external_import, search_path};
 use roots::find_roots;
-use uses::{Uses, find_uses};
+use uses::{AllUses, Uses, find_uses};
 
 /// `TypedDict`, as `typing` and `typing_extensions` give it out.
 const TYPED_DICTS: [&str; 2] = ["typing.TypedDict", "typing_extensions.TypedDict"];
@@ -39,6 +40,10 @@ const ENUMS: [&str; 1] = ["enum.Enum"];
 
 /// A definition of the project, by its index among the definitions of every file in order.
 type DefinitionId = usize;
+
+/// The code of a module or of a function of the project: the code of each module by its file, then
+/// that of each function by the number of files plus its definition.
+type CodeId = usize;
 
 /// The modules of the project, by the index of their file.
 struct Project {
@@ -154,7 +159,13 @@ pub(crate) fn find_unused(
     let classes = Classes::new(&project, &hierarchy, &fields);
     let typed_dicts: FxHashMap<String, Vec<DefinitionId>> = typed_dicts
         .into_iter()
-        .map(|((file, class), fields)| (join(&project.names[file].name, &class), fields))
+        .map(|(class, fields)| {
+            let module = &project.names[project.definition_files[class]].name;
+            (
+                join(module, &project.definitions[class].qualified_name),
+                fields,
+            )
+        })
         .collect();
     timings.end("TypedDict and enum attributes, classes");
     let uses = find_uses(&project, &classes, &typed_dicts);
@@ -262,6 +273,36 @@ impl Project {
             .map(|(id, (&file, definition))| (id, file, definition))
     }
 
+    /// Get the id of a definition of a file, given by its index in the definitions of the file.
+    fn id(&self, file: usize, index: Index) -> DefinitionId {
+        self.first_definition[file] + index.get()
+    }
+
+    /// Get the class that a definition is in, by its id.
+    fn class_of(&self, id: DefinitionId) -> Option<DefinitionId> {
+        let class = self.definitions[id].class?;
+        Some(self.id(self.definition_files[id], class))
+    }
+
+    /// Get the name in its module of the class that a definition is in.
+    fn class_name(&self, id: DefinitionId) -> Option<&str> {
+        let class = self.class_of(id)?;
+        Some(&self.definitions[class].qualified_name)
+    }
+
+    /// Get the code of an owner of a file.
+    fn code(&self, file: usize, owner: Owner) -> CodeId {
+        match owner {
+            None => file,
+            Some(function) => self.function_code(self.id(file, function)),
+        }
+    }
+
+    /// Get the code of a function, by its id.
+    fn function_code(&self, function: DefinitionId) -> CodeId {
+        self.files.len() + function
+    }
+
     /// Check whether a dotted name is in a module of the project: whether a start of it, shorter than
     /// the whole, is the name of one.
     fn holds(&self, name: &str) -> bool {
@@ -274,25 +315,25 @@ impl Project {
 /// fields of the TypedDicts, which are read as keys rather than as attributes, or the members of the
 /// enums.
 ///
-/// Returns the attributes of each class that inherits from one of them, directly or not, by its file
-/// and its name in the module.
+/// Returns the attributes of each class that inherits from one of them, directly or not, by the
+/// definition of the class.
 fn subclass_attributes(
     project: &Project,
     hierarchy: &ClassHierarchy,
     bases: &[&str],
-) -> FxHashMap<(usize, String), Vec<DefinitionId>> {
-    let mut attributes: FxHashMap<(usize, String), Vec<DefinitionId>> = FxHashMap::default();
-    for (id, file, definition) in project.definitions_by_file() {
+) -> FxHashMap<DefinitionId, Vec<DefinitionId>> {
+    let mut attributes: FxHashMap<DefinitionId, Vec<DefinitionId>> = FxHashMap::default();
+    for (id, definition) in project.definitions.iter().enumerate() {
         if definition.kind == Kind::Attribute
-            && let Some(class) = &definition.class
+            && let Some(class) = project.class_of(id)
         {
-            attributes
-                .entry((file, class.clone()))
-                .or_default()
-                .push(id);
+            attributes.entry(class).or_default().push(id);
         }
     }
-    attributes.retain(|(file, class), _| hierarchy.inherits(*file, class, bases));
+    attributes.retain(|&class, _| {
+        let file = project.definition_files[class];
+        hierarchy.inherits(file, &project.definitions[class].qualified_name, bases)
+    });
     attributes
 }
 

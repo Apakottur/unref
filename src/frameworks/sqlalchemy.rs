@@ -54,7 +54,7 @@ impl FrameworkRules<'_> {
                 self.resolves_to_sqlalchemy(module, decorator, &SQLALCHEMY_DECORATORS)
             });
         }
-        let Some(class) = &definition.class else {
+        let Some(class) = self.class_name(definition, module) else {
             return false;
         };
         if definition.kind != Kind::Attribute {

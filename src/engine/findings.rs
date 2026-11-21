@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::definitions::Kind;
 use crate::ignores::apply_ignore_comments;
 use crate::models::Finding;
 use crate::transitive::transitive;
@@ -22,42 +21,26 @@ pub(super) fn transitive_definitions(
     graph: &Graph,
     unused: &[DefinitionId],
 ) -> FxHashSet<DefinitionId> {
-    let position: FxHashMap<DefinitionId, usize> = unused
-        .iter()
-        .enumerate()
-        .map(|(index, &id)| (id, index))
-        .collect();
+    let mut position: Vec<Option<usize>> = vec![None; project.definitions.len()];
+    for (index, &id) in unused.iter().enumerate() {
+        position[id] = Some(index);
+    }
     let mut successors: Vec<Vec<usize>> = unused
         .iter()
         .map(|&id| {
             graph
                 .reached(id)
                 .into_iter()
-                .filter_map(|other| position.get(&other).copied())
+                .filter_map(|other| position[other])
                 .collect()
         })
         .collect();
 
-    let mut classes: FxHashMap<(usize, String), usize> = FxHashMap::default();
-    // By the line of their name, which is the owner of the code in them.
-    let mut functions: FxHashMap<(usize, u32), usize> = FxHashMap::default();
     for (index, &id) in unused.iter().enumerate() {
-        let (file, definition) = (&project.definition_files[id], &project.definitions[id]);
-        if definition.kind == Kind::Class {
-            classes.insert((*file, definition.qualified_name()), index);
-        } else if definition.kind.is_function() {
-            functions.insert((*file, definition.line), index);
-        }
-    }
-    for (index, &id) in unused.iter().enumerate() {
-        let (file, definition) = (&project.definition_files[id], &project.definitions[id]);
+        let (file, definition) = (project.definition_files[id], &project.definitions[id]);
         // A definition in a class is in the class first, even if the class is in a function.
-        let container = match (&definition.class, definition.owner) {
-            (Some(class), _) => classes.get(&(*file, class.clone())),
-            (None, Some(function)) => functions.get(&(*file, function)),
-            (None, None) => None,
-        };
-        if let Some(&container) = container {
+        let container = definition.class.or(definition.owner);
+        if let Some(container) = container.and_then(|index| position[project.id(file, index)]) {
             successors[container].push(index);
         }
     }
@@ -102,7 +85,7 @@ pub(super) fn findings(
             .map(|id| {
                 let definition = &project.definitions[id];
                 Finding {
-                    path: definition.path.to_path_buf(),
+                    path: path.to_path_buf(),
                     line: definition.line,
                     column: definition.column,
                     code: definition.kind.code(),

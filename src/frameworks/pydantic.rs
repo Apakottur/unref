@@ -44,7 +44,7 @@ const PYDANTIC_V1_CONFIG: &str = "Config";
 impl FrameworkRules<'_> {
     /// Check whether Pydantic calls or reads a definition by itself.
     pub(super) fn pydantic_uses(&self, definition: &Definition, module: usize) -> bool {
-        let Some(class) = &definition.class else {
+        let Some(class) = self.class_name(definition, module) else {
             return false;
         };
         if definition.kind == Kind::Method {

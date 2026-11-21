@@ -25,7 +25,7 @@ use crate::classes::ClassHierarchy;
 use crate::definitions::{Definition, Kind};
 use crate::models::Framework;
 use crate::modules::{ModuleName, resolve};
-use crate::references::References;
+use crate::references::{Index, References};
 
 use celery::{CELERY_APPS, CELERY_CURRENT_APP};
 use django::{DjangoModules, django_modules};
@@ -52,6 +52,8 @@ fn has_any(names: &FxHashSet<String>, wanted: &[&str]) -> bool {
 pub(crate) struct FrameworkRules<'a> {
     /// The frameworks whose rules apply.
     frameworks: &'a FxHashSet<Framework>,
+    /// The files of the project, by their indices.
+    files: &'a [ProjectFile<'a>],
     /// The module name of each file of the project, by its index.
     module_names: &'a [ModuleName],
     hierarchy: &'a ClassHierarchy,
@@ -82,9 +84,8 @@ pub(crate) struct FrameworkRules<'a> {
 struct Instances {
     /// The variables at the top level of a module, by their dotted names.
     variables: FxHashSet<String>,
-    /// The local variables of functions, each by its module, the line of the name of its function,
-    /// and its name.
-    locals: FxHashSet<(usize, u32, String)>,
+    /// The local variables of functions, each by its module, its function, and its name.
+    locals: FxHashSet<(usize, Index, String)>,
 }
 
 /// A file of a project, with its definitions and what it refers to.
@@ -97,7 +98,7 @@ impl<'a> FrameworkRules<'a> {
     /// that are found.
     pub(crate) fn new(
         frameworks: &'a FxHashSet<Framework>,
-        files: &[ProjectFile],
+        files: &'a [ProjectFile<'a>],
         module_names: &'a [ModuleName],
         hierarchy: &'a ClassHierarchy,
         sphinx_configuration: Option<&FxHashSet<PathBuf>>,
@@ -105,6 +106,7 @@ impl<'a> FrameworkRules<'a> {
     ) -> Self {
         let mut rules = Self {
             frameworks,
+            files,
             module_names,
             hierarchy,
             pytest_bases: FxHashSet::default(),
@@ -165,24 +167,24 @@ impl<'a> FrameworkRules<'a> {
                 rules.sphinx_configs.insert(module);
             }
             for definition in *definitions {
-                let name = definition.qualified_name();
+                let name = &definition.qualified_name;
                 if definition.kind == Kind::Class {
-                    let ancestors = || hierarchy.ancestors(module, &name);
-                    if rules.enabled(Framework::Pytest) && is_pytest_class(path, &name) {
+                    let ancestors = || hierarchy.ancestors(module, name);
+                    if rules.enabled(Framework::Pytest) && is_pytest_class(path, name) {
                         rules.pytest_bases.extend(ancestors().iter().cloned());
                     }
-                    if rules.enabled(Framework::Unittest) && rules.is_test_case(module, &name) {
+                    if rules.enabled(Framework::Unittest) && rules.is_test_case(module, name) {
                         rules.unittest_bases.extend(ancestors().iter().cloned());
                     }
                     if rules.enabled(Framework::Sqlalchemy)
                         && is_sqlalchemy(
-                            &hierarchy.decorators(module, &name),
+                            &hierarchy.decorators(module, name),
                             &SQLALCHEMY_BASE_DECORATORS,
                         )
                     {
-                        made.insert(rules.dotted_name(module, &name));
+                        made.insert(rules.dotted_name(module, name));
                     }
-                    classes.push((module, name));
+                    classes.push((module, name.clone()));
                 } else if definition.kind == Kind::Variable
                     && let Some(call) = &definition.call
                 {
@@ -190,14 +192,14 @@ impl<'a> FrameworkRules<'a> {
                     if rules.enabled(Framework::Sqlalchemy)
                         && is_sqlalchemy(&called, &SQLALCHEMY_BASE_FUNCTIONS)
                     {
-                        made.insert(rules.dotted_name(module, &name));
+                        made.insert(rules.dotted_name(module, name));
                     }
                     if rules.enabled(Framework::Fastapi) && has_any(&called, &FASTAPI_ROUTERS) {
-                        let router = rules.dotted_name(module, &name);
+                        let router = rules.dotted_name(module, name);
                         rules.fastapi_routers.variables.insert(router);
                     }
                     if rules.enabled(Framework::Flask) {
-                        let dotted = rules.dotted_name(module, &name);
+                        let dotted = rules.dotted_name(module, name);
                         if has_any(&called, &FLASK_APPS) || rules.is_flask_factory(module, call) {
                             rules.flask_apps.variables.insert(dotted);
                         } else if has_any(&called, &FLASK_GROUPS) {
@@ -205,7 +207,7 @@ impl<'a> FrameworkRules<'a> {
                         }
                     }
                     if rules.enabled(Framework::Celery) && has_any(&called, &CELERY_APPS) {
-                        let app = rules.dotted_name(module, &name);
+                        let app = rules.dotted_name(module, name);
                         rules.celery_apps.variables.insert(app);
                     }
                 }
@@ -291,6 +293,17 @@ impl<'a> FrameworkRules<'a> {
         self.frameworks.contains(&framework)
     }
 
+    /// Get the name in its module of the class that a definition of a module is in.
+    fn class_name(&self, definition: &Definition, module: usize) -> Option<&'a str> {
+        let class = definition.class?;
+        Some(&self.files[module].1[class.get()].qualified_name)
+    }
+
+    /// Get the file of a module.
+    fn path(&self, module: usize) -> &'a Path {
+        self.files[module].0
+    }
+
     /// Check whether a class of a module inherits from one of the given classes, by their dotted
     /// names.
     fn inherits(&self, module: usize, class: &str, bases: &[&str]) -> bool {
@@ -332,7 +345,7 @@ fn annotated_parameters(
     files: &[ProjectFile],
     hierarchy: &ClassHierarchy,
     classes: &[&str],
-) -> FxHashSet<(usize, u32, String)> {
+) -> FxHashSet<(usize, Index, String)> {
     let mut parameters = FxHashSet::default();
     for (module, (_, _, references)) in files.iter().enumerate() {
         for ((function, name), annotation) in &references.annotated_parameters {
@@ -350,7 +363,7 @@ fn local_instances(
     files: &[ProjectFile],
     hierarchy: &ClassHierarchy,
     classes: &[&str],
-) -> FxHashSet<(usize, u32, String)> {
+) -> FxHashSet<(usize, Index, String)> {
     let mut instances = FxHashSet::default();
     for (module, (_, _, references)) in files.iter().enumerate() {
         for ((function, name), called) in &references.local_calls {

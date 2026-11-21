@@ -6,7 +6,7 @@ use ruff_python_ast::{self as ast, Expr};
 
 use super::scopes::ScopeKind;
 use super::type_strings::type_arguments;
-use super::{Read, Receiver, Walker};
+use super::{Index, Read, Receiver, Walker};
 
 /// The methods of a mapping that read a key, given as their first argument.
 const KEY_METHODS: [&str; 3] = ["get", "pop", "setdefault"];
@@ -168,12 +168,12 @@ impl<'a> Walker<'_, '_> {
 
     /// Get the class whose base classes a call of `super` reads from: `super()` in a method, or
     /// `super(Class, self)` in a method of `Class`.
-    fn super_class(&self, call: &ast::ExprCall) -> Option<String> {
+    fn super_class(&self, call: &ast::ExprCall) -> Option<Index> {
         let Expr::Name(func) = &*call.func else {
             return None;
         };
         let scope = &self.scopes[self.scope];
-        let class = scope.class_name.as_ref()?;
+        let class = scope.class?;
         // Only the body of a method has an instance.
         if func.id.as_str() != "super" || scope.instance.is_none() {
             return None;
@@ -182,12 +182,12 @@ impl<'a> Walker<'_, '_> {
         let plain = match (arguments.args.as_ref(), arguments.keywords.is_empty()) {
             ([], true) => true,
             ([Expr::Name(first), Expr::Name(second)], true) => {
-                class.rsplit('.').next() == Some(first.id.as_str())
+                self.definitions[class.get()].name == first.id.as_str()
                     && scope.instance.as_deref() == Some(second.id.as_str())
             }
             _ => false,
         };
-        plain.then(|| class.clone())
+        plain.then_some(class)
     }
 }
 

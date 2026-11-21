@@ -5,11 +5,13 @@ use ruff_python_ast::visitor::Visitor;
 use ruff_python_ast::{self as ast, Expr};
 use ruff_text_size::{Ranged, TextSize};
 
-use crate::definitions::{Definition, Kind, Unwrap, annotation_name, decorator_names, dotted_name};
+use crate::definitions::{
+    Definition, Kind, LOCALS, Unwrap, annotation_name, decorator_names, dotted_name,
+};
 
 use super::scopes::{Scope, ScopeKind};
 use super::type_strings::typing_name;
-use super::{Read, Walker};
+use super::{Index, Read, Walker};
 
 impl<'a> Walker<'_, '_> {
     /// Add the names listed in `__all__`. Only the `__all__` of the module, at its top level or
@@ -101,8 +103,8 @@ impl<'a> Walker<'_, '_> {
 
     /// Add a function or a method.
     ///
-    /// Returns the scope of its body, and the line of its name.
-    pub(super) fn define_function(&mut self, function: &ast::StmtFunctionDef) -> (Scope, u32) {
+    /// Returns the scope of its body, and its index in the definitions of the module.
+    pub(super) fn define_function(&mut self, function: &ast::StmtFunctionDef) -> (Scope, Index) {
         let enclosing = &self.scopes[self.binder];
         let mut kind = Kind::Function;
         let mut scope = Scope::new(ScopeKind::Function);
@@ -123,21 +125,25 @@ impl<'a> Walker<'_, '_> {
                 .filter(|_| !is_static)
                 .map(|parameter| parameter.parameter.name.to_string());
             scope.defined_in = enclosing.defined_in;
-            scope.class_name.clone_from(&enclosing.class_name);
-            class.clone_from(&enclosing.class_name);
+            scope.class = enclosing.class;
+            class = enclosing.class;
         } else if !enclosing.global_names.contains(function.name.as_str()) {
-            enclosing_function.clone_from(&enclosing.function_name);
+            enclosing_function = enclosing.function;
         }
         let definition = Definition {
             decorators: decorator_names(&function.decorator_list),
-            class,
-            function: enclosing_function,
-            ..self.definition(kind, &function.name, function.name.start())
+            ..self.definition(
+                kind,
+                &function.name,
+                function.name.start(),
+                class,
+                enclosing_function,
+            )
         };
-        scope.function_name = Some(definition.qualified_name());
-        let line = definition.line;
+        let index = Index::new(self.definitions.len());
+        scope.function = Some(index);
         self.definitions.push(definition);
-        (scope, line)
+        (scope, index)
     }
 
     /// Add the variables and attributes that an assignment target defines.
@@ -197,7 +203,7 @@ impl<'a> Walker<'_, '_> {
         };
 
         // A variable or attribute is found once, where it is first assigned.
-        let class_name = scope.class_name.clone();
+        let class = scope.class;
         let in_class_body = scope.kind == ScopeKind::Class;
         let Some(defined_in) = scope.defined_in else {
             return;
@@ -222,31 +228,48 @@ impl<'a> Walker<'_, '_> {
             return;
         }
         self.definitions.push(Definition {
-            class: class_name,
             unpacked,
             annotation: annotation.cloned(),
             call: call.cloned(),
             string: string.cloned(),
             wrapped_by: wrapped_by.cloned(),
-            ..self.definition(kind, name, position)
+            ..self.definition(kind, name, position, class, None)
         });
     }
 
-    /// Start a definition of a name at a position, in the function that the node is in, with no
-    /// decorators, class, base classes, annotation, call, string or wrapping decorator, and not
-    /// unpacked.
-    pub(super) fn definition(&self, kind: Kind, name: &str, position: TextSize) -> Definition {
+    /// Start a definition of a name at a position, in the function that the node is in, with the
+    /// class that it is in and the function that it is in outside a class, and no decorators, base
+    /// classes, annotation, call, string or wrapping decorator, not unpacked and not merged.
+    pub(super) fn definition(
+        &self,
+        kind: Kind,
+        name: &str,
+        position: TextSize,
+        class: Option<Index>,
+        function: Option<Index>,
+    ) -> Definition {
         let (line, column) = self.positions.line_column(position);
+        let qualified_name = match (class, function) {
+            (Some(class), _) => format!("{}.{name}", self.definitions[class.get()].qualified_name),
+            (None, Some(function)) => {
+                format!(
+                    "{}{LOCALS}{name}",
+                    self.definitions[function.get()].qualified_name
+                )
+            }
+            (None, None) => name.to_string(),
+        };
         Definition {
-            path: self.path.clone(),
             line,
             column,
             kind,
             name: name.to_string(),
+            qualified_name,
             decorators: Vec::new(),
-            class: None,
-            function: None,
+            class,
+            function,
             owner: self.owner,
+            merged_into: None,
             bases: Vec::new(),
             other_bases: false,
             unpacked: false,
