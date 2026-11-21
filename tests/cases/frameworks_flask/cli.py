@@ -64,16 +64,6 @@ def not_a_command():  # expect: 5 [unused-function]
     return None
 
 
-@click.group()
-def plain():
-    return None
-
-
-@plain.command()
-def plain_command():  # expect: 5 [unused-function]
-    return None
-
-
 app.cli.add_command(users)
 app.register_blueprint(bp)
-register, plain
+register

@@ -225,33 +225,12 @@ impl Flask {
 
     /// Get the groups of commands of Flask's CLI: the instances of `AppGroup`, and the functions that
     /// the `cli.group` decorator of an application or a blueprint, or the `group` decorator of a group,
-    /// makes into a group, until no more are found.
+    /// makes into a group.
     fn command_groups(&self, context: &Context) -> Instances {
-        let mut groups = self.groups.clone();
-        loop {
-            let mut found = Instances::default();
-            for (module, file) in context.files.iter().enumerate() {
-                for definition in file.definitions {
-                    if definition.kind != Kind::Function
-                        || !(context.registers(definition, module, &self.apps, &[&["cli.group"]])
-                            || context.registers(definition, module, &groups, &[&["group"]]))
-                    {
-                        continue;
-                    }
-                    let name = definition.name.clone();
-                    match definition.owner {
-                        None => found.variables.insert(context.dotted_name(module, &name)),
-                        Some(function) => found.locals.insert((module, function, name)),
-                    };
-                }
-            }
-            let count = groups.variables.len() + groups.locals.len();
-            groups.variables.extend(found.variables);
-            groups.locals.extend(found.locals);
-            if groups.variables.len() + groups.locals.len() == count {
-                return groups;
-            }
-        }
+        context.groups(self.groups.clone(), |definition, module, groups| {
+            context.registers(definition, module, &self.apps, &[&["cli.group"]])
+                || context.registers(definition, module, groups, &[&["group"]])
+        })
     }
 }
 
