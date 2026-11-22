@@ -49,6 +49,7 @@ isort
 isupper
 jemalloc
 jemallocator
+kwarg
 kwonlyargs
 longpaths
 lucide
@@ -119,6 +120,7 @@ URLCONF
 urlpatterns
 vararg
 venv
+viewset
 viewsets
 worktrees
 wsgi
