@@ -40,6 +40,7 @@ frameworks! {
     Flask => "flask",
     Sphinx => "sphinx",
     Django => "django",
+    Drf => "rest-framework",
     Celery => "celery",
 }
 

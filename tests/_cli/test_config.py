@@ -129,7 +129,7 @@ _OVERRIDE_WRONG_TYPE = "Option '{option}' in an override in the configuration fi
             "[frameworks]\nnose = true",
             "Option 'frameworks' in the configuration file {config} has an unknown framework 'nose', "
             "expected one of 'pytest', 'unittest', 'pydantic', 'dataclasses', 'sqlalchemy', 'fastapi', 'flask', 'sphinx', "
-            "'django', 'celery'",
+            "'django', 'rest-framework', 'celery'",
         ),
         _invalid(
             "frameworks-not-boolean",

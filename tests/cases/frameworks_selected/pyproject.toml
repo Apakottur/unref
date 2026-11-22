@@ -1,4 +1,5 @@
 [tool.unref.frameworks]
 dataclasses = false
 pytest = false
+rest-framework = false
 sphinx = false
