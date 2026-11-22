@@ -42,6 +42,8 @@ frameworks! {
     Sphinx => "sphinx",
     Django => "django",
     Celery => "celery",
+    Click => "click",
+    Typer => "typer",
 }
 
 impl Framework {

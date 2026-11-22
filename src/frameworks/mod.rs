@@ -13,6 +13,7 @@
 //! variant with its name to `frameworks!` in `models.rs`, and an arm that makes it to `make`.
 
 mod celery;
+mod click;
 mod dataclasses;
 mod django;
 mod fastapi;
@@ -22,6 +23,7 @@ mod pydantic;
 mod pytest;
 mod sphinx;
 mod sqlalchemy;
+mod typer;
 mod unittest;
 
 use std::cell::OnceCell;
@@ -123,6 +125,8 @@ fn make(framework: Framework, context: &Context, settings: &Settings) -> Box<dyn
         Framework::Sphinx => Box::new(sphinx::Sphinx::new(context, settings)),
         Framework::Django => Box::new(django::Django::new(context, settings)),
         Framework::Celery => Box::new(celery::Celery::new(context, settings)),
+        Framework::Click => Box::new(click::Click::new(context, settings)),
+        Framework::Typer => Box::new(typer::Typer::new(context, settings)),
     }
 }
 
@@ -277,6 +281,39 @@ impl<'a> Context<'a> {
             }
         }
         false
+    }
+
+    /// Get the groups of commands of a CLI, such as Click's: the given groups, with the functions that
+    /// a decorator makes into a group, as `makes_group` tells from the groups found so far, until no
+    /// more are found.
+    fn groups(
+        &self,
+        mut groups: Instances,
+        makes_group: impl Fn(&Definition, usize, &Instances) -> bool,
+    ) -> Instances {
+        loop {
+            let mut found = Instances::default();
+            for (module, file) in self.files.iter().enumerate() {
+                for definition in file.definitions {
+                    if definition.kind != Kind::Function
+                        || !makes_group(definition, module, &groups)
+                    {
+                        continue;
+                    }
+                    let name = definition.name.clone();
+                    match definition.owner {
+                        None => found.variables.insert(self.dotted_name(module, &name)),
+                        Some(function) => found.locals.insert((module, function, name)),
+                    };
+                }
+            }
+            let count = groups.variables.len() + groups.locals.len();
+            groups.variables.extend(found.variables);
+            groups.locals.extend(found.locals);
+            if groups.variables.len() + groups.locals.len() == count {
+                return groups;
+            }
+        }
     }
 
     /// Get the name in its module of the class that a definition of a module is in.

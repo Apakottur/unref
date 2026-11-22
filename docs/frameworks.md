@@ -138,3 +138,22 @@ Enabled by default: yes.
 - Tasks of `shared_task`, and of the `task` decorator of `Celery()`, or an instance of a subclass, set
   at module level or in the same function, of a parameter annotated as one, or of `current_app`.
 - In subclasses of `Task`: `run` and handlers such as `on_failure`.
+
+## `click`
+
+Enabled by default: yes.
+
+- Commands and groups of the `command` and `group` decorators of a group, and functions of its
+  `result_callback` decorator. A group is a `Group()`, or an instance of a subclass, set at module level or
+  in the same function, or a function that `click.group` or the `group` decorator of a group makes into
+  one. The same holds for rich-click and asyncclick.
+
+A function that only `click.command` or `click.group` makes into a command is registered nowhere, so it
+counts as used only if something refers to it, such as an entry point or `add_command`.
+
+## `typer`
+
+Enabled by default: yes.
+
+- Functions of the `command` and `callback` decorators of a `Typer()`, or an instance of a subclass, set at
+  module level or in the same function.
