@@ -134,15 +134,11 @@ jobs:
       # Required to start CI on the pull request, as one opened with this token does not.
       actions: write
     steps:
-      # The mirror of unref-pre-commit runs `uv lock`, which reads the simple index, not the JSON API. The index is
-      # cached apart from the JSON API and can name the release later, so the step waits for the index as uv reads it.
       - name: Wait for the release on PyPI
         run: |
           version="${GITHUB_REF_NAME#v}"
           for _ in $(seq 60); do
-            if curl --fail --silent --show-error --header "Accept: application/vnd.pypi.simple.v1+json" \
-              "https://pypi.org/simple/unref/" \
-              | jq --exit-status --arg version "$version" '.versions | index($version)' >/dev/null; then
+            if curl --fail --silent --show-error --output /dev/null "https://pypi.org/pypi/unref/$version/json"; then
               exit 0
             fi
             sleep 10
@@ -161,22 +157,30 @@ jobs:
           repositories: unref-pre-commit
           permission-actions: write
 
-      - name: Start the mirror of unref-pre-commit
+      # The mirror finds the release through PyPI's JSON API, which is cached and can name it later than the step that
+      # waits for PyPI saw it. A mirror that finds no release succeeds without a tag, so the mirror is started again
+      # whenever none is running and there is still no tag. The mirror itself retries `uv lock` for up to 12 minutes.
+      - name: Mirror the release to unref-pre-commit
         env:
-          GH_TOKEN: ${{ steps.mirror-token.outputs.token }}
-        run: gh workflow run mirror.yml --repo Apakottur/unref-pre-commit --ref main
-
-      - name: Wait for the release in unref-pre-commit
-        env:
+          MIRROR_TOKEN: ${{ steps.mirror-token.outputs.token }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          for _ in $(seq 60); do
+          for minute in $(seq 0 25); do
             if gh api "repos/Apakottur/unref-pre-commit/git/ref/tags/$GITHUB_REF_NAME" --silent 2>/dev/null; then
+              echo "unref-pre-commit has $GITHUB_REF_NAME."
               exit 0
             fi
-            sleep 10
+            active=$(GH_TOKEN="$MIRROR_TOKEN" gh run list --repo Apakottur/unref-pre-commit --workflow mirror.yml \
+              --json status --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$active" = 0 ]; then
+              echo "Minute $minute: no $GITHUB_REF_NAME in unref-pre-commit and no mirror running, starting the mirror."
+              GH_TOKEN="$MIRROR_TOKEN" gh workflow run mirror.yml --repo Apakottur/unref-pre-commit --ref main
+            else
+              echo "Minute $minute: no $GITHUB_REF_NAME in unref-pre-commit yet, the mirror is running."
+            fi
+            sleep 60
           done
-          echo "unref-pre-commit has no $GITHUB_REF_NAME after 10 minutes."
+          echo "unref-pre-commit has no $GITHUB_REF_NAME after 25 minutes."
           exit 1
 
       # The pull request is opened against main, not the tagged commit.
