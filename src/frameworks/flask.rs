@@ -4,12 +4,18 @@
 //! decorated function is defined in, of a parameter of that function that is annotated as one, or
 //! that pytest passes a fixture to that returns or yields one, of a variable at the top level that
 //! is set to what a factory makes, and of `current_app`. It calls the methods of a `MethodView`
-//! named after HTTP methods, and the `dispatch_request` method of a `View`. Its CLI runs the
+//! named after HTTP methods, and the `dispatch_request` method of a `View`, and reads the class
+//! attributes of a `View` that configure it, such as `decorators`. Its CLI runs the
 //! commands that `cli.command` and `cli.group` of an application or a blueprint add, and those that
 //! `command` and `group` of a group add, a group being an instance of `AppGroup` or a function that
 //! such a decorator makes one. It calls a factory, a function at the top level named `create_app`
 //! or `make_app` that sets a local variable to an application, and loads a variable at the top
 //! level named `app` or `application` that is set to an application or to what a factory makes.
+//!
+//! Flask calls a function that `after_this_request` registers, after the request that it is defined
+//! in, and the receivers that the `connect` and `connect_via` decorators of its signals, such as
+//! `request_started`, connect. `copy_current_request_context` and `stream_with_context` only wrap
+//! a function, so they do not make it used.
 
 use rustc_hash::FxHashSet;
 
@@ -78,10 +84,46 @@ const FLASK_CLI_DECORATORS: [&str; 2] = ["cli.command", "cli.group"];
 /// methods that add a command or a group to a group.
 const FLASK_GROUPS: [&str; 2] = ["flask.cli.AppGroup", "flask.cli.FlaskGroup"];
 const FLASK_GROUP_DECORATORS: [&str; 2] = ["command", "group"];
+/// `after_this_request`, which registers a function to run after the current request, as `flask` gives
+/// it out, and where it is defined.
+const FLASK_AFTER_THIS_REQUEST: [&str; 2] =
+    ["flask.after_this_request", "flask.ctx.after_this_request"];
+/// The signals of Flask, as `flask` gives them out, and where they are defined, with the methods that
+/// connect the function they decorate as a receiver.
+const FLASK_SIGNALS: [&str; 20] = [
+    "flask.template_rendered",
+    "flask.before_render_template",
+    "flask.request_started",
+    "flask.request_finished",
+    "flask.request_tearing_down",
+    "flask.got_request_exception",
+    "flask.appcontext_tearing_down",
+    "flask.appcontext_pushed",
+    "flask.appcontext_popped",
+    "flask.message_flashed",
+    "flask.signals.template_rendered",
+    "flask.signals.before_render_template",
+    "flask.signals.request_started",
+    "flask.signals.request_finished",
+    "flask.signals.request_tearing_down",
+    "flask.signals.got_request_exception",
+    "flask.signals.appcontext_tearing_down",
+    "flask.signals.appcontext_pushed",
+    "flask.signals.appcontext_popped",
+    "flask.signals.message_flashed",
+];
+const FLASK_SIGNAL_DECORATORS: [&str; 2] = ["connect", "connect_via"];
 /// The class views of Flask, whose `dispatch_request` method it calls. `MethodView` inherits from
 /// `View`, and its `dispatch_request` calls its methods named after HTTP methods.
 const FLASK_VIEWS: [&str; 2] = ["flask.views.View", FLASK_METHOD_VIEW];
 const FLASK_METHOD_VIEW: &str = "flask.views.MethodView";
+/// The class attributes of a view that Flask reads when it makes the view function.
+pub(super) const FLASK_VIEW_ATTRIBUTES: [&str; 4] = [
+    "methods",
+    "provide_automatic_options",
+    "decorators",
+    "init_every_request",
+];
 
 /// The rules of Flask.
 pub(super) struct Flask {
@@ -91,6 +133,8 @@ pub(super) struct Flask {
     groups: Instances,
     /// The factories of applications that the CLI finds, by their dotted names.
     factories: FxHashSet<String>,
+    /// The signals.
+    signals: Instances,
 }
 
 impl Rules for Flask {
@@ -99,6 +143,10 @@ impl Rules for Flask {
             apps: Instances::default(),
             groups: Instances::default(),
             factories: factories(context),
+            signals: Instances {
+                variables: FLASK_SIGNALS.map(String::from).into_iter().collect(),
+                ..Instances::default()
+            },
         };
         flask.apps.locals = context.local_instances(&FLASK_APPS);
         flask
@@ -148,6 +196,13 @@ impl Rules for Flask {
                 return true;
             }
         }
+        if definition.kind == Kind::Attribute
+            && FLASK_VIEW_ATTRIBUTES.contains(&definition.name.as_str())
+            && let Some(class) = context.class_name(definition, module)
+            && context.inherits(module, class, &FLASK_VIEWS)
+        {
+            return true;
+        }
         if is_top_level(definition) {
             let name = definition.name.as_str();
             if definition.kind == Kind::Function && FLASK_FACTORIES.contains(&name) {
@@ -166,6 +221,14 @@ impl Rules for Flask {
             &self.apps,
             &[&FLASK_DECORATORS, &FLASK_CLI_DECORATORS],
         ) || context.registers(definition, module, &self.groups, &[&FLASK_GROUP_DECORATORS])
+            || (definition.kind.is_function()
+                && context.is_decorated(definition, module, &FLASK_AFTER_THIS_REQUEST))
+            || context.registers(
+                definition,
+                module,
+                &self.signals,
+                &[&FLASK_SIGNAL_DECORATORS],
+            )
     }
 }
 
@@ -225,33 +288,12 @@ impl Flask {
 
     /// Get the groups of commands of Flask's CLI: the instances of `AppGroup`, and the functions that
     /// the `cli.group` decorator of an application or a blueprint, or the `group` decorator of a group,
-    /// makes into a group, until no more are found.
+    /// makes into a group.
     fn command_groups(&self, context: &Context) -> Instances {
-        let mut groups = self.groups.clone();
-        loop {
-            let mut found = Instances::default();
-            for (module, file) in context.files.iter().enumerate() {
-                for definition in file.definitions {
-                    if definition.kind != Kind::Function
-                        || !(context.registers(definition, module, &self.apps, &[&["cli.group"]])
-                            || context.registers(definition, module, &groups, &[&["group"]]))
-                    {
-                        continue;
-                    }
-                    let name = definition.name.clone();
-                    match definition.owner {
-                        None => found.variables.insert(context.dotted_name(module, &name)),
-                        Some(function) => found.locals.insert((module, function, name)),
-                    };
-                }
-            }
-            let count = groups.variables.len() + groups.locals.len();
-            groups.variables.extend(found.variables);
-            groups.locals.extend(found.locals);
-            if groups.variables.len() + groups.locals.len() == count {
-                return groups;
-            }
-        }
+        context.groups(self.groups.clone(), |definition, module, groups| {
+            context.registers(definition, module, &self.apps, &[&["cli.group"]])
+                || context.registers(definition, module, groups, &[&["group"]])
+        })
     }
 }
 

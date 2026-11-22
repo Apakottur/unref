@@ -7,6 +7,7 @@ appcontext
 asdict
 asgi
 asname
+asyncclick
 asyncio
 attribs
 capsys
@@ -87,6 +88,7 @@ pytype
 pyvenv
 queryset
 reconstructor
+restx
 rfind
 Rozantsev
 rsplit

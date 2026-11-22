@@ -13,15 +13,18 @@
 //! variant with its name to `frameworks!` in `models.rs`, and an arm that makes it to `make`.
 
 mod celery;
+mod click;
 mod dataclasses;
 mod django;
 mod fastapi;
 mod flask;
+mod flask_restful;
 mod pydantic;
 mod pytest;
 mod rest_framework;
 mod sphinx;
 mod sqlalchemy;
+mod typer;
 mod unittest;
 
 use std::cell::OnceCell;
@@ -36,8 +39,8 @@ use crate::modules::ModuleName;
 use crate::references::{Hints, Index, References};
 use crate::resolver::Names;
 
-/// The HTTP methods, which name methods of FastAPI's applications and routers, and of Flask's
-/// `MethodView`.
+/// The HTTP methods, which name methods of FastAPI's applications and routers, of Flask's
+/// `MethodView`, and of the resources of Flask-RESTful and Flask-RESTX.
 const HTTP_METHODS: [&str; 8] = [
     "get", "put", "post", "delete", "options", "head", "patch", "trace",
 ];
@@ -130,10 +133,13 @@ fn make(framework: Framework, context: &Context, settings: &Settings) -> Box<dyn
         Framework::Sqlalchemy => Box::new(sqlalchemy::Sqlalchemy::new(context, settings)),
         Framework::Fastapi => Box::new(fastapi::Fastapi::new(context, settings)),
         Framework::Flask => Box::new(flask::Flask::new(context, settings)),
+        Framework::FlaskRestful => Box::new(flask_restful::FlaskRestful::new(context, settings)),
         Framework::Sphinx => Box::new(sphinx::Sphinx::new(context, settings)),
         Framework::Django => Box::new(django::Django::new(context, settings)),
         Framework::Drf => Box::new(rest_framework::RestFramework::new(context, settings)),
         Framework::Celery => Box::new(celery::Celery::new(context, settings)),
+        Framework::Click => Box::new(click::Click::new(context, settings)),
+        Framework::Typer => Box::new(typer::Typer::new(context, settings)),
     }
 }
 
@@ -239,9 +245,18 @@ impl<'a> Context<'a> {
         instances: &Instances,
         methods: &[&[&str]],
     ) -> bool {
-        if !definition.kind.is_function() {
-            return false;
-        }
+        definition.kind.is_function() && self.decorated_by(definition, module, instances, methods)
+    }
+
+    /// Check whether a definition, a function or a class, has a decorator that is a method of one of
+    /// the given instances, with a method of one of the given lists.
+    fn decorated_by(
+        &self,
+        definition: &Definition,
+        module: usize,
+        instances: &Instances,
+        methods: &[&[&str]],
+    ) -> bool {
         // Check the instance that a decorator is a method of, such as `app` for `app.route`. A method
         // can be that of an attribute of the instance, such as `cli.command`.
         let any_instance = |name: &str, check: &dyn Fn(&str) -> bool| {
@@ -279,6 +294,39 @@ impl<'a> Context<'a> {
             }
         }
         false
+    }
+
+    /// Get the groups of commands of a CLI, such as Click's: the given groups, with the functions that
+    /// a decorator makes into a group, as `makes_group` tells from the groups found so far, until no
+    /// more are found.
+    fn groups(
+        &self,
+        mut groups: Instances,
+        makes_group: impl Fn(&Definition, usize, &Instances) -> bool,
+    ) -> Instances {
+        loop {
+            let mut found = Instances::default();
+            for (module, file) in self.files.iter().enumerate() {
+                for definition in file.definitions {
+                    if definition.kind != Kind::Function
+                        || !makes_group(definition, module, &groups)
+                    {
+                        continue;
+                    }
+                    let name = definition.name.clone();
+                    match definition.owner {
+                        None => found.variables.insert(self.dotted_name(module, &name)),
+                        Some(function) => found.locals.insert((module, function, name)),
+                    };
+                }
+            }
+            let count = groups.variables.len() + groups.locals.len();
+            groups.variables.extend(found.variables);
+            groups.locals.extend(found.locals);
+            if groups.variables.len() + groups.locals.len() == count {
+                return groups;
+            }
+        }
     }
 
     /// Get the name in its module of the class that a definition of a module is in.

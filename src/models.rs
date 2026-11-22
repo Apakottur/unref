@@ -38,10 +38,13 @@ frameworks! {
     Sqlalchemy => "sqlalchemy",
     Fastapi => "fastapi",
     Flask => "flask",
+    FlaskRestful => "flask-restful",
     Sphinx => "sphinx",
     Django => "django",
     Drf => "rest-framework",
     Celery => "celery",
+    Click => "click",
+    Typer => "typer",
 }
 
 impl Framework {
