@@ -85,6 +85,7 @@ PYTHONPATH
 pytype
 pyvenv
 reconstructor
+restx
 rfind
 Rozantsev
 rsplit

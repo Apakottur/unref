@@ -75,7 +75,25 @@ Enabled by default: yes.
   or of such a group.
 - Module-level `create_app` and `make_app` functions that make a `Flask()`, and module-level `app` and
   `application` variables set to `Flask()` or to what such a factory makes.
-- HTTP method handlers of `MethodView` subclasses, and `dispatch_request` of `View` subclasses.
+- HTTP method handlers of `MethodView` subclasses, `dispatch_request` of `View` subclasses, and their
+  class attributes `methods`, `provide_automatic_options`, `decorators` and `init_every_request`.
+- Functions decorated with `after_this_request`, and receivers that `connect` and `connect_via` of
+  Flask's signals, such as `request_started`, connect. Not `copy_current_request_context` or
+  `stream_with_context`, which only wrap a function.
+
+## `flask-restful`
+
+Enabled by default: yes. Covers Flask-RESTful and Flask-RESTX.
+
+- HTTP method handlers of `Resource` subclasses, and their `method_decorators` and the class
+  attributes that `flask` reads of a view. With the package installed in the
+  [environment](configuration.md#python), the `flask` rules find them as a `MethodView` as well.
+- Classes with the `resource` decorator of an `Api` of Flask-RESTful, or the `route` decorator of an
+  `Api` or a `Namespace` of Flask-RESTX.
+- Functions with the `representation` decorator of an `Api`, or the `errorhandler` decorator of an
+  `Api` or a `Namespace` of Flask-RESTX, or its `documentation` decorator of an `Api`.
+- The instances are set at module level or in the same function, or a parameter annotated as one, and
+  a `Namespace` can be a module-level variable set to what `api.namespace()` makes.
 
 ## `sphinx`
 

@@ -38,6 +38,7 @@ frameworks! {
     Sqlalchemy => "sqlalchemy",
     Fastapi => "fastapi",
     Flask => "flask",
+    FlaskRestful => "flask-restful",
     Sphinx => "sphinx",
     Django => "django",
     Celery => "celery",
