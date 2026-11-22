@@ -17,6 +17,7 @@ codegen
 commitish
 commondir
 conftest
+contenttypes
 contextlib
 cpython
 dataclass
@@ -34,6 +35,7 @@ elts
 errorhandler
 fastapi
 feff
+filterset
 fnmatch
 fnmatchcase
 freqtrade
@@ -47,6 +49,7 @@ isort
 isupper
 jemalloc
 jemallocator
+kwarg
 kwonlyargs
 longpaths
 lucide
@@ -84,6 +87,7 @@ pytestmark
 PYTHONPATH
 pytype
 pyvenv
+queryset
 reconstructor
 restx
 rfind
@@ -107,6 +111,7 @@ subclassing
 Swatinem
 taplo
 Tarjan
+templatetags
 tikv
 typer
 typeshed
@@ -115,6 +120,8 @@ URLCONF
 urlpatterns
 vararg
 venv
+viewset
+viewsets
 worktrees
 wsgi
 Yossi

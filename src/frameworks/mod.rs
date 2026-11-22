@@ -21,6 +21,7 @@ mod flask;
 mod flask_restful;
 mod pydantic;
 mod pytest;
+mod rest_framework;
 mod sphinx;
 mod sqlalchemy;
 mod typer;
@@ -49,6 +50,17 @@ const CLASS_VARIABLES: [&str; 2] = ["typing.ClassVar", "typing_extensions.ClassV
 /// Check whether a set of dotted names has one of the given names.
 fn has_any(names: &FxHashSet<String>, wanted: &[&str]) -> bool {
     wanted.iter().any(|name| names.contains(*name))
+}
+
+/// Check whether a set of dotted names has a name in a package whose last part ends with one of the
+/// given ends, such as `rest_framework.fields.CharField` in `rest_framework` for `Field`.
+fn has_end(names: &FxHashSet<String>, package: &str, ends: &[&str]) -> bool {
+    names.iter().any(|name| {
+        name.strip_prefix(package)
+            .and_then(|rest| rest.strip_prefix('.'))
+            .and_then(|rest| rest.rsplit('.').next())
+            .is_some_and(|last| ends.iter().any(|end| last.ends_with(end)))
+    })
 }
 
 /// A file of a project, with its definitions, what it refers to, and its hints for frameworks.
@@ -124,6 +136,7 @@ fn make(framework: Framework, context: &Context, settings: &Settings) -> Box<dyn
         Framework::FlaskRestful => Box::new(flask_restful::FlaskRestful::new(context, settings)),
         Framework::Sphinx => Box::new(sphinx::Sphinx::new(context, settings)),
         Framework::Django => Box::new(django::Django::new(context, settings)),
+        Framework::Drf => Box::new(rest_framework::RestFramework::new(context, settings)),
         Framework::Celery => Box::new(celery::Celery::new(context, settings)),
         Framework::Click => Box::new(click::Click::new(context, settings)),
         Framework::Typer => Box::new(typer::Typer::new(context, settings)),
@@ -334,6 +347,42 @@ impl<'a> Context<'a> {
     #[inline]
     fn inherits(&self, module: usize, class: &str, bases: &[&str]) -> bool {
         self.hierarchy.inherits(module, class, bases)
+    }
+
+    /// Check whether a class of a module inherits from a class of a package whose name ends with one of
+    /// the given ends.
+    #[inline]
+    fn inherits_end(&self, module: usize, class: &str, package: &str, ends: &[&str]) -> bool {
+        has_end(&self.hierarchy.ancestors(module, class), package, ends)
+    }
+
+    /// Check whether a variable or attribute of a module is first assigned the result of calling a
+    /// class or function of a package whose name ends with one of the given ends, or a subclass of
+    /// such a class.
+    #[inline]
+    fn calls_end(
+        &self,
+        definition: &Definition,
+        module: usize,
+        package: &str,
+        ends: &[&str],
+    ) -> bool {
+        definition
+            .call
+            .as_ref()
+            .is_some_and(|call| has_end(&self.hierarchy.resolve(module, call), package, ends))
+    }
+
+    /// Get the attributes of the class that a definition of a module is in.
+    fn class_attributes(
+        &self,
+        definition: &Definition,
+        module: usize,
+    ) -> impl Iterator<Item = &'a Definition> {
+        let class = definition.class;
+        self.files[module].definitions.iter().filter(move |other| {
+            other.kind == Kind::Attribute && class.is_some() && other.class == class
+        })
     }
 
     /// Check whether an expression of a module resolves to one of the given dotted names.

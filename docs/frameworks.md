@@ -122,6 +122,18 @@ Enabled by default: yes.
 - Subclasses of `AppConfig`, with their `ready` method and attributes such as `name`.
 - Subclasses of `Migration` named `Migration`, with their attributes such as `operations` and
   `dependencies`.
+- In models: fields, such as `models.CharField(...)` or `ForeignKey(...)`, the first manager, the `Meta`
+  class with its options, and `get_absolute_url`. In managers: `get_queryset`.
+- In forms: fields, `clean_<field>` methods, the `Media` class, and the `Meta` class of a `ModelForm`.
+  The `Media` class of widgets and of the admin's classes, such as `ModelAdmin`.
+- In class-based views, subclasses of `View`: methods named by HTTP methods, such as `get` and `post`.
+- Classes named `Command` in modules of `management/commands` whose name does not start with `_`, and in
+  subclasses of `BaseCommand`: `handle`, `add_arguments` and attributes such as `help`.
+- Template tags and filters of `register.filter`, `register.simple_tag` and the like, of a module-level
+  `Library()`, and a module-level `register` variable set to one.
+- Functions with `receiver`.
+- In filter sets of `django-filter`: filters, such as `django_filters.CharFilter(...)`, and the `Meta`
+  class with its options.
 
 The settings modules are those that `os.environ.setdefault("DJANGO_SETTINGS_MODULE", ...)` names, those
 that `settings` names, and the modules they star import. A table turns the rules on:
@@ -130,6 +142,18 @@ that `settings` names, and the modules they star import. A table turns the rules
 [tool.unref.frameworks.django]
 settings = ["config/settings/production.py"]
 ```
+
+## `rest-framework`
+
+Enabled by default: yes.
+
+- In serializers: fields, such as `serializers.CharField(...)` or a nested serializer, `validate_<field>`
+  methods, the `get_<field>` method of a `SerializerMethodField`, and the `Meta` class with its options.
+- In views, subclasses of `APIView` and the generic views and viewsets: methods named by HTTP methods,
+  such as `get`, and the attributes that configure them, such as `serializer_class`, `permission_classes`
+  and `filterset_class`.
+- In viewsets: the actions `list`, `create`, `retrieve`, `update`, `partial_update` and `destroy`.
+- Anywhere: methods with `action`.
 
 ## `celery`
 
