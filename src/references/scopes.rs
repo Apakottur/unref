@@ -3,7 +3,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{Binding, ImportedRead, Index, Read, Receiver, Walker};
+use super::{Binding, ImportedRead, Index, ModulePattern, Read, Receiver, Walker};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ScopeKind {
@@ -54,6 +54,10 @@ pub(super) struct Scope {
     /// The variables assigned the result of a call, with the dotted names of what they call as
     /// written.
     pub(super) calls: FxHashMap<String, Vec<String>>,
+    /// The names that are assigned a module imported by a string, which are read as imported names.
+    pub(super) string_imports: FxHashSet<String>,
+    /// The names that are assigned some module whose name matches a pattern, with the pattern.
+    pub(super) module_patterns: FxHashMap<String, ModulePattern>,
     /// The scope a comprehension reads from when a name is not local to it.
     pub(super) comprehension_parent: Option<usize>,
     /// The scope a function or lambda reads from when a name is not local to it.
@@ -83,6 +87,8 @@ impl Scope {
             function: None,
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
+            string_imports: FxHashSet::default(),
+            module_patterns: FxHashMap::default(),
             comprehension_parent: None,
             function_parent: None,
             outer: None,
@@ -216,17 +222,38 @@ impl Walker<'_, '_> {
             .zip(scope.class);
         let mut passed = Vec::new();
         for read in reads {
-            if let Some(binding) = self.scopes[inner].imports.get(read.root.as_str()) {
+            let root = read.root.as_str();
+            if let Some(pattern) = self.scopes[inner].module_patterns.get(root)
+                && let Some(first) = read.attributes.first()
+            {
+                self.references
+                    .pattern_reads
+                    .insert((read.owner, pattern.clone(), first.clone()));
+            }
+            if let Some(binding) = self.scopes[inner].imports.get(root) {
                 // A plain read of a name that is not local, at the module or declared `global`, is also
-                // a read of the name of the enclosing scope, without reading the object.
-                if read.attributes.is_empty() && !local_names.contains(read.root.as_str()) {
+                // a read of the name of the enclosing scope, without reading the object. So is any
+                // read of a variable of the module that is assigned a module imported by a string.
+                if !local_names.contains(root)
+                    && (read.attributes.is_empty()
+                        || self.scopes[inner].string_imports.contains(root))
+                {
                     passed.push(Read {
                         owner: read.owner,
                         root: read.root.clone(),
                         attributes: Vec::new(),
                         reads_object: false,
                         called: None,
+                        passed: false,
                     });
+                }
+                // The module that a string imports can be replaced in `sys.modules`, as tests do, so
+                // its names are also read from any object.
+                if self.scopes[inner].string_imports.contains(root) {
+                    let names = read.attributes.iter().chain(&read.called).cloned();
+                    self.references
+                        .attributes
+                        .extend(names.map(|name| (read.owner, name)));
                 }
                 self.references.imported_reads.insert(ImportedRead {
                     owner: read.owner,
@@ -234,6 +261,7 @@ impl Walker<'_, '_> {
                     attributes: read.attributes,
                     reads_object: read.reads_object,
                     called: read.called,
+                    passed: read.passed,
                 });
             } else if local_names.contains(read.root.as_str()) {
                 for &index in defined.get(read.root.as_str()).into_iter().flatten() {

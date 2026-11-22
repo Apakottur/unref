@@ -2,7 +2,7 @@
 
 use ruff_python_ast::name::Name;
 use ruff_python_ast::visitor::{Visitor, walk_expr};
-use ruff_python_ast::{self as ast, Expr};
+use ruff_python_ast::{self as ast, Expr, ExprContext};
 
 use super::scopes::ScopeKind;
 use super::type_strings::type_arguments;
@@ -10,6 +10,17 @@ use super::{Index, Read, Receiver, Walker};
 
 /// The methods of a mapping that read a key, given as their first argument.
 const KEY_METHODS: [&str; 3] = ["get", "pop", "setdefault"];
+/// The last names of the functions that change or check an object passed to them, rather than pass
+/// it on: `setattr`, `monkeypatch.setattr`, `mock.patch.object`, `importlib.reload` and the like.
+const PATCHERS: [&str; 7] = [
+    "setattr",
+    "delattr",
+    "getattr",
+    "hasattr",
+    "object",
+    "reload",
+    "isinstance",
+];
 /// The functions that read an attribute named by their second argument, as `value.name` does.
 const ATTRIBUTE_READERS: [&str; 2] = ["getattr", "hasattr"];
 
@@ -22,7 +33,13 @@ impl<'a> Walker<'_, '_> {
     /// that read is passed on.
     ///
     /// `called` is the attribute read from the result of calling the chain, as in `Class().name`.
-    pub(super) fn add_read(&mut self, root: &Name, attributes: Vec<Name>, called: Option<Name>) {
+    pub(super) fn add_read(
+        &mut self,
+        root: &Name,
+        attributes: Vec<Name>,
+        called: Option<Name>,
+        passed: bool,
+    ) {
         let scope = &self.scopes[self.scope];
         if scope.kind == ScopeKind::Class
             && scope.bound.contains(root.as_str())
@@ -43,6 +60,7 @@ impl<'a> Walker<'_, '_> {
             attributes,
             reads_object: !self.in_signature,
             called,
+            passed,
         };
         let scope = self.scope;
         self.scopes[scope].reads.push(read);
@@ -50,10 +68,17 @@ impl<'a> Walker<'_, '_> {
 
     /// Add the read of a chain of attributes of an expression, such as `name` and `other` of
     /// `value.name.other`, and what the expression itself reads.
-    pub(super) fn visit_attributes(&mut self, base: &'a Expr, mut attributes: Vec<Name>) {
+    ///
+    /// `passed` is whether the value of the chain is passed on, as for [`Read`].
+    pub(super) fn visit_attributes(
+        &mut self,
+        base: &'a Expr,
+        mut attributes: Vec<Name>,
+        passed: bool,
+    ) {
         match base {
             // Whether the chain starts with an imported name is known when the scope ends.
-            Expr::Name(name) => self.add_read(&name.id, attributes, None),
+            Expr::Name(name) => self.add_read(&name.id, attributes, None, passed),
             Expr::Call(call) => {
                 let first = attributes.remove(0);
                 self.add_attributes(attributes);
@@ -102,7 +127,23 @@ impl<'a> Walker<'_, '_> {
             attributes: Vec::new(),
             reads_object: true,
             called: None,
+            passed: false,
         });
+    }
+
+    /// Walk an expression whose value is passed on: given to a function, assigned, put in a container,
+    /// or returned. A name or a chain of attributes is read as passed on.
+    pub(super) fn visit_passed(&mut self, value: &'a Expr) {
+        match value {
+            Expr::Name(name) if name.ctx == ExprContext::Load => {
+                self.add_read(&name.id, Vec::new(), None, true);
+            }
+            Expr::Attribute(attribute) if attribute.ctx == ExprContext::Load => {
+                let (base, attributes) = attribute_chain(attribute);
+                self.visit_attributes(base, attributes, true);
+            }
+            _ => self.visit_expr(value),
+        }
     }
 
     /// Add the names that are read as attributes of an object whose class is not known.
@@ -135,14 +176,14 @@ impl<'a> Walker<'_, '_> {
             && call.arguments.keywords.is_empty()
             && let [value, Expr::StringLiteral(literal), rest @ ..] = &*call.arguments.args
         {
-            self.add_read(&func.id, Vec::new(), None);
+            self.add_read(&func.id, Vec::new(), None, false);
             let (base, mut attributes) = match value {
                 Expr::Attribute(attribute) => attribute_chain(attribute),
                 value => (value, Vec::new()),
             };
             attributes.push(Name::new(literal.value.to_str()));
             attributes.extend(called);
-            self.visit_attributes(base, attributes);
+            self.visit_attributes(base, attributes, false);
             for argument in rest {
                 self.visit_expr(argument);
             }
@@ -155,12 +196,23 @@ impl<'a> Walker<'_, '_> {
             func => (func, Vec::new()),
         };
         if let Expr::Name(name) = base {
-            self.add_read(&name.id, attributes, called);
+            self.add_read(&name.id, attributes, called, false);
         } else {
             self.add_attributes(called);
             self.visit_expr(&call.func);
         }
-        self.visit_arguments(&call.arguments);
+        if PATCHERS.contains(&last_name(&call.func)) {
+            self.visit_arguments(&call.arguments);
+        } else {
+            let arguments = &call.arguments;
+            let values = arguments
+                .args
+                .iter()
+                .chain(arguments.keywords.iter().map(|keyword| &keyword.value));
+            for value in values {
+                self.visit_passed(value);
+            }
+        }
         for argument in type_arguments(call) {
             self.visit_type_strings(argument);
         }
@@ -188,6 +240,16 @@ impl<'a> Walker<'_, '_> {
             _ => false,
         };
         plain.then_some(class)
+    }
+}
+
+/// Get the last name of what a call calls, such as `setattr` of `monkeypatch.setattr`, or an empty
+/// string.
+fn last_name(func: &Expr) -> &str {
+    match func {
+        Expr::Name(name) => name.id.as_str(),
+        Expr::Attribute(attribute) => attribute.attr.as_str(),
+        _ => "",
     }
 }
 
