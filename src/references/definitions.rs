@@ -71,7 +71,7 @@ impl<'a> Walker<'_, '_> {
             }
         }
         if targets.iter().any(is_all) {
-            self.add_all_names(string_literals(value));
+            self.add_all_names(value.map_or_default(concatenated_string_literals));
         }
         // The value is evaluated before the targets are bound, so in a class body, `size = size + 1`
         // reads the name around the class.
@@ -305,6 +305,20 @@ pub(super) fn all_call_names(expr: &Expr) -> Option<Vec<String>> {
         ("extend", argument) => Some(string_literals(Some(argument))),
         ("append", Expr::StringLiteral(literal)) => Some(vec![literal.value.to_str().to_string()]),
         _ => None,
+    }
+}
+
+/// Get the string literals of the list or tuple literals that an assignment to `__all__`
+/// concatenates, as in `__all__ = base.__all__ + ["name"]`. Other operands, such as `__all__`
+/// itself or the `__all__` of another module, have none.
+fn concatenated_string_literals(value: &Expr) -> Vec<String> {
+    match value {
+        Expr::BinOp(binary) if binary.op == ast::Operator::Add => {
+            let mut names = concatenated_string_literals(&binary.left);
+            names.extend(concatenated_string_literals(&binary.right));
+            names
+        }
+        _ => string_literals(Some(value)),
     }
 }
 
