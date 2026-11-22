@@ -23,6 +23,7 @@ cpython
 dataclass
 dataclasses
 deadcode
+delattr
 delenv
 Deque
 direnv
@@ -39,12 +40,14 @@ filterset
 fnmatch
 fnmatchcase
 freqtrade
+fromlist
 getattr
 gitdir
 hasattr
 httpx
 ignorelist
 isenabled
+isinstance
 isort
 isupper
 jemalloc
@@ -63,6 +66,7 @@ metafunc
 mimalloc
 mkdocstrings
 modifyitems
+monkeypatch
 musllinux
 mypy
 mysite
@@ -97,6 +101,7 @@ rustc
 rustup
 saleor
 sdist
+setattr
 setdefault
 showlocals
 shpyx

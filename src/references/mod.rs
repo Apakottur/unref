@@ -1,6 +1,7 @@
 //! What a Python module defines and refers to, found by walking its syntax tree once.
 
 mod definitions;
+mod dynamic_imports;
 mod hints;
 mod imports;
 mod nested;
@@ -27,7 +28,8 @@ use reads::attribute_chain;
 use scopes::{Scope, ScopeKind, Target};
 
 pub(crate) use types::{
-    Binding, Hints, Import, ImportedRead, Index, Owner, Read, Receiver, References, WholeRead,
+    Binding, Hints, Import, ImportedRead, Index, ModulePattern, Owner, Read, Receiver, References,
+    WholeRead,
 };
 
 /// Find what a Python module defines and refers to.
@@ -147,7 +149,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 value: Some(value), ..
             }) => {
                 self.add_returned(value);
-                walk_stmt(self, stmt);
+                self.visit_passed(value);
             }
             Stmt::TypeAlias(alias) => {
                 // Its value is evaluated when it is used, but what it reads is still read.
@@ -173,7 +175,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
         match expr {
             Expr::Name(name) => {
                 if name.ctx == ExprContext::Load {
-                    self.add_read(&name.id, Vec::new(), None);
+                    self.add_read(&name.id, Vec::new(), None, false);
                 } else {
                     self.bind(name.id.as_str());
                 }
@@ -184,7 +186,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                     return;
                 }
                 let (base, attributes) = attribute_chain(attribute);
-                self.visit_attributes(base, attributes);
+                self.visit_attributes(base, attributes, false);
             }
             Expr::Subscript(subscript) => {
                 // A read of a string key (`value["name"]`).
@@ -202,7 +204,21 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                 value: Some(value), ..
             }) => {
                 self.add_returned(value);
-                walk_expr(self, expr);
+                self.visit_passed(value);
+            }
+            // The elements of a container are passed on.
+            Expr::List(ast::ExprList { elts, ctx, .. })
+            | Expr::Tuple(ast::ExprTuple { elts, ctx, .. })
+                if *ctx == ExprContext::Load =>
+            {
+                for element in elts {
+                    self.visit_passed(element);
+                }
+            }
+            Expr::Set(ast::ExprSet { elts, .. }) => {
+                for element in elts {
+                    self.visit_passed(element);
+                }
             }
             Expr::Dict(dict) => {
                 // `{**value}` reads every key of the value.
@@ -210,7 +226,12 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                     let values = self.value_calls(&item.value);
                     self.add_whole_read(values, None);
                 }
-                walk_expr(self, expr);
+                for item in dict {
+                    if let Some(key) = &item.key {
+                        self.visit_expr(key);
+                    }
+                    self.visit_passed(&item.value);
+                }
             }
             Expr::Compare(compare) => {
                 // A read of a string key by a membership test (`"name" in value`).
@@ -257,7 +278,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             Expr::Named(named) => {
                 // The target of a walrus is assigned, as by an assignment.
                 self.define_target(&named.target, false, None, None, None, None);
-                self.visit_expr(&named.value);
+                self.visit_passed(&named.value);
                 if let Expr::Name(name) = &*named.target {
                     let mut binder = self.binder;
                     while let Some(enclosing) = self.scopes[binder].enclosing {

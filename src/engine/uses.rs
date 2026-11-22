@@ -20,6 +20,12 @@ pub(super) struct Uses {
     /// The objects of the modules of the project that the code reads, each with its module and its
     /// name in the module followed by the attributes that are read from it, in order.
     pub(super) objects: FxHashSet<(usize, Vec<Name>)>,
+    /// The names that the code reads from some module whose name matches a pattern, each with the
+    /// literal parts of the pattern, the first resolved, as `ModulePattern` holds them.
+    pub(super) patterns: FxHashSet<(Vec<String>, Name)>,
+    /// The modules of the project that the code reads as objects, other than to read a name from them,
+    /// such as by passing them to a function. Any name read from an object can be read from them.
+    pub(super) escaped: FxHashSet<usize>,
     /// The modules that the code star imports.
     pub(super) stars: FxHashSet<usize>,
     /// The functions and classes that are local variables of a function, the members of a class read
@@ -107,6 +113,12 @@ pub(super) fn find_uses(project: &Project, classes: &Classes) -> AllUses {
             };
             let mut parts: Vec<Name> = imported.split('.').map(Name::new).collect();
             parts.extend(read.attributes.iter().cloned());
+            // A module of the project read as an object, other than to read a name from it.
+            if read.passed {
+                owner_uses
+                    .escaped
+                    .extend(passed_modules(project, &parts).iter().copied());
+            }
             if read.reads_object || !read.attributes.is_empty() {
                 let objects = imported_objects(project, resolver, &parts.join("."));
                 if !read.attributes.is_empty() {
@@ -158,6 +170,15 @@ pub(super) fn find_uses(project: &Project, classes: &Classes) -> AllUses {
             }
         }
 
+        for (owner, pattern, name) in &references.pattern_reads {
+            let mut parts = pattern.parts.clone();
+            if let Some(first) = project.names[file].resolve(Some(&parts[0]), pattern.level) {
+                parts[0] = first;
+                uses.entry(project.code(file, *owner))
+                    .patterns
+                    .insert((parts, name.clone()));
+            }
+        }
         for (owner, name) in &references.attributes {
             uses.entry(project.code(file, *owner))
                 .attributes
@@ -224,6 +245,37 @@ pub(super) fn find_uses(project: &Project, classes: &Classes) -> AllUses {
         }
     }
     uses
+}
+
+/// Find the modules of the project that a dotted name, as imported, stands for. A name of a package
+/// stands for its module unless the package binds the name to something else, as
+/// `from .directive import directive` does.
+fn passed_modules<'a>(project: &'a Project, parts: &[Name]) -> &'a [usize] {
+    let full = parts.join(".");
+    let Some(files) = project.files_by_name.get(&full) else {
+        return &[];
+    };
+    let Some((last, package)) = parts.split_last() else {
+        return &[];
+    };
+    let package = package.join(".");
+    for &file in project.files_by_name.get(&package).into_iter().flatten() {
+        let references = &project.facts[file].references;
+        let rebound = references
+            .bindings
+            .get(last.as_str())
+            .is_some_and(|binding| {
+                imported_name(&project.names[file], binding).is_none_or(|name| name != full)
+            });
+        let defined = project
+            .file_definitions(file)
+            .iter()
+            .any(|definition| definition.class.is_none() && definition.name == last.as_str());
+        if rebound || defined {
+            return &[];
+        }
+    }
+    files
 }
 
 /// Find the objects of the modules of the project that a dotted name stands for, through the modules

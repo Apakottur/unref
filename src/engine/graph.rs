@@ -3,6 +3,8 @@
 use ruff_python_ast::name::Name;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::references::ModulePattern;
+
 use super::{AllUses, Classes, CodeId, DefinitionId, Project, Uses};
 
 /// The definitions of a project and what the code of each module and function uses.
@@ -16,6 +18,11 @@ pub(super) struct Graph<'a> {
     /// names.
     enums: FxHashMap<(usize, String), (Vec<DefinitionId>, FxHashSet<String>)>,
     by_name: FxHashMap<(usize, Name), Vec<DefinitionId>>,
+    /// The names of each module, as `by_name` holds them, for the modules that are read as objects.
+    module_names: FxHashMap<usize, Vec<(Name, DefinitionId)>>,
+    /// The definitions that `by_name` holds, by their name only, for the names read from a module
+    /// that is imported by a string.
+    module_level: FxHashMap<Name, Vec<DefinitionId>>,
     by_attribute: FxHashMap<String, Vec<DefinitionId>>,
     by_key: FxHashMap<String, Vec<DefinitionId>>,
     public: FxHashMap<usize, Vec<DefinitionId>>,
@@ -39,6 +46,10 @@ struct Seen {
     keys: FxHashSet<String>,
     objects: FxHashSet<(usize, Vec<Name>)>,
     stars: FxHashSet<usize>,
+    patterns: FxHashSet<(Vec<String>, Name)>,
+    escaped: FxHashSet<usize>,
+    /// The names of the modules read as objects, which any read of an attribute can stand for.
+    loose: FxHashMap<Name, Vec<DefinitionId>>,
 }
 
 impl<'a> Graph<'a> {
@@ -98,11 +109,21 @@ impl<'a> Graph<'a> {
             })
             .collect();
 
+        let mut module_names: FxHashMap<usize, Vec<(Name, DefinitionId)>> = FxHashMap::default();
+        let mut module_level: FxHashMap<Name, Vec<DefinitionId>> = FxHashMap::default();
+        for ((file, name), ids) in &by_name {
+            let names = module_names.entry(*file).or_default();
+            names.extend(ids.iter().map(|&id| (name.clone(), id)));
+            module_level.entry(name.clone()).or_default().extend(ids);
+        }
+
         Self {
             project,
             uses,
             enums,
             by_name,
+            module_names,
+            module_level,
             by_attribute,
             by_key,
             public,
@@ -190,6 +211,36 @@ impl<'a> Graph<'a> {
                         .flatten()
                         .copied(),
                 );
+                let loose = &seen.as_deref().unwrap_or(&self.seen).loose;
+                found.extend(loose.get(attribute).into_iter().flatten().copied());
+            }
+        }
+        for read in &uses.patterns {
+            if seen
+                .as_mut()
+                .is_none_or(|seen| seen.patterns.insert(read.clone()))
+            {
+                found.extend(self.pattern_read(&read.0, &read.1));
+            }
+        }
+        for &module in &uses.escaped {
+            let names = self.module_names.get(&module).into_iter().flatten();
+            match seen.as_mut() {
+                Some(seen) => {
+                    if seen.escaped.insert(module) {
+                        for (name, id) in names {
+                            if seen.attributes.contains(name) {
+                                found.extend([*id]);
+                            }
+                            seen.loose.entry(name.clone()).or_default().push(*id);
+                        }
+                    }
+                }
+                None => found.extend(
+                    names
+                        .filter(|(name, _)| self.seen.attributes.contains(name))
+                        .map(|(_, id)| *id),
+                ),
             }
         }
         for key in &uses.keys {
@@ -214,6 +265,16 @@ impl<'a> Graph<'a> {
             }
         }
         found.extend(uses.definitions.iter().copied());
+    }
+
+    /// Find the definitions of a name in the modules whose names match a pattern, given by its literal
+    /// parts as `ModulePattern` holds them.
+    fn pattern_read(&self, parts: &[String], name: &Name) -> impl Iterator<Item = DefinitionId> {
+        let ids = self.module_level.get(name).into_iter().flatten();
+        ids.copied().filter(move |&id| {
+            let module = &self.project.names[self.project.definition_files[id]].name;
+            ModulePattern::matches(parts, module)
+        })
     }
 
     /// Find the members of the enums that an object read uses as a whole.

@@ -9,9 +9,10 @@ use crate::definitions::{
     Definition, Kind, LOCALS, Unwrap, annotation_name, decorator_names, dotted_name,
 };
 
+use super::dynamic_imports::StringImport;
 use super::scopes::{Scope, ScopeKind};
 use super::type_strings::typing_name;
-use super::{Index, Read, Walker};
+use super::{Binding, Index, Read, Walker};
 
 impl<'a> Walker<'_, '_> {
     /// Add the names listed in `__all__`. Only the `__all__` of the module, at its top level or
@@ -28,6 +29,7 @@ impl<'a> Walker<'_, '_> {
                 attributes: Vec::new(),
                 reads_object: true,
                 called: None,
+                passed: false,
             });
         }
     }
@@ -76,7 +78,11 @@ impl<'a> Walker<'_, '_> {
         // The value is evaluated before the targets are bound, so in a class body, `size = size + 1`
         // reads the name around the class.
         if let Some(value) = value {
-            self.visit_expr(value);
+            if defines {
+                self.visit_passed(value);
+            } else {
+                self.visit_expr(value);
+            }
         }
         if let Some(annotation) = annotation {
             self.visit_expr(annotation);
@@ -87,6 +93,30 @@ impl<'a> Walker<'_, '_> {
                 && name.is_some_and(|name| typing_name(&name) == Some("TypeAlias"))
             {
                 self.visit_type_strings(value);
+            }
+        }
+        // A name assigned a module imported by a string stands for it, as if it were imported.
+        if let ([Expr::Name(target)], Some(value)) = (targets, value)
+            && defines
+        {
+            let binder = self.binder;
+            match self.string_import(value) {
+                Some(StringImport::Exact(module, level)) => {
+                    let binding = Binding {
+                        module: Some(module),
+                        level,
+                        name: None,
+                    };
+                    let name = target.id.to_string();
+                    self.scopes[binder].string_imports.insert(name.clone());
+                    self.bind_imports(std::iter::once((name, binding)).collect());
+                }
+                Some(StringImport::Pattern(pattern)) => {
+                    self.scopes[binder]
+                        .module_patterns
+                        .insert(target.id.to_string(), pattern);
+                }
+                None => {}
             }
         }
         for target in targets {

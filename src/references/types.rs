@@ -47,6 +47,8 @@ pub(crate) struct Read {
     pub reads_object: bool,
     /// The attribute read from the result of calling the chain, such as `name` in `Class().name`.
     pub called: Option<Name>,
+    /// Whether the object is passed on: given to a function, assigned, put in a container, or returned.
+    pub passed: bool,
 }
 
 /// A read of an imported name, or of a chain of attributes that starts with one.
@@ -57,6 +59,7 @@ pub(crate) struct ImportedRead {
     pub attributes: Vec<Name>,
     pub reads_object: bool,
     pub called: Option<Name>,
+    pub passed: bool,
 }
 
 /// The object that a member is read from, when the class that it is in is plain, with the class.
@@ -78,6 +81,43 @@ pub(crate) struct Import {
     pub level: u32,
     /// The name, `*` for a star import.
     pub name: String,
+}
+
+/// The modules that a string with values in it can name, as `import_module(f"plugins.{name}")` does:
+/// those whose names hold its literal parts in order, with any text between them. The first part is
+/// written as for an `import` statement, with the number of leading dots. There are always at least two
+/// parts, the first and the last of which can be empty.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ModulePattern {
+    pub parts: Vec<String>,
+    pub level: u32,
+}
+
+impl ModulePattern {
+    /// The pattern of any module.
+    pub(crate) fn any() -> Self {
+        Self {
+            parts: vec![String::new(), String::new()],
+            level: 0,
+        }
+    }
+
+    /// Check whether the name of a module matches the pattern, once its first part is resolved.
+    pub(crate) fn matches(parts: &[String], module: &str) -> bool {
+        let [first, middle @ .., last] = parts else {
+            return false;
+        };
+        let Some(mut rest) = module.strip_prefix(first.as_str()) else {
+            return false;
+        };
+        for part in middle {
+            let Some(index) = rest.find(part.as_str()) else {
+                return false;
+            };
+            rest = &rest[index + part.len()..];
+        }
+        rest.ends_with(last.as_str())
+    }
 }
 
 /// A value that is read as a whole, which reads every key of a TypedDict.
@@ -121,6 +161,10 @@ pub(crate) struct References {
     /// `for key in value`, `value.items()` or `f(value)`, when the value is the result of a call, or a
     /// local variable that is assigned one.
     pub whole_reads: FxHashSet<WholeRead>,
+    /// The names that are read as attributes of a module imported by a string with values in it, as
+    /// `module.name` after `module = import_module(f"plugins.{name}")`, each with the modules that it
+    /// can be read from.
+    pub pattern_reads: FxHashSet<(Owner, ModulePattern, Name)>,
     /// The names that are imported from another module. A star import has the name `*`.
     pub imports: FxHashSet<Import>,
     /// Whether the module defines `__all__`.
