@@ -134,11 +134,15 @@ jobs:
       # Required to start CI on the pull request, as one opened with this token does not.
       actions: write
     steps:
+      # The mirror of unref-pre-commit runs `uv lock`, which reads the simple index, not the JSON API. The index is
+      # cached apart from the JSON API and can name the release later, so the step waits for the index as uv reads it.
       - name: Wait for the release on PyPI
         run: |
           version="${GITHUB_REF_NAME#v}"
           for _ in $(seq 60); do
-            if curl --fail --silent --show-error --output /dev/null "https://pypi.org/pypi/unref/$version/json"; then
+            if curl --fail --silent --show-error --header "Accept: application/vnd.pypi.simple.v1+json" \
+              "https://pypi.org/simple/unref/" \
+              | jq --exit-status --arg version "$version" '.versions | index($version)' >/dev/null; then
               exit 0
             fi
             sleep 10
