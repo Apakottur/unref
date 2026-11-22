@@ -25,7 +25,7 @@ import typer
 
 _CPYTHON_TAG = "v3.15.0"
 _TOOLS = {
-    "unref": ("unref==0.5.0", []),
+    "unref": ("unref==0.5.1", []),
     "vulture": ("vulture==2.16", ["."]),
     "deadcode": ("deadcode==2.6.3", ["."]),
     "skylos": ("skylos==5.6.0", [".", "--no-upload", "--no-cache"]),

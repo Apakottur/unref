@@ -49,7 +49,7 @@ repos:
       - id: ruff-check
       - id: ruff-format
   - repo: https://github.com/Apakottur/unref-pre-commit
-    rev: v0.5.0
+    rev: v0.5.1
     hooks:
       - id: unref
 ```
