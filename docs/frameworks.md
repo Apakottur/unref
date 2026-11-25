@@ -59,8 +59,10 @@ Enabled by default: yes.
 
 Enabled by default: yes.
 
-- Functions and methods with a route or event decorator, such as `app.get` or `router.websocket`, of a
-  `FastAPI()` or `APIRouter()`, or an instance of a subclass, set at module level or in the same function.
+- Functions and methods with a route or event decorator, such as `app.get`, `router.websocket`,
+  Starlette's `app.route` or `app.webhooks.post`, of a `FastAPI()` or `APIRouter()`, or an instance of a
+  subclass, set at module level or in the same function, also as one branch of `a if test else b` or
+  through another variable.
 
 ## `flask`
 

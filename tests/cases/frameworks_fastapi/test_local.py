@@ -40,6 +40,48 @@ def test_local_router():
     return router, admin, Health
 
 
+# Starlette's decorators, which FastAPI's applications and routers have, and the webhooks of an
+# application.
+def test_starlette_and_webhooks():
+    app = FastAPI()
+
+    @app.route("/plain")
+    def plain(request):
+        return None
+
+    @app.websocket_route("/live")
+    async def live(websocket):
+        return None
+
+    @app.webhooks.post("new-subscription")
+    def new_subscription(body):
+        return None
+
+    return app
+
+
+# A router that is one of several values, or another variable.
+def test_chosen_router(nested):
+    app = FastAPI()
+    router = fastapi.APIRouter() if nested else app.router
+    reader = app if nested else router
+    other = Registry() if nested else None
+
+    @router.get("/items")
+    def chosen():
+        return []
+
+    @reader.middleware("http")
+    async def aliased(request, call_next):
+        return await call_next(request)
+
+    @other.get("/")
+    def not_chosen():  # expect: 9 [unused-function]
+        return None
+
+    return app
+
+
 # A local variable of the same name that is not an application, in another function.
 class Registry:
     def get(self, path):

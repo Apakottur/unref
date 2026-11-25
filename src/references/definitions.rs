@@ -71,6 +71,22 @@ impl<'a> Walker<'_, '_> {
                     wrapped_by.as_ref(),
                 );
             }
+            // A variable of a function that is assigned one of several values, as `a if test else b`,
+            // or another variable, is assigned what each of them is assigned the result of calling.
+            if call.is_none()
+                && let ([Expr::Name(target)], Some(value)) = (targets, value)
+                && self.scopes[self.binder].kind == ScopeKind::Function
+            {
+                let calls = self.value_calls(value);
+                if !calls.is_empty() {
+                    let binder = self.binder;
+                    self.scopes[binder]
+                        .calls
+                        .entry(target.id.to_string())
+                        .or_default()
+                        .extend(calls);
+                }
+            }
         }
         if targets.iter().any(is_all) {
             self.add_all_names(value.map_or_default(concatenated_string_literals));

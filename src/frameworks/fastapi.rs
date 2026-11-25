@@ -16,13 +16,27 @@ const FASTAPI_ROUTERS: [&str; 4] = [
     "fastapi.routing.APIRouter",
 ];
 /// The methods of an application or a router that register the function they decorate, besides
-/// those named after HTTP methods.
-const FASTAPI_DECORATORS: [&str; 5] = [
+/// those named after HTTP methods. `route` and `websocket_route` are Starlette's.
+const FASTAPI_DECORATORS: [&str; 7] = [
     "api_route",
     "websocket",
     "on_event",
     "middleware",
     "exception_handler",
+    "route",
+    "websocket_route",
+];
+/// The methods of the webhooks of an application, as `app.webhooks.post`, which register the
+/// function they decorate as the documentation of a webhook.
+const FASTAPI_WEBHOOKS: [&str; 8] = [
+    "webhooks.get",
+    "webhooks.put",
+    "webhooks.post",
+    "webhooks.delete",
+    "webhooks.options",
+    "webhooks.head",
+    "webhooks.patch",
+    "webhooks.trace",
 ];
 
 /// The rules of FastAPI.
@@ -60,7 +74,7 @@ impl Rules for Fastapi {
             definition,
             module,
             &self.routers,
-            &[&HTTP_METHODS, &FASTAPI_DECORATORS],
+            &[&HTTP_METHODS, &FASTAPI_DECORATORS, &FASTAPI_WEBHOOKS],
         )
     }
 }
