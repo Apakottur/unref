@@ -54,6 +54,9 @@ pub(super) struct Scope {
     /// The variables assigned the result of a call, with the dotted names of what they call as
     /// written.
     pub(super) calls: FxHashMap<String, Vec<String>>,
+    /// In a function, the parameters and local variables that are annotated, with the dotted names of
+    /// the annotation as written, one for each side of a union.
+    pub(super) annotations: FxHashMap<String, Vec<String>>,
     /// The names that are assigned a module imported by a string, which are read as imported names.
     pub(super) string_imports: FxHashSet<String>,
     /// The names that are assigned some module whose name matches a pattern, with the pattern.
@@ -87,6 +90,7 @@ impl Scope {
             function: None,
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
+            annotations: FxHashMap::default(),
             string_imports: FxHashSet::default(),
             module_patterns: FxHashMap::default(),
             comprehension_parent: None,
@@ -142,6 +146,24 @@ impl Walker<'_, '_> {
             let found = &self.scopes[index];
             if found.bound.contains(name) {
                 return found.calls.get(name).cloned().unwrap_or_default();
+            }
+            scope = found.comprehension_parent;
+        }
+        Vec::new()
+    }
+
+    /// Get the dotted names of the annotation of a parameter or local variable, as they are written,
+    /// looking through enclosing scopes for a comprehension.
+    pub(super) fn variable_annotations(&self, name: &str) -> Vec<String> {
+        let mut scope = Some(self.scope);
+        while let Some(index) = scope {
+            let found = &self.scopes[index];
+            // A parameter is not bound in the scope of the body, but its annotation is kept there.
+            if let Some(names) = found.annotations.get(name) {
+                return names.clone();
+            }
+            if found.bound.contains(name) {
+                return Vec::new();
             }
             scope = found.comprehension_parent;
         }

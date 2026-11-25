@@ -1,6 +1,7 @@
 import json
 import logging
 from json import dumps
+import typing
 from typing import TypedDict
 
 import helpers
@@ -48,6 +49,43 @@ class Logged(TypedDict):
 
 class Stringified(TypedDict):
     stringified: int
+
+
+# So is a parameter or local variable annotated with the TypedDict, also as one side of a union.
+class Parameter(TypedDict):
+    parameter: int
+
+
+class Local(TypedDict):
+    local: int
+
+
+class Optional(TypedDict):
+    optional: int
+
+
+class Quoted(TypedDict):
+    quoted: int
+
+
+# An annotated value that is only read by a key reads no other key.
+class Keyed(TypedDict):
+    keyed: int
+    other: int  # expect: 5 [unused-attribute]
+
+
+def annotated(parameter: Parameter | None, optional: typing.Optional[Optional], quoted: "Quoted") -> None:
+    local: Local = make_local()
+    keyed: Keyed = make_keyed()
+    {**parameter}, dict(local), list(optional), {**quoted}, keyed["keyed"]
+
+
+def make_local():
+    return {}
+
+
+def make_keyed():
+    return {}
 
 
 # Passing the value to a function of the project or to a method of another object reads no key.
@@ -111,3 +149,4 @@ def unused() -> None:  # expect: 5 [unused-function]
 
 
 read(Client())
+annotated(None, None, {})
