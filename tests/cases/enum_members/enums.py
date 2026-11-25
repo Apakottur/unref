@@ -86,9 +86,31 @@ def paint(level: Level) -> Level:
     return Level.LOW
 
 
+# A decorator can read the signature of a function, as FastAPI reads the members of an enum that
+# annotates a parameter of a route, so the type hint of a parameter of a decorated function reads them
+# all. The type hint of its return still reads none.
+class Model(Enum):
+    FAST = "fast"
+    ACCURATE = "accurate"
+
+
+class Result(Enum):
+    DONE = 1
+    FAILED = 2  # expect: 5 [unused-attribute]
+
+
+def route(function):
+    return function
+
+
+@route
+def predict(model: Model) -> Result:
+    return Result.DONE
+
+
 def unused():  # expect: 5 [unused-function]
     return list(Unit)
 
 
 Status.ACTIVE, Color(1), list(Size), Mode["READ"], Point, Priority.parse("low"), Weekday.__members__
-paint, Unit.METER, Plain.RED
+paint, predict, Unit.METER, Plain.RED
