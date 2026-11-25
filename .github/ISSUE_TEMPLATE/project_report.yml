@@ -1,0 +1,40 @@
+name: Project report
+description: Wrong or missed findings in your project, without a small reproduction.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        No need to reduce the problem: we do that. For a public project, a link is enough.
+
+  - type: input
+    id: project
+    attributes:
+      label: Project
+      description: A link to the project, with the commit or branch, if it is public.
+      placeholder: https://github.com/owner/project
+
+  - type: textarea
+    id: findings
+    attributes:
+      label: Findings
+      description: >-
+        The findings that are wrong, or the definitions that should have been reported. For a private
+        project, add the code around them.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: How the code is used, if it is not obvious, such as a framework or a plugin system.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `unref --version`.
+    validations:
+      required: true
