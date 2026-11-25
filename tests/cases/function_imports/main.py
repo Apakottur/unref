@@ -37,7 +37,7 @@ def import_handler():
 
 
 def make_unrelated():
-    class Unrelated(Handler):  # noqa: F821
+    class Unrelated(Handler):
         def emit(self, record):  # expect: 13 [unused-method]
             return record
 
