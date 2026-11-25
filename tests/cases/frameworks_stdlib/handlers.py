@@ -2,12 +2,16 @@ import importlib.abc
 from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler
 
 
-# `BaseHTTPRequestHandler` calls the method named `do_` and the method of the request.
+# `BaseHTTPRequestHandler` calls the method named `do_` and the method of the request, which is
+# uppercase.
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         return None
 
-    def handle_post(self):  # expect: 9 [unused-method]
+    def do_PATCH(self):
+        return None
+
+    def do_cleanup(self):  # expect: 9 [unused-method]
         return None
 
 

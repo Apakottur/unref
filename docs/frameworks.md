@@ -31,6 +31,16 @@ Enabled by default: yes.
 
 - Subclasses of `unittest.TestCase`, with their `test*`, `setUp` and `tearDown` methods.
 
+## `stdlib`
+
+Enabled by default: yes.
+
+- In subclasses of `ast.NodeVisitor`: `visit_*` methods, which `visit` calls by the class of the node.
+- In subclasses of `http.server.BaseHTTPRequestHandler`: `do_` and an uppercase HTTP method, such as
+  `do_POST`, which it calls by the method of the request.
+- In subclasses of the finders and loaders of `importlib.abc`: `find_spec` and `exec_module`, which
+  the import system calls.
+
 ## `pydantic`
 
 Enabled by default: yes.

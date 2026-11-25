@@ -3,3 +3,4 @@ dataclasses = false
 pytest = false
 rest-framework = false
 sphinx = false
+stdlib = false

@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::ClassHierarchy;
 use crate::config::Config;
-use crate::definitions::{Definition, Kind};
+use crate::definitions::Definition;
 use crate::discover::is_under;
 use crate::frameworks::FrameworkRules;
 use crate::ignores::ignored_codes;
@@ -23,26 +23,6 @@ pub(super) static OBJECT_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(?P<module>[\w.]+)\s*(:\s*(?P<attributes>[\w.]+)\s*)?(\[.*\]\s*)?$")
         .expect("valid pattern")
 });
-
-/// The classes of the standard library whose code calls methods of their subclasses that they do not
-/// define, with the names of those methods, `*` ending a prefix:
-///
-/// - `ast.NodeVisitor`, whose `visit` calls `visit_` and the class of the node, and
-///   `ast.NodeTransformer`, which inherits from it.
-/// - `http.server.BaseHTTPRequestHandler`, which calls `do_` and the method of the request.
-/// - The finders and loaders of `importlib.abc`, which the import system calls.
-const CALLED_BY_NAME: [(&[&str], &str); 4] = [
-    (&["ast.NodeVisitor", "ast.NodeTransformer"], "visit_*"),
-    (&["http.server.BaseHTTPRequestHandler"], "do_*"),
-    (
-        &[
-            "importlib.abc.MetaPathFinder",
-            "importlib.abc.PathEntryFinder",
-        ],
-        "find_spec",
-    ),
-    (&["importlib.abc.Loader"], "exec_module"),
-];
 
 /// Find the definitions that count as used whatever references them, and those that are ignored.
 ///
@@ -93,14 +73,11 @@ pub(super) fn find_roots(
                         .is_some_and(|pattern| pattern.is_match(name).unwrap_or(false)))
                 // A member that a base class outside the project defines is used by its code.
                 || class.is_some_and(|class| hierarchy.external_members(file, class).contains(name))
-                // A method that a class of the standard library calls by its name.
-                || (definition.kind == Kind::Method
-                    && class.is_some_and(|class| is_called_by_name(name, file, class, hierarchy)))
                 // The objects that the entry points name.
                 || entry_objects
                     .get(&file)
                     .is_some_and(|objects| objects.contains(&definition.qualified_name))
-                // What the test frameworks find and call by themselves.
+                // What the frameworks, and classes of the standard library, find and call by themselves.
                 || rules.uses(definition, file)
                 // The options of a definition are those of the project, plus those of every override
                 // that covers it.
@@ -116,18 +93,6 @@ pub(super) fn find_roots(
         }
     }
     (kept, ignored)
-}
-
-/// Check whether a class of the standard library that a class inherits from calls a method of it by its
-/// name, as `CALLED_BY_NAME` lists them.
-fn is_called_by_name(name: &str, file: usize, class: &str, hierarchy: &ClassHierarchy) -> bool {
-    CALLED_BY_NAME.iter().any(|(bases, method)| {
-        let named = match method.strip_suffix('*') {
-            Some(prefix) => name.starts_with(prefix),
-            None => name == *method,
-        };
-        named && hierarchy.inherits(file, class, bases)
-    })
 }
 
 /// Check whether an override that applies to a file covers a definition of it, given by the name in
