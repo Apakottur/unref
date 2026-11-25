@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::classes::ClassHierarchy;
 use crate::config::Config;
-use crate::definitions::{Definition, Kind};
+use crate::definitions::Definition;
 use crate::discover::is_under;
 use crate::frameworks::FrameworkRules;
 use crate::ignores::ignored_codes;
@@ -23,11 +23,6 @@ pub(super) static OBJECT_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(?P<module>[\w.]+)\s*(:\s*(?P<attributes>[\w.]+)\s*)?(\[.*\]\s*)?$")
         .expect("valid pattern")
 });
-
-/// `ast.NodeVisitor`, whose `visit` calls the method named `visit_` and the class of the node, and
-/// `ast.NodeTransformer`, which inherits from it.
-const NODE_VISITORS: [&str; 2] = ["ast.NodeVisitor", "ast.NodeTransformer"];
-const NODE_VISITOR_PREFIX: &str = "visit_";
 
 /// Find the definitions that count as used whatever references them, and those that are ignored.
 ///
@@ -78,15 +73,11 @@ pub(super) fn find_roots(
                         .is_some_and(|pattern| pattern.is_match(name).unwrap_or(false)))
                 // A member that a base class outside the project defines is used by its code.
                 || class.is_some_and(|class| hierarchy.external_members(file, class).contains(name))
-                // A method of a node visitor of `ast`, which its `visit` calls by the name of the node.
-                || (definition.kind == Kind::Method
-                    && name.starts_with(NODE_VISITOR_PREFIX)
-                    && class.is_some_and(|class| hierarchy.inherits(file, class, &NODE_VISITORS)))
                 // The objects that the entry points name.
                 || entry_objects
                     .get(&file)
                     .is_some_and(|objects| objects.contains(&definition.qualified_name))
-                // What the test frameworks find and call by themselves.
+                // What the frameworks, and classes of the standard library, find and call by themselves.
                 || rules.uses(definition, file)
                 // The options of a definition are those of the project, plus those of every override
                 // that covers it.

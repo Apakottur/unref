@@ -24,6 +24,7 @@ mod pytest;
 mod rest_framework;
 mod sphinx;
 mod sqlalchemy;
+mod stdlib;
 mod typer;
 mod unittest;
 
@@ -128,6 +129,7 @@ fn make(framework: Framework, context: &Context, settings: &Settings) -> Box<dyn
     match framework {
         Framework::Pytest => Box::new(pytest::Pytest::new(context, settings)),
         Framework::Unittest => Box::new(unittest::Unittest::new(context, settings)),
+        Framework::Stdlib => Box::new(stdlib::Stdlib::new(context, settings)),
         Framework::Pydantic => Box::new(pydantic::Pydantic::new(context, settings)),
         Framework::Dataclasses => Box::new(dataclasses::Dataclasses::new(context, settings)),
         Framework::Sqlalchemy => Box::new(sqlalchemy::Sqlalchemy::new(context, settings)),

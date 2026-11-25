@@ -33,6 +33,7 @@ macro_rules! frameworks {
 frameworks! {
     Pytest => "pytest",
     Unittest => "unittest",
+    Stdlib => "stdlib",
     Pydantic => "pydantic",
     Dataclasses => "dataclasses",
     Sqlalchemy => "sqlalchemy",
