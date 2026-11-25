@@ -272,8 +272,11 @@ impl<'a> Graph<'a> {
     fn pattern_read(&self, parts: &[String], name: &Name) -> impl Iterator<Item = DefinitionId> {
         let ids = self.module_level.get(name).into_iter().flatten();
         ids.copied().filter(move |&id| {
-            let module = &self.project.names[self.project.definition_files[id]].name;
-            ModulePattern::matches(parts, module)
+            let file = self.project.definition_files[id];
+            ModulePattern::matches(parts, &self.project.names[file].name)
+                || self.project.root_names[file]
+                    .as_ref()
+                    .is_some_and(|root_name| ModulePattern::matches(parts, root_name))
         })
     }
 

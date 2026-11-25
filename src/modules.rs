@@ -112,6 +112,41 @@ pub(crate) fn import_root(path: &Path, name: &ModuleName) -> PathBuf {
         .to_path_buf()
 }
 
+/// Get the name that a Python file is also imported by from the project root, when the directory
+/// that it is imported from is below the root through directories without an `__init__.py`, as
+/// namespace packages: `docs.examples.tutorial` for `docs/examples/tutorial.py`, whose name is
+/// `tutorial`. Python finds it so when the root is on the import path, as it is for pytest or
+/// `python -m` run from the root.
+///
+/// Returns None for a file that is imported from the root itself, outside it, or through a directory
+/// whose name is not an identifier.
+pub(crate) fn root_name(path: &Path, name: &ModuleName, root: &Path) -> Option<String> {
+    let import_root = import_root(path, name);
+    let directories = import_root.strip_prefix(root).ok()?;
+    let mut parts = Vec::new();
+    for component in directories.components() {
+        let Component::Normal(part) = component else {
+            return None;
+        };
+        let part = part.to_str().filter(|part| is_identifier(part))?;
+        parts.push(part);
+    }
+    if parts.is_empty() || name.name.is_empty() {
+        return None;
+    }
+    parts.push(&name.name);
+    Some(parts.join("."))
+}
+
+/// Check whether a name of a directory can be a part of a dotted name of a module.
+fn is_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|first| first == '_' || first.is_alphabetic())
+        && chars.all(|char| char == '_' || char.is_alphanumeric())
+}
+
 /// The name of a file without its last suffix.
 fn stem(path: &Path) -> String {
     path.file_stem()

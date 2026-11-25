@@ -20,7 +20,7 @@ use crate::external::ExternalModules;
 use crate::files::{FileFacts, analyze_files};
 use crate::frameworks::{FrameworkRules, ProjectFile, Settings};
 use crate::models::{Finding, Framework};
-use crate::modules::{ModuleName, module_name, resolve};
+use crate::modules::{ModuleName, module_name, resolve, root_name};
 use crate::references::{Index, Owner};
 use crate::resolver::Resolver;
 use crate::symbols::ModuleSymbols;
@@ -48,6 +48,8 @@ struct Project {
     facts: Vec<FileFacts>,
     /// The module name of each file.
     names: Vec<ModuleName>,
+    /// The name that each file is also imported by from the project root, if it has one.
+    root_names: Vec<Option<String>>,
     /// The files of each module name.
     files_by_name: FxHashMap<String, Vec<usize>>,
     /// The definitions of every file, in order.
@@ -109,6 +111,20 @@ pub(crate) fn find_unused(
             .or_default()
             .push(index);
     }
+    let project_root = resolve(&options.root);
+    let root_names: Vec<Option<String>> = files
+        .iter()
+        .zip(&names)
+        .map(|(path, name)| root_name(path, name, &project_root))
+        .collect();
+    for (index, root_name) in root_names.iter().enumerate() {
+        if let Some(root_name) = root_name {
+            files_by_name
+                .entry(root_name.clone())
+                .or_default()
+                .push(index);
+        }
+    }
     let mut external = ExternalModules::new(search_path(&files, &names, options.python.as_deref()));
     import_siblings(&mut facts, &names, &files_by_name, &mut external);
     timings.end("module names and sibling imports");
@@ -126,6 +142,7 @@ pub(crate) fn find_unused(
         files,
         facts,
         names,
+        root_names,
         files_by_name,
         definitions,
         definition_files,
