@@ -21,7 +21,7 @@ use crate::files::{FileFacts, analyze_files};
 use crate::frameworks::{FrameworkRules, ProjectFile, Settings};
 use crate::models::{Finding, Framework};
 use crate::modules::{ModuleName, module_name, resolve, root_name};
-use crate::references::{Index, Owner};
+use crate::references::{Index, ModulePattern, Owner};
 use crate::resolver::Resolver;
 use crate::symbols::ModuleSymbols;
 use crate::timings::Timings;
@@ -248,6 +248,15 @@ pub(crate) fn find_unused(
 }
 
 impl Project {
+    /// Check whether a module is named by a pattern, by its name or by its name from the project root,
+    /// given by the literal parts of the pattern, as `ModulePattern` holds them.
+    fn matches_pattern(&self, file: usize, parts: &[String]) -> bool {
+        ModulePattern::matches(parts, &self.names[file].name)
+            || self.root_names[file]
+                .as_ref()
+                .is_some_and(|root_name| ModulePattern::matches(parts, root_name))
+    }
+
     /// The definitions of a file, by their ids.
     fn ids_of_file(&self, file: usize) -> std::ops::Range<DefinitionId> {
         let start = self.first_definition[file];

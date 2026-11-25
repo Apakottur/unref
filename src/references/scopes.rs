@@ -223,12 +223,20 @@ impl Walker<'_, '_> {
         let mut passed = Vec::new();
         for read in reads {
             let root = read.root.as_str();
-            if let Some(pattern) = self.scopes[inner].module_patterns.get(root)
-                && let Some(first) = read.attributes.first()
-            {
-                self.references
-                    .pattern_reads
-                    .insert((read.owner, pattern.clone(), first.clone()));
+            if let Some(pattern) = self.scopes[inner].module_patterns.get(root) {
+                if let Some(first) = read.attributes.first() {
+                    self.references.pattern_reads.insert((
+                        read.owner,
+                        pattern.clone(),
+                        first.clone(),
+                    ));
+                } else if read.passed && *pattern != ModulePattern::any() {
+                    // A module that can be any module of the project is not passed on, as each of
+                    // them would be.
+                    self.references
+                        .passed_patterns
+                        .insert((read.owner, pattern.clone()));
+                }
             }
             if let Some(binding) = self.scopes[inner].imports.get(root) {
                 // A plain read of a name that is not local, at the module or declared `global`, is also

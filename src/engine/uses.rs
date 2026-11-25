@@ -170,6 +170,17 @@ pub(super) fn find_uses(project: &Project, classes: &Classes) -> AllUses {
             }
         }
 
+        for (owner, pattern) in &references.passed_patterns {
+            let mut parts = pattern.parts.clone();
+            if let Some(first) = project.names[file].resolve(Some(&parts[0]), pattern.level) {
+                parts[0] = first;
+                let matching = (0..project.files.len())
+                    .filter(|&module| project.matches_pattern(module, &parts));
+                uses.entry(project.code(file, *owner))
+                    .escaped
+                    .extend(matching);
+            }
+        }
         for (owner, pattern, name) in &references.pattern_reads {
             let mut parts = pattern.parts.clone();
             if let Some(first) = project.names[file].resolve(Some(&parts[0]), pattern.level) {
