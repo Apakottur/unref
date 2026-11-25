@@ -193,3 +193,13 @@ Enabled by default: yes.
 
 - Functions of the `command` and `callback` decorators of a `Typer()`, or an instance of a subclass, set at
   module level or in the same function.
+
+## `strawberry`
+
+Enabled by default: yes.
+
+- Fields of classes with `strawberry.type`, `input`, `interface` or `schema_directive`, and those of
+  `strawberry.federation` and `strawberry.pydantic`.
+- Methods with `strawberry.field`, `mutation` or `subscription`, also of `strawberry.federation`, and
+  `strawberry.relay.connection` or `node`.
+- Every member of an enum with `strawberry.enum`.
