@@ -8,6 +8,10 @@ A framework is turned off in the [configuration](configuration.md#frameworks):
 unittest = false
 ```
 
+An application, router or group whose decorators register functions can also be read from a module
+that `import_module` names by a pattern, as `module.app.get` after
+`module = import_module(f"apps.{name}")`.
+
 ## `pytest`
 
 Enabled by default: yes.
