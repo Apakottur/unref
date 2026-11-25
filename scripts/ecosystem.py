@@ -93,6 +93,16 @@ def _section(name: str, url: str, sha: str, base: _Run, head: _Run) -> str | Non
     return "\n".join(lines)
 
 
+def _unchanged(rows: list[tuple[str, str, str, _Run]]) -> str:
+    """A table of the projects without changes, with their number of findings, folded."""
+    lines = [f"<details><summary>Unchanged ({len(rows)})</summary>", "", "| Project | Findings |", "| --- | ---: |"]
+    for name, url, sha, run in rows:
+        findings = "failed" if run.error is not None else str(len(run.findings))
+        lines.append(f"| [{name}]({url}/tree/{sha}) | {findings} |")
+    lines += ["", "</details>"]
+    return "\n".join(lines)
+
+
 @app.command()
 def compare(base: Path, head: Path, report: Path) -> None:
     """Run two unref binaries on each project, and write the findings that HEAD adds or removes to REPORT."""
@@ -102,16 +112,26 @@ def compare(base: Path, head: Path, report: Path) -> None:
         print(f"Cloning {len(_PROJECTS)} projects...")
         with ThreadPoolExecutor() as executor:
             shas = dict(zip(_PROJECTS, executor.map(_clone, _PROJECTS.values(), projects.values()), strict=True))
-        sections = []
+        changed, unchanged = [], []
         for name, url in _PROJECTS.items():
             print(f"Checking {name}...")
             project = projects[name]
-            section = _section(name, url, shas[name], _run(base, project), _run(head, project))
-            if section is not None:
-                sections.append(section)
+            head_run = _run(head, project)
+            section = _section(name, url, shas[name], _run(base, project), head_run)
+            if section is None:
+                unchanged.append((name, url, shas[name], head_run))
+            else:
+                changed.append(section)
 
-    summary = f"Findings on {len(_PROJECTS)} projects: {len(sections) or 'none'} changed."
-    text = "\n\n".join(["## Ecosystem", summary, *sections]) + "\n"
+    summary = f"Findings on {len(_PROJECTS)} projects: {len(changed) or 'none'} changed."
+    parts = ["## Ecosystem", summary]
+    if changed:
+        parts.append(
+            "\n\n".join([f"<details open><summary>Changed ({len(changed)})</summary>", *changed, "</details>"])
+        )
+    if unchanged:
+        parts.append(_unchanged(unchanged))
+    text = "\n\n".join(parts) + "\n"
     report.write_text(text)
     print(text)
 
