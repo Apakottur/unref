@@ -11,6 +11,7 @@ strict = true
 nav = [
   { "Home" = "index.md" },
   { "Usage" = "usage.md" },
+  { "Adopting unref" = "adopting.md" },
   { "Rules" = "rules.md" },
   { "Frameworks" = "frameworks.md" },
   { "Configuration" = "configuration.md" },

@@ -56,15 +56,8 @@ repos:
 
 ## Adopting unref
 
-1. Run `uvx unref` on your project and delete what is really unused.
-2. If a finding is wrong, check the [frameworks](https://unref.readthedocs.io/en/latest/frameworks/), the
-   [configuration](https://unref.readthedocs.io/en/latest/configuration/) and how to
-   [ignore a finding](https://unref.readthedocs.io/en/latest/rules/#ignoring-a-finding).
-3. Tell us about wrong or missed findings with a
-   [project report](https://github.com/Apakottur/unref/issues/new?template=project_report.yml). For a
-   public project, a link to it is enough, and we can add it to the projects that every change is
-   checked against.
-4. Once it is clean, add the hook above so new dead code is caught.
+See [adopting unref](https://unref.readthedocs.io/en/latest/adopting/) for trying it on your project and
+reporting wrong findings.
 
 ## Contributing
 
