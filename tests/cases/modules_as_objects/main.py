@@ -30,6 +30,19 @@ def load_extension(path):
     return getattr(module, "register")()
 
 
+def load_report(name):
+    # Some module of `reports`, passed on, so a read of an attribute of any object can stand for the
+    # names of each module of `reports`.
+    module = importlib.import_module(f"reports.{name}")
+    return module  # noqa: RET504
+
+
+def load_any(path):
+    # Any module, passed on: that does not pass on every module of the project.
+    module = importlib.import_module(path)
+    return module  # noqa: RET504
+
+
 def load_legacy():
     module = __import__("backends.legacy", fromlist=["start"])
     return module.start()
@@ -44,7 +57,8 @@ def describe(mod):
 
 
 # `formatting` is passed on, so a read of an attribute of any object can stand for its names.
-load_plugin, load_backend, load_handler, load_extension, load_legacy
+load_plugin, load_backend, load_handler, load_extension, load_any, load_legacy
+load_report("daily").summary()
 pick(formatting)
 plugins.load, plugins.load_own
 # Changing a module, or checking it, does not pass it on. `hasattr` reads the name, as `getattr` does.

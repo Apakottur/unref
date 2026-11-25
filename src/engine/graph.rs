@@ -3,8 +3,6 @@
 use ruff_python_ast::name::Name;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::references::ModulePattern;
-
 use super::{AllUses, Classes, CodeId, DefinitionId, Project, Uses};
 
 /// The definitions of a project and what the code of each module and function uses.
@@ -272,11 +270,8 @@ impl<'a> Graph<'a> {
     fn pattern_read(&self, parts: &[String], name: &Name) -> impl Iterator<Item = DefinitionId> {
         let ids = self.module_level.get(name).into_iter().flatten();
         ids.copied().filter(move |&id| {
-            let file = self.project.definition_files[id];
-            ModulePattern::matches(parts, &self.project.names[file].name)
-                || self.project.root_names[file]
-                    .as_ref()
-                    .is_some_and(|root_name| ModulePattern::matches(parts, root_name))
+            self.project
+                .matches_pattern(self.project.definition_files[id], parts)
         })
     }
 

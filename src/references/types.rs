@@ -165,6 +165,9 @@ pub(crate) struct References {
     /// `module.name` after `module = import_module(f"plugins.{name}")`, each with the modules that it
     /// can be read from.
     pub pattern_reads: FxHashSet<(Owner, ModulePattern, Name)>,
+    /// The modules whose names match a pattern that are passed on, as `return module` after
+    /// `module = import_module(f"plugins.{name}")`.
+    pub passed_patterns: FxHashSet<(Owner, ModulePattern)>,
     /// The names that are imported from another module. A star import has the name `*`.
     pub imports: FxHashSet<Import>,
     /// Whether the module defines `__all__`.

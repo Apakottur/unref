@@ -43,7 +43,7 @@ object:
 | `module = import_module("package.module")`, or `__import__` with a `fromlist`                  | `package.module`, as for `import package.module as module`.         |
 | `module = import_module(f"plugins.{name}")`, by `+`, `%`, or relative with `package=__package__` | Each module whose name matches the literal parts: here `plugins.*`. |
 | `module = import_module(path)`, by a name that has no literal part                             | Each module of the project.                                         |
-| A module of the project that is passed on: given to a function, assigned, put in a container, or returned | The module, as for an attribute of any object, matched by name. |
+| A module of the project that is passed on: given to a function, assigned, put in a container, or returned | The module, as for an attribute of any object, matched by name. For `import_module(f"plugins.{name}")`, each module that matches, unless its name has no literal part. |
 
 So in this project, `run`, `setup` and `CONSTANT` are used, and `unused` is not:
 
