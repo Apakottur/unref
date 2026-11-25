@@ -117,11 +117,16 @@ impl Walker<'_, '_> {
     }
 
     /// Get the dotted names of what a value is the result of calling, as they are written, if it is a
-    /// call, or a variable that is assigned one in the current scope.
+    /// call, a variable that is assigned one in the current scope, or `a if test else b` of them.
     pub(super) fn value_calls(&self, value: &Expr) -> Vec<String> {
         match value {
             Expr::Call(call) => dotted_name(&call.func, Unwrap::Call).into_iter().collect(),
             Expr::Name(name) => self.variable_calls(name.id.as_str()),
+            Expr::If(choice) => {
+                let mut calls = self.value_calls(&choice.body);
+                calls.extend(self.value_calls(&choice.orelse));
+                calls
+            }
             _ => Vec::new(),
         }
     }
