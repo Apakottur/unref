@@ -232,6 +232,12 @@ impl Resolver {
             }
             for (file, symbol) in self.locate(&name) {
                 let symbols = self.module(file);
+                // A module that is found by its name from the project root also stands for its name,
+                // which the rest of the project knows it by.
+                let named = join(&symbols.name.name, &symbol);
+                if named != name {
+                    pending.push(named);
+                }
                 let (first, rest) = symbol.split_once('.').unwrap_or((&symbol, ""));
                 if symbols.bases.contains_key(&symbol) {
                     trace.definitions.push((file, symbol));
