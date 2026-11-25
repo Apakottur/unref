@@ -25,6 +25,7 @@ mod rest_framework;
 mod sphinx;
 mod sqlalchemy;
 mod stdlib;
+mod strawberry;
 mod typer;
 mod unittest;
 
@@ -142,6 +143,7 @@ fn make(framework: Framework, context: &Context, settings: &Settings) -> Box<dyn
         Framework::Celery => Box::new(celery::Celery::new(context, settings)),
         Framework::Click => Box::new(click::Click::new(context, settings)),
         Framework::Typer => Box::new(typer::Typer::new(context, settings)),
+        Framework::Strawberry => Box::new(strawberry::Strawberry::new(context, settings)),
     }
 }
 

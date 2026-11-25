@@ -46,6 +46,7 @@ frameworks! {
     Celery => "celery",
     Click => "click",
     Typer => "typer",
+    Strawberry => "strawberry",
 }
 
 impl Framework {
