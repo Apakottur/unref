@@ -113,7 +113,8 @@ impl ClassHierarchy {
     /// name of each.
     ///
     /// Where in the module the name is written is not known, so a name that the module neither
-    /// defines at its top level nor imports is each class or function of that name in its functions.
+    /// defines at its top level nor imports is each class or function of that name in its functions,
+    /// and each import of it in them.
     pub(crate) fn resolve(&self, module: usize, written: &str) -> Names {
         cached(&self.resolved, module, written, || {
             let mut trace = Trace::default();

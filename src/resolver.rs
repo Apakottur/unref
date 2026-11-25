@@ -138,10 +138,10 @@ impl Resolver {
     /// Follow a name as it is written in a module, and add what it stands for to a trace.
     ///
     /// `scope` is the name in the module of the class or function that it is written for, or an empty
-    /// string at the top level of the module. The functions that it is defined in are looked in first,
-    /// from the nearest one. Where in the module the name is written is not known otherwise, so a name
-    /// that the module neither defines at its top level nor imports is each class or function of that
-    /// name in its functions.
+    /// string at the top level of the module. The classes, functions and imports of the functions that
+    /// it is defined in are looked in first, from the nearest one. Where in the module the name is
+    /// written is not known otherwise, so a name that the module neither defines at its top level nor
+    /// imports is each class or function of that name in its functions, and each import of it in them.
     pub(crate) fn trace_written(
         &self,
         module: usize,
@@ -160,6 +160,15 @@ impl Resolver {
                 self.trace(join(&symbols.name.name, &join(&local, rest)), trace);
                 return;
             }
+            if let Some(binding) = symbols
+                .local_bindings
+                .get(function)
+                .and_then(|bindings| bindings.get(first))
+            {
+                // A name that a function that the scope is in imports.
+                self.trace_binding(&symbols.name, binding, rest, trace);
+                return;
+            }
             functions = function;
         }
         if symbols.bases.contains_key(first) {
@@ -167,20 +176,40 @@ impl Resolver {
             self.trace(format!("{}.{written}", symbols.name.name), trace);
         } else if let Some(binding) = symbols.bindings.get(first) {
             // A name that the module imports.
-            if let Some(imported) = imported_name(&symbols.name, binding) {
-                self.trace(join(&imported, rest), trace);
-            }
-        } else if !scope.contains(LOCALS)
-            && let Some(locals) = symbols.locals.get(first)
-        {
-            // A name that is not written in a function of the module, or that is written where it is
-            // not known, is each class or function of that name that a function of the module defines.
-            for local in locals {
-                self.trace(join(&symbols.name.name, &join(local, rest)), trace);
-            }
-        } else {
+            self.trace_binding(&symbols.name, binding, rest, trace);
+        } else if scope.contains(LOCALS) {
             // A builtin, or a name that the module does not define at its top level.
             trace.names.insert(written.to_string());
+        } else {
+            // A name that is not written in a function of the module, or that is written where it is
+            // not known, is each class or function of that name that a function of the module defines,
+            // and each module or name that a function of the module imports by that name.
+            let locals = symbols.locals.get(first).into_iter().flatten();
+            let imported = symbols
+                .local_bindings
+                .values()
+                .filter_map(|bindings| bindings.get(first));
+            let mut found = false;
+            for local in locals {
+                self.trace(join(&symbols.name.name, &join(local, rest)), trace);
+                found = true;
+            }
+            for binding in imported {
+                self.trace_binding(&symbols.name, binding, rest, trace);
+                found = true;
+            }
+            if !found {
+                // A builtin, or a name that the module does not define.
+                trace.names.insert(written.to_string());
+            }
+        }
+    }
+
+    /// Follow what an imported name stands for, with the attributes read from it, and add it to a
+    /// trace.
+    fn trace_binding(&self, module: &ModuleName, binding: &Binding, rest: &str, trace: &mut Trace) {
+        if let Some(imported) = imported_name(module, binding) {
+            self.trace(join(&imported, rest), trace);
         }
     }
 
