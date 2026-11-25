@@ -197,6 +197,9 @@ pub(crate) struct References {
 pub(crate) struct Hints {
     /// The local variables of the functions that are assigned the result of a call.
     pub local_calls: LocalCalls,
+    /// The local variables of the functions that are assigned some module whose name matches a
+    /// pattern, as `module = import_module(f"plugins.{name}")`, with the pattern.
+    pub local_patterns: FxHashMap<(Index, String), ModulePattern>,
     /// The annotated parameters of the functions, by the function and the name of the parameter, each
     /// with the dotted name of its annotation as it is written, without its type arguments, such as
     /// `Flask` for `app: Flask`.

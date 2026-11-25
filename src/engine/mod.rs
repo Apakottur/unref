@@ -192,6 +192,7 @@ pub(crate) fn find_unused(
         &enabled,
         &file_definitions,
         &project.names,
+        &project.root_names,
         &hierarchy,
         &Settings {
             sphinx_configuration: sphinx_configuration.as_ref(),

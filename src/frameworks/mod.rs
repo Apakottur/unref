@@ -37,7 +37,7 @@ use crate::classes::ClassHierarchy;
 use crate::definitions::{Definition, Kind};
 use crate::models::Framework;
 use crate::modules::ModuleName;
-use crate::references::{Hints, Index, References};
+use crate::references::{Hints, Index, ModulePattern, References};
 use crate::resolver::Names;
 
 /// The HTTP methods, which name methods of FastAPI's applications and routers, of Flask's
@@ -86,6 +86,8 @@ pub(crate) struct Context<'a> {
     files: &'a [ProjectFile<'a>],
     /// The module name of each file of the project, by its index.
     module_names: &'a [ModuleName],
+    /// The name that each file is also imported by from the project root, if it has one.
+    root_names: &'a [Option<String>],
     hierarchy: &'a ClassHierarchy,
 }
 
@@ -173,12 +175,14 @@ impl<'a> FrameworkRules<'a> {
         frameworks: &FxHashSet<Framework>,
         files: &'a [ProjectFile<'a>],
         module_names: &'a [ModuleName],
+        root_names: &'a [Option<String>],
         hierarchy: &'a ClassHierarchy,
         settings: &Settings,
     ) -> Self {
         let context = Context {
             files,
             module_names,
+            root_names,
             hierarchy,
         };
         let mut rules: Vec<Box<dyn Rules>> = Framework::ALL
@@ -276,6 +280,24 @@ impl<'a> Context<'a> {
                     instances
                         .locals
                         .contains(&(module, function, instance.to_string()))
+                })
+            {
+                return true;
+            }
+            // A method of an instance of some module whose name matches a pattern, such as
+            // `module.app.get` after `module = import_module(f"apps.{name}")`.
+            if let Some(function) = definition.owner
+                && let Some((root, rest)) = decorator.split_once('.')
+                && let Some(pattern) = self.files[module]
+                    .hints
+                    .local_patterns
+                    .get(&(function, root.to_string()))
+                && self.pattern_modules(module, pattern).any(|matched| {
+                    any_instance(rest, &|instance| {
+                        instances
+                            .variables
+                            .contains(&self.dotted_name(matched, instance))
+                    })
                 })
             {
                 return true;
@@ -401,6 +423,30 @@ impl<'a> Context<'a> {
             .decorators
             .iter()
             .any(|decorator| self.resolves_to(module, decorator, names))
+    }
+
+    /// Get the modules of the project whose names match a pattern that is written in a module, by their
+    /// names or by their names from the project root.
+    fn pattern_modules(
+        &self,
+        module: usize,
+        pattern: &ModulePattern,
+    ) -> impl Iterator<Item = usize> + '_ {
+        let mut parts = pattern.parts.clone();
+        let resolved = self.module_names[module]
+            .resolve(Some(&parts[0]), pattern.level)
+            .map(|first| {
+                parts[0] = first;
+                parts
+            });
+        (0..self.module_names.len()).filter(move |&other| {
+            resolved.as_ref().is_some_and(|parts| {
+                ModulePattern::matches(parts, &self.module_names[other].name)
+                    || self.root_names[other]
+                        .as_ref()
+                        .is_some_and(|root_name| ModulePattern::matches(parts, root_name))
+            })
+        })
     }
 
     /// Get the dotted name of a class or variable of a module, as it is among the base classes of a

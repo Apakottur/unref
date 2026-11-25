@@ -195,6 +195,13 @@ impl<'a> Walker<'_, '_> {
             self.hints
                 .local_calls
                 .extend(calls.map(|(name, called)| ((function, name), called)));
+            let patterns = inner_scope
+                .module_patterns
+                .iter()
+                .filter(|(name, _)| local_names.contains(*name));
+            self.hints.local_patterns.extend(
+                patterns.map(|(name, pattern)| ((function, name.clone()), pattern.clone())),
+            );
         }
         local_names.extend(names.iter().map(|name| (*name).to_string()));
         let target = self.reads_target(scope);

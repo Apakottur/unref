@@ -1,3 +1,5 @@
+import importlib
+
 import fastapi
 from fastapi import FastAPI
 
@@ -130,3 +132,20 @@ def create_app():  # expect: 5 [unused-function]
         return {}
 
     return app
+
+
+# The application of some module whose name matches a pattern.
+def test_tutorial(name):
+    module = importlib.import_module(f"tutorials.{name}")
+
+    @module.app.get("/check")
+    def check():
+        return None
+
+    other = importlib.import_module(f"others.{name}")
+
+    @other.app.get("/")
+    def not_a_route_either():  # expect: 9 [unused-function]
+        return None
+
+    return module, other
