@@ -6,19 +6,19 @@ body:
     attributes:
       value: |
         The smallest project that shows the bug helps the most: a few short files, the configuration
-        and the command. For a public project, a link to it is enough.
+        and the command.
 
   - type: input
     id: project
     attributes:
       label: Project
-      description: A link to the project, with the commit, if it is public.
+      description: A link to the project, if it is public, so we can run unref on all of it.
 
   - type: textarea
     id: files
     attributes:
       label: Files
-      description: The Python files and the configuration file, if any, each with its path. Not needed with a link.
+      description: The Python files and the configuration file, if any, each with its path.
       placeholder: |
         `main.py`:
         ```python
@@ -30,6 +30,8 @@ body:
         [tool.unref]
 
         ```
+    validations:
+      required: true
 
   - type: input
     id: command
