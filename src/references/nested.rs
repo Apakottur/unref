@@ -136,9 +136,16 @@ impl<'a> Walker<'_, '_> {
         for decorator in decorators {
             self.visit_expr(&decorator.expression);
         }
-        // A type hint of a parameter or the return reads no value of the object that it names.
+        // A type hint of a parameter or the return reads no value of the object that it names, except
+        // that a decorator can read the signature of the function, as FastAPI and Typer read the
+        // members of an enum that annotates a parameter.
+        for annotation in annotations {
+            self.in_signature = decorators.is_empty();
+            self.visit_expr(annotation);
+            self.visit_type_strings(annotation);
+        }
         self.in_signature = true;
-        for annotation in annotations.into_iter().chain(returns) {
+        if let Some(annotation) = returns {
             self.visit_expr(annotation);
             self.visit_type_strings(annotation);
         }
