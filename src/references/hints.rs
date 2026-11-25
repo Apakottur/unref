@@ -55,12 +55,12 @@ impl Walker<'_, '_> {
             && WHOLE_METHODS.contains(&func.attr.as_str())
             && call.arguments.is_empty()
         {
-            let values = self.value_calls(&func.value);
+            let values = self.value_types(&func.value);
             self.add_whole_read(values, None);
         }
         for keyword in &call.arguments.keywords {
             if keyword.arg.is_none() {
-                let values = self.value_calls(&keyword.value);
+                let values = self.value_types(&keyword.value);
                 self.add_whole_read(values, None);
             }
         }
@@ -74,7 +74,7 @@ impl Walker<'_, '_> {
                 .map(|keyword| &keyword.value),
         );
         for argument in passed {
-            let values = self.value_calls(argument);
+            let values = self.value_types(argument);
             if values.is_empty() {
                 continue;
             }
@@ -124,6 +124,16 @@ impl Walker<'_, '_> {
             Expr::Name(name) => self.variable_calls(name.id.as_str()),
             _ => Vec::new(),
         }
+    }
+
+    /// Get the dotted names of what a value is the result of calling, as `value_calls` gets them, or of
+    /// the classes that a variable or parameter that it is is annotated with, as they are written.
+    pub(super) fn value_types(&self, value: &Expr) -> Vec<String> {
+        let mut types = self.value_calls(value);
+        if let Expr::Name(name) = value {
+            types.extend(self.variable_annotations(name.id.as_str()));
+        }
+        types
     }
 
     /// Add a read of a key, if it is a string literal.

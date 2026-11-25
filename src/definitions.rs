@@ -1,6 +1,6 @@
 //! What a Python module defines.
 
-use ruff_python_ast::{Decorator, Expr};
+use ruff_python_ast::{self as ast, Decorator, Expr};
 
 use crate::models::Rule;
 use crate::references::{Index, Owner};
@@ -121,6 +121,37 @@ pub(crate) fn annotation_name(annotation: &Expr) -> String {
         };
     }
     dotted_name(annotation, Unwrap::Subscript).unwrap_or_default()
+}
+
+/// Get the dotted names of an annotation, one for each side of a union: `Model | None`,
+/// `Optional[Model]` or `Union[Model, Other]`, as written. A string annotation is parsed.
+pub(crate) fn annotation_names(annotation: &Expr) -> Vec<String> {
+    if let Expr::StringLiteral(literal) = annotation {
+        return match ruff_python_parser::parse_expression(literal.value.to_str().trim()) {
+            Ok(parsed) => annotation_names(parsed.expr()),
+            Err(_) => Vec::new(),
+        };
+    }
+    match annotation {
+        Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
+            let mut names = annotation_names(&union.left);
+            names.extend(annotation_names(&union.right));
+            names
+        }
+        Expr::Subscript(subscript)
+            if dotted_name(&subscript.value, Unwrap::Subscript).is_some_and(|name| {
+                matches!(name.rsplit('.').next(), Some("Optional" | "Union"))
+            }) =>
+        {
+            match &*subscript.slice {
+                Expr::Tuple(tuple) => tuple.iter().flat_map(annotation_names).collect(),
+                other => annotation_names(other),
+            }
+        }
+        _ => dotted_name(annotation, Unwrap::Subscript)
+            .into_iter()
+            .collect(),
+    }
 }
 
 /// Get the dotted name of an expression, such as a decorator, a base class, an annotation or what a

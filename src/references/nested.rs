@@ -5,7 +5,9 @@ use ruff_python_ast::{self as ast, Expr, Parameters, Stmt};
 use ruff_text_size::Ranged;
 use rustc_hash::FxHashSet;
 
-use crate::definitions::{Definition, Kind, Unwrap, annotation_name, decorator_names, dotted_name};
+use crate::definitions::{
+    Definition, Kind, Unwrap, annotation_name, annotation_names, decorator_names, dotted_name,
+};
 
 use super::scopes::{Scope, ScopeKind, Target};
 use super::{Index, Walker};
@@ -31,7 +33,7 @@ impl<'a> Walker<'_, '_> {
             return;
         };
         // The first iterable is read outside the comprehension.
-        let values = self.value_calls(&first.iter);
+        let values = self.value_types(&first.iter);
         self.add_whole_read(values, None);
         self.visit_expr(&first.iter);
         let (scope, binder) = (self.scope, self.binder);
@@ -48,7 +50,7 @@ impl<'a> Walker<'_, '_> {
             if index > 0 {
                 // A comprehension over a mapping reads its keys in the current scope,
                 // after the earlier iteration targets have been bound.
-                let values = self.value_calls(&generator.iter);
+                let values = self.value_types(&generator.iter);
                 self.add_whole_read(values, None);
                 self.visit_expr(&generator.iter);
             }
@@ -97,6 +99,7 @@ impl<'a> Walker<'_, '_> {
         let mut names: Vec<&str> = Vec::new();
         let mut defaults: Vec<&Expr> = Vec::new();
         let mut annotations: Vec<&Expr> = Vec::new();
+        let mut annotated: Vec<(String, Vec<String>)> = Vec::new();
         if let Some(parameters) = parameters {
             for parameter in parameters {
                 names.push(parameter.name().as_str());
@@ -110,6 +113,7 @@ impl<'a> Walker<'_, '_> {
                 }
                 if let Some(annotation) = parameter.annotation() {
                     annotations.push(annotation);
+                    annotated.push((parameter.name().to_string(), annotation_names(annotation)));
                     if let Some((_, function)) = &defined {
                         let name = annotation_name(annotation);
                         if !name.is_empty() {
@@ -146,6 +150,7 @@ impl<'a> Walker<'_, '_> {
             Some((body_scope, function)) => (body_scope, Some(function)),
             None => (Scope::new(ScopeKind::Function), None),
         };
+        body_scope.annotations.extend(annotated);
         let (scope, owner) = (self.scope, self.owner);
         body_scope.function_parent = Some(self.reads_target(scope));
         self.scope = self.push_scope(body_scope);
