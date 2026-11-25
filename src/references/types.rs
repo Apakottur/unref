@@ -171,6 +171,9 @@ pub(crate) struct References {
     pub has_all: bool,
     /// The names that the module imports at its top level, each with what it stands for.
     pub bindings: FxHashMap<String, Binding>,
+    /// The names that the functions of the module import, by the index of the function in the
+    /// definitions of the module, each with what it stands for.
+    pub local_bindings: FxHashMap<Index, FxHashMap<String, Binding>>,
     /// The functions and classes that are local variables of a function, by their index in the
     /// definitions of the module. A read of their name elsewhere is not a reference to them.
     pub local_definitions: FxHashSet<usize>,

@@ -65,6 +65,19 @@ pub(crate) fn walk_module(
     // What reaches the module is read from the module itself, or from what it imports.
     walker.close(0, &FxHashSet::default(), Target::Module);
     walker.references.bindings = std::mem::take(&mut walker.scopes[0].imports);
+    for scope in &mut walker.scopes {
+        if let Some(function) = scope.function
+            && scope.kind == ScopeKind::Function
+            && !scope.imports.is_empty()
+        {
+            walker
+                .references
+                .local_bindings
+                .entry(function)
+                .or_default()
+                .extend(std::mem::take(&mut scope.imports));
+        }
+    }
     (walker.definitions, walker.references, walker.hints)
 }
 

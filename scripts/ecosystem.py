@@ -39,6 +39,8 @@ _PROJECTS = {
 }
 # The changes shown for each project. A comment on GitHub holds at most 65536 characters.
 _MAX_CHANGES = 50
+# The columns of the table of changed projects, after the project.
+_COLUMNS = ("Before", "After", "Change")
 # The exit code of unref when it fails, rather than finding unused code or not.
 _ERROR = 2
 
@@ -70,12 +72,17 @@ def _position(finding: str) -> tuple[str, int, int]:
     return path, int(line), int(column)
 
 
-def _section(name: str, url: str, sha: str, base: _Run, head: _Run) -> str | None:
-    """The changes of a project, folded, or `None` if it has none."""
+def _count(run: _Run) -> str:
+    """The number of findings of a run, or `failed`."""
+    return "failed" if run.error is not None else str(len(run.findings))
+
+
+def _row(name: str, url: str, sha: str, base: _Run, head: _Run) -> str | None:
+    """A row of the table of changed projects, whose name opens its changes, or `None` if it has none."""
     added, removed = head.findings - base.findings, base.findings - head.findings
     if not added and not removed and head.error == base.error:
         return None
-    lines = [f'<details><summary><a href="{url}/tree/{sha}">{name}</a>: +{len(added)} -{len(removed)}</summary>', ""]
+    lines = [f'<tr><td><details><summary><a href="{url}/tree/{sha}">{name}</a></summary>', ""]
     if head.error != base.error:
         for label, error in (("Base", base.error), ("Head", head.error)):
             if error is not None:
@@ -89,16 +96,33 @@ def _section(name: str, url: str, sha: str, base: _Run, head: _Run) -> str | Non
         if len(changes) > _MAX_CHANGES:
             lines.append(f"... and {len(changes) - _MAX_CHANGES} more")
         lines += ["```", ""]
-    lines.append("</details>")
+    numbers = (_count(base), _count(head), f"+{len(added)} -{len(removed)}")
+    lines.append("</details></td>" + "".join(f'<td align="right">{number}</td>' for number in numbers) + "</tr>")
     return "\n".join(lines)
+
+
+def _changed(rows: list[str]) -> str:
+    """A table of the projects with changes, open."""
+    header = "<tr><th>Project</th>" + "".join(f'<th align="right">{name}</th>' for name in _COLUMNS) + "</tr>"
+    return "\n".join(
+        [
+            f"<details open><summary>Changed ({len(rows)})</summary>",
+            "",
+            "<table>",
+            header,
+            *rows,
+            "</table>",
+            "",
+            "</details>",
+        ]
+    )
 
 
 def _unchanged(rows: list[tuple[str, str, str, _Run]]) -> str:
     """A table of the projects without changes, with their number of findings, folded."""
     lines = [f"<details><summary>Unchanged ({len(rows)})</summary>", "", "| Project | Findings |", "| --- | ---: |"]
     for name, url, sha, run in rows:
-        findings = "failed" if run.error is not None else str(len(run.findings))
-        lines.append(f"| [{name}]({url}/tree/{sha}) | {findings} |")
+        lines.append(f"| [{name}]({url}/tree/{sha}) | {_count(run)} |")
     lines += ["", "</details>"]
     return "\n".join(lines)
 
@@ -117,18 +141,16 @@ def compare(base: Path, head: Path, report: Path) -> None:
             print(f"Checking {name}...")
             project = projects[name]
             head_run = _run(head, project)
-            section = _section(name, url, shas[name], _run(base, project), head_run)
-            if section is None:
+            row = _row(name, url, shas[name], _run(base, project), head_run)
+            if row is None:
                 unchanged.append((name, url, shas[name], head_run))
             else:
-                changed.append(section)
+                changed.append(row)
 
     summary = f"Findings on {len(_PROJECTS)} projects: {len(changed) or 'none'} changed."
     parts = ["## Ecosystem", summary]
     if changed:
-        parts.append(
-            "\n\n".join([f"<details open><summary>Changed ({len(changed)})</summary>", *changed, "</details>"])
-        )
+        parts.append(_changed(changed))
     if unchanged:
         parts.append(_unchanged(unchanged))
     text = "\n\n".join(parts) + "\n"
