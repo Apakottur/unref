@@ -89,8 +89,8 @@ Enabled by default: yes.
   of `current_app`.
 - Commands of `cli.command` and `cli.group` of these, and of `command` and `group` of an `AppGroup()`
   or of such a group.
-- Module-level `create_app` and `make_app` functions that make a `Flask()`, and module-level `app` and
-  `application` variables set to `Flask()` or to what such a factory makes.
+- Module-level `create_app` and `make_app` functions that make or return a `Flask()`, and module-level
+  `app` and `application` variables set to `Flask()` or to what such a factory makes.
 - HTTP method handlers of `MethodView` subclasses, `dispatch_request` of `View` subclasses, and their
   class attributes `methods`, `provide_automatic_options`, `decorators` and `init_every_request`.
 - Functions decorated with `after_this_request`, and receivers that `connect` and `connect_via` of
