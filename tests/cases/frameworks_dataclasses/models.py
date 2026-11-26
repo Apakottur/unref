@@ -62,6 +62,16 @@ class Triple(typing_extensions.NamedTuple):
 class Modern:
     size: int
     weight = attrs.field(default=0)
+    height: int = attrs.field()
+
+    # attrs calls the validators and defaults of a field.
+    @height.validator
+    def check_height(self, attribute, value):
+        return value
+
+    @height.default
+    def make_height(self):
+        return 0
 
 
 @attrs.frozen(kw_only=True)

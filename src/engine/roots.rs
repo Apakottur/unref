@@ -14,6 +14,7 @@ use crate::frameworks::FrameworkRules;
 use crate::ignores::ignored_codes;
 use crate::models::{Override, fnmatch};
 use crate::modules::resolve;
+use crate::references::Index;
 
 use super::{DefinitionId, Project};
 
@@ -59,6 +60,7 @@ pub(super) fn find_roots(
             .filter(|(roots, _, _)| roots.is_empty() || is_under(path, roots))
             .collect();
         let ignored_in_file = ignored_codes(&project.facts[file].ignore_comments);
+        let class_names = class_body_names(project.file_definitions(file));
         for id in project.ids_of_file(file) {
             let definition = &project.definitions[id];
             let class = project.class_name(id);
@@ -79,6 +81,7 @@ pub(super) fn find_roots(
                     .is_some_and(|objects| objects.contains(&definition.qualified_name))
                 // What the frameworks, and classes of the standard library, find and call by themselves.
                 || rules.uses(definition, file)
+                || registers_on_class_name(definition, &class_names)
                 // The options of a definition are those of the project, plus those of every override
                 // that covers it.
                 || matches_options(definition, &options.used_names, &used_decorators)
@@ -145,6 +148,39 @@ fn matches_options(
             .decorators
             .iter()
             .any(|decorator| decorators.contains(decorator.as_str()))
+}
+
+/// Get the line where each name of a class body is first bound, by the class and the name.
+fn class_body_names(definitions: &[Definition]) -> FxHashMap<(Index, &str), u32> {
+    let mut names = FxHashMap::default();
+    for definition in definitions {
+        if let Some(class) = definition.class {
+            names
+                .entry((class, definition.name.as_str()))
+                .or_insert(definition.line);
+        }
+    }
+    names
+}
+
+/// Check whether a method has a decorator that is an attribute of a name bound earlier in its class
+/// body, such as `@etag.register_setter`, which registers it on that object to be called. A method
+/// of the name itself, such as a setter of a property, is left to what reads the name.
+fn registers_on_class_name(
+    definition: &Definition,
+    class_names: &FxHashMap<(Index, &str), u32>,
+) -> bool {
+    let Some(class) = definition.class else {
+        return false;
+    };
+    definition.decorators.iter().any(|decorator| {
+        decorator.split_once('.').is_some_and(|(name, _)| {
+            name != definition.name
+                && class_names
+                    .get(&(class, name))
+                    .is_some_and(|&line| line < definition.line)
+        })
+    })
 }
 
 /// Find the objects that the entry points of a project name.
