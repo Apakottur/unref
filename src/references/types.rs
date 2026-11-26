@@ -188,6 +188,9 @@ pub(crate) struct References {
     /// each with the index of the definition in the definitions of the module and the attributes read
     /// from it, in order, as in `Color.parse` for an enum.
     pub local_objects: FxHashSet<(Owner, usize, Vec<Name>)>,
+    /// The owners that read every name of the module through its namespace, as by iterating
+    /// `globals()` or passing it on.
+    pub namespace_reads: FxHashSet<Owner>,
 }
 
 /// What a Python module reveals about its values that only the rules of frameworks read, such as the

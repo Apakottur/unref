@@ -10,6 +10,9 @@ use super::{Index, Read, Receiver, Walker};
 
 /// The methods of a mapping that read a key, given as their first argument.
 const KEY_METHODS: [&str; 3] = ["get", "pop", "setdefault"];
+/// The methods of the namespace of the module that read or write a name of it by its key, rather than
+/// read every name of it.
+const NAMESPACE_KEY_METHODS: [&str; 4] = ["get", "pop", "setdefault", "update"];
 /// The last names of the functions that change or check an object passed to them, rather than pass
 /// it on: `setattr`, `monkeypatch.setattr`, `mock.patch.object`, `importlib.reload` and the like.
 const PATCHERS: [&str; 7] = [
@@ -101,9 +104,11 @@ impl<'a> Walker<'_, '_> {
     /// Check whether an expression is the namespace of the module: `globals()`, or `vars()` or
     /// `locals()` at the top level of the module, where they are the same.
     pub(super) fn is_module_namespace(&self, expr: &Expr) -> bool {
-        let Expr::Call(call) = expr else {
-            return false;
-        };
+        matches!(expr, Expr::Call(call) if self.is_module_namespace_call(call))
+    }
+
+    /// Check whether a call gets the namespace of the module, as for `is_module_namespace`.
+    fn is_module_namespace_call(&self, call: &ast::ExprCall) -> bool {
         let Expr::Name(func) = &*call.func else {
             return false;
         };
@@ -159,6 +164,14 @@ impl<'a> Walker<'_, '_> {
     /// `called` is the attribute read from its result, as in `Class().name`. It is read from the
     /// class when what is called is a name, or a chain of attributes that starts with one.
     pub(super) fn visit_call(&mut self, call: &'a ast::ExprCall, called: Option<Name>) {
+        // The namespace of the module, other than to look up a key in it, reads every name of it.
+        if self.is_module_namespace_call(call) {
+            self.references.namespace_reads.insert(self.owner);
+        }
+        // A key method of the namespace reads or writes a name by its key.
+        let is_namespace_key = matches!(&*call.func, Expr::Attribute(func)
+            if NAMESPACE_KEY_METHODS.contains(&func.attr.as_str())
+                && self.is_module_namespace(&func.value));
         // A read of a string key by a method of a mapping (`value.get("name")`).
         if let Expr::Attribute(func) = &*call.func
             && KEY_METHODS.contains(&func.attr.as_str())
@@ -200,7 +213,9 @@ impl<'a> Walker<'_, '_> {
             self.add_read(&name.id, attributes, called, false);
         } else {
             self.add_attributes(called);
-            self.visit_expr(&call.func);
+            if !is_namespace_key {
+                self.visit_expr(&call.func);
+            }
         }
         if PATCHERS.contains(&last_name(&call.func)) {
             self.visit_arguments(&call.arguments);
@@ -210,7 +225,12 @@ impl<'a> Walker<'_, '_> {
                 .args
                 .iter()
                 .chain(arguments.keywords.iter().map(|keyword| &keyword.value));
+            // `__import__` reads only the name of the package from the namespace given to it.
+            let is_import = matches!(&*call.func, Expr::Name(func) if func.id == "__import__");
             for value in values {
+                if is_import && self.is_module_namespace(value) {
+                    continue;
+                }
                 self.visit_passed(value);
             }
         }
