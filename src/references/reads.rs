@@ -191,6 +191,7 @@ impl<'a> Walker<'_, '_> {
         }
         self.add_whole_reads(call);
         self.add_string_call(call);
+        self.add_config_object(call);
         let (base, attributes) = match &*call.func {
             Expr::Attribute(func) => attribute_chain(func),
             func => (func, Vec::new()),
