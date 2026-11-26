@@ -56,7 +56,8 @@ pub(super) fn transitive_definitions(
 /// Make the findings of a project.
 ///
 /// Returns a finding for each unused definition, for each problem with an ignore comment, and for each
-/// file that does not parse, sorted by file, line and column.
+/// file that does not parse, sorted by file, line and column. An overloaded function is one finding,
+/// at the definition that stands for it in `overloads`.
 pub(super) fn findings(
     project: &Project,
     discovered: &[Arc<Path>],
@@ -64,6 +65,7 @@ pub(super) fn findings(
     used: &[bool],
     needed: &[DefinitionId],
     is_transitive: &FxHashSet<DefinitionId>,
+    overloads: &[DefinitionId],
 ) -> Vec<Finding> {
     let file_of: FxHashMap<&Arc<Path>, usize> = project
         .files
@@ -81,7 +83,7 @@ pub(super) fn findings(
         let file = file_of[path];
         let mut file_findings: Vec<Finding> = project
             .ids_of_file(file)
-            .filter(|id| !used[*id])
+            .filter(|id| !used[*id] && overloads[*id] == *id)
             .map(|id| {
                 let definition = &project.definitions[id];
                 Finding {

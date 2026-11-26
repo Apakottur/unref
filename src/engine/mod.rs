@@ -211,6 +211,8 @@ pub(crate) fn find_unused(
     let needed: Vec<DefinitionId> = ignored.into_iter().filter(|id| !kept_used[*id]).collect();
     let mut all_used = graph.use_definitions(needed.iter().copied());
     share_used(&project, &mut all_used);
+    let overloads = overload_groups(&project);
+    share_overloads(&overloads, &mut all_used);
     let unused: Vec<DefinitionId> = (0..project.definitions.len())
         .filter(|id| !all_used[*id])
         .collect();
@@ -225,6 +227,7 @@ pub(crate) fn find_unused(
         &all_used,
         &needed,
         &is_transitive,
+        &overloads,
     );
     if !discovery.errors.is_empty() {
         findings.extend(discovery.errors);
@@ -341,5 +344,51 @@ fn share_used(project: &Project, used: &mut [bool]) {
                 }
             }
         }
+    }
+}
+
+/// Find the definition that stands for each definition of a function or method with `@overload`
+/// stubs: the implementation after the stubs, or the first stub if there is none. Any other
+/// definition stands for itself.
+fn overload_groups(project: &Project) -> Vec<DefinitionId> {
+    let mut group: Vec<DefinitionId> = (0..project.definitions.len()).collect();
+    for file in 0..project.files.len() {
+        let mut stubs: FxHashMap<&str, Vec<DefinitionId>> = FxHashMap::default();
+        for id in project.ids_of_file(file) {
+            let definition = &project.definitions[id];
+            if !definition.kind.is_function() {
+                continue;
+            }
+            let name = definition.qualified_name.as_str();
+            if definition
+                .decorators
+                .iter()
+                .any(|decorator| decorator.rsplit('.').next() == Some("overload"))
+            {
+                stubs.entry(name).or_default().push(id);
+            } else if let Some(stubs) = stubs.remove(name) {
+                for stub in stubs {
+                    group[stub] = id;
+                }
+            }
+        }
+        for stubs in stubs.into_values() {
+            for &stub in &stubs {
+                group[stub] = stubs[0];
+            }
+        }
+    }
+    group
+}
+
+/// Mark the stubs and the implementation of an overloaded function used if one of them is used.
+fn share_overloads(group: &[DefinitionId], used: &mut [bool]) {
+    for (id, &representative) in group.iter().enumerate() {
+        if used[id] {
+            used[representative] = true;
+        }
+    }
+    for (id, &representative) in group.iter().enumerate() {
+        used[id] = used[representative];
     }
 }
