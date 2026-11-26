@@ -81,10 +81,23 @@ pub(super) fn find_uses(project: &Project, classes: &Classes) -> AllUses {
     let mut uses = AllUses::new(project.files.len() + project.definitions.len());
     let resolver = classes.hierarchy.resolver();
     // The names of the TypedDicts, so that a value that cannot be one is not resolved.
-    let typed_dict_names: FxHashSet<&str> = classes
+    let mut typed_dict_names: FxHashSet<&str> = classes
         .typed_dicts()
         .map(|(class, _)| project.definitions[class].name.as_str())
         .collect();
+    // And the variables of modules that are assigned one, such as `Message = Request | Response`.
+    let aliases: Vec<&str> = project
+        .facts
+        .iter()
+        .flat_map(|facts| &facts.references.aliases)
+        .filter(|(_, values)| {
+            values
+                .iter()
+                .any(|value| typed_dict_names.contains(value.rsplit('.').next().unwrap_or(value)))
+        })
+        .map(|(name, _)| name.as_str())
+        .collect();
+    typed_dict_names.extend(aliases);
     for (file, file_facts) in project.facts.iter().enumerate() {
         let references = &file_facts.references;
         let module = &project.names[file].name;
