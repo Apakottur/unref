@@ -23,6 +23,7 @@ cpython
 dataclass
 dataclasses
 deadcode
+defaultdict
 delattr
 delenv
 Deque
@@ -42,6 +43,7 @@ fnmatchcase
 freqtrade
 fromkeys
 fromlist
+frozenset
 getattr
 gitdir
 hasattr

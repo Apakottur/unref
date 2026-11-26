@@ -106,7 +106,11 @@ impl Walker<'_, '_> {
                 .map(|keyword| &keyword.value),
         );
         for argument in passed {
-            let values = self.value_types(argument);
+            // A container passed to a function, such as one that serializes it, reads its elements.
+            let mut values = self.value_types(argument);
+            if let Expr::Name(name) = argument {
+                values.extend(self.variable_element_annotations(name.id.as_str()));
+            }
             if values.is_empty() {
                 continue;
             }
