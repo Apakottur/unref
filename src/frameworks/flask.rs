@@ -9,8 +9,9 @@
 //! commands that `cli.command` and `cli.group` of an application or a blueprint add, and those that
 //! `command` and `group` of a group add, a group being an instance of `AppGroup` or a function that
 //! such a decorator makes one. It calls a factory, a function at the top level named `create_app`
-//! or `make_app` that sets a local variable to an application, and loads a variable at the top
-//! level named `app` or `application` that is set to an application or to what a factory makes.
+//! or `make_app` that sets a local variable to an application or returns one, and loads a variable
+//! at the top level named `app` or `application` that is set to an application or to what a factory
+//! makes.
 //!
 //! Flask calls a function that `after_this_request` registers, after the request that it is defined
 //! in, and the receivers that the `connect` and `connect_via` decorators of its signals, such as
@@ -298,7 +299,7 @@ impl Flask {
 }
 
 /// Find the factories of Flask's applications that the Flask CLI finds: the functions at the top level
-/// of a module that are named as one, and set a local variable to an application.
+/// of a module that are named as one, and set a local variable to an application or return one.
 fn factories(context: &Context) -> FxHashSet<String> {
     let applications: FxHashSet<(usize, Index)> = context
         .local_instances(&FLASK_APPLICATIONS)
@@ -308,10 +309,16 @@ fn factories(context: &Context) -> FxHashSet<String> {
     let mut factories = FxHashSet::default();
     for (module, file) in context.files.iter().enumerate() {
         for (index, definition) in file.definitions.iter().enumerate() {
+            let index = Index::new(index);
             if definition.kind == Kind::Function
                 && is_top_level(definition)
                 && FLASK_FACTORIES.contains(&definition.name.as_str())
-                && applications.contains(&(module, Index::new(index)))
+                && (applications.contains(&(module, index))
+                    || file.hints.returned_calls.get(&index).is_some_and(|calls| {
+                        calls
+                            .iter()
+                            .any(|call| context.resolves_to(module, call, &FLASK_APPLICATIONS))
+                    }))
             {
                 factories.insert(context.dotted_name(module, &definition.name));
             }
