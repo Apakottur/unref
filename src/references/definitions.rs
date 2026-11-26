@@ -80,6 +80,16 @@ impl<'a> Walker<'_, '_> {
                     wrapped_by.as_ref(),
                 );
             }
+            if let ([Expr::Name(target)], Some(value)) = (targets, value)
+                && self.scopes[self.binder].kind == ScopeKind::Module
+                && let Some(name) = dotted_name(value, Unwrap::Subscript)
+            {
+                self.references
+                    .aliases
+                    .entry(target.id.to_string())
+                    .or_default()
+                    .push(name);
+            }
             // A variable of a function that is assigned one of several values, as `a if test else b`,
             // or another variable, is assigned what each of them is assigned the result of calling.
             if call.is_none()

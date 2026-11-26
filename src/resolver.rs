@@ -171,8 +171,8 @@ impl Resolver {
             }
             functions = function;
         }
-        if symbols.bases.contains_key(first) {
-            // A class or function of the module itself.
+        if symbols.bases.contains_key(first) || symbols.aliases.contains_key(first) {
+            // A class or function of the module itself, or a variable of it that is assigned one.
             self.trace(format!("{}.{written}", symbols.name.name), trace);
         } else if let Some(binding) = symbols.bindings.get(first) {
             // A name that the module imports.
@@ -239,13 +239,19 @@ impl Resolver {
                     pending.push(named);
                 }
                 let (first, rest) = symbol.split_once('.').unwrap_or((&symbol, ""));
+                // A variable that is assigned a dotted name stands for each name that it is assigned,
+                // as in both branches of an `if`, besides a class or import of that name.
+                for value in symbols.aliases.get(first).into_iter().flatten() {
+                    self.trace_written(file, "", &join(value, rest), trace);
+                }
                 if symbols.bases.contains_key(&symbol) {
                     trace.definitions.push((file, symbol));
                 } else if let Some(binding) = symbols.bindings.get(first) {
                     pending.extend(
                         imported_name(&symbols.name, binding).map(|imported| join(&imported, rest)),
                     );
-                } else if !symbols.bases.contains_key(first) {
+                } else if !symbols.bases.contains_key(first) && !symbols.aliases.contains_key(first)
+                {
                     // A name that the module may star import.
                     for star_module in star_modules(&symbols, first) {
                         let star = self.star_imported(&join(star_module, &symbol));
