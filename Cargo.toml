@@ -1,7 +1,7 @@
 [package]
 name = "unref"
 # The latest release, set by the release workflow.
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.98"
 description = "An extremely fast Python dead code finder, written in Rust."
