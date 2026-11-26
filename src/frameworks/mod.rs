@@ -506,6 +506,12 @@ fn file_name(path: &Path) -> &str {
         .unwrap_or_default()
 }
 
+/// Check whether a name is uppercase, as Python's `str.isupper`: it has a cased letter, and no
+/// lowercase one.
+fn is_uppercase(name: &str) -> bool {
+    name.chars().any(char::is_uppercase) && !name.chars().any(char::is_lowercase)
+}
+
 /// Check whether a definition is at the top level of its module, in no class or function.
 fn is_top_level(definition: &Definition) -> bool {
     definition.class.is_none() && definition.owner.is_none()

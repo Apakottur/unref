@@ -38,7 +38,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::definitions::{Definition, Kind};
 use crate::modules::resolve;
 
-use super::{Call, Context, HTTP_METHODS, Instances, Rules, Settings, has_any, is_top_level};
+use super::{
+    Call, Context, HTTP_METHODS, Instances, Rules, Settings, has_any, is_top_level, is_uppercase,
+};
 
 /// The environment variable that names the settings module of Django, and `os.environ.setdefault`,
 /// which `startproject` sets it with.
@@ -459,10 +461,4 @@ fn django_modules(context: &Context, given: &FxHashSet<PathBuf>) -> Django {
         included_urls,
         libraries: Instances::default(),
     }
-}
-
-/// Check whether a name is uppercase, as Python's `str.isupper`: it has a cased letter, and no
-/// lowercase one.
-fn is_uppercase(name: &str) -> bool {
-    name.chars().any(char::is_uppercase) && !name.chars().any(char::is_lowercase)
 }

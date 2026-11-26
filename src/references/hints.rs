@@ -6,7 +6,7 @@ use ruff_python_ast::{self as ast, Expr};
 
 use crate::definitions::{Unwrap, dotted_name};
 
-use super::{Walker, WholeRead};
+use super::{ConfigObject, Walker, WholeRead};
 
 /// The methods of a mapping that read every key.
 const WHOLE_METHODS: [&str; 3] = ["items", "keys", "values"];
@@ -15,6 +15,9 @@ const WHOLE_METHODS: [&str; 3] = ["items", "keys", "values"];
 /// module of URLs, and `os.environ.setdefault`, which can set `DJANGO_SETTINGS_MODULE`. The rules of
 /// Django, in `frameworks/django.rs`, check what each call resolves to.
 const FRAMEWORK_STRING_CALLS: [&str; 2] = ["include", "setdefault"];
+/// A hint for frameworks: the method of Flask's config that reads the uppercase attributes of an
+/// object, which the rules of Flask, in `frameworks/flask.rs`, check the instance of.
+const CONFIG_FROM_OBJECT: &str = "from_object";
 
 impl Walker<'_, '_> {
     /// Add a call of a function or method whose string arguments frameworks read, with its leading
@@ -46,6 +49,35 @@ impl Walker<'_, '_> {
             })
             .collect();
         self.hints.string_calls.insert((called, arguments));
+    }
+
+    /// Add a call of `config.from_object`, such as `app.config.from_object(Config)`, with its argument.
+    pub(super) fn add_config_object(&mut self, call: &ast::ExprCall) {
+        let Expr::Attribute(func) = &*call.func else {
+            return;
+        };
+        if func.attr.as_str() != CONFIG_FROM_OBJECT
+            || !matches!(&*func.value, Expr::Attribute(config) if config.attr.as_str() == "config")
+        {
+            return;
+        }
+        let ([argument], []) = (&*call.arguments.args, &*call.arguments.keywords) else {
+            return;
+        };
+        let object = match argument {
+            Expr::StringLiteral(literal) => {
+                ConfigObject::String(literal.value.to_str().to_string())
+            }
+            argument => match dotted_name(argument, Unwrap::Subscript) {
+                Some(name) => ConfigObject::Name(name),
+                None => return,
+            },
+        };
+        if let Some(called) = dotted_name(&call.func, Unwrap::Call) {
+            self.hints
+                .config_objects
+                .insert((self.owner, called, object));
+        }
     }
 
     /// Add the values that a call reads as a whole, `f(**value)` and `value.items()`, and those that

@@ -28,8 +28,8 @@ use reads::attribute_chain;
 use scopes::{Scope, ScopeKind, Target};
 
 pub(crate) use types::{
-    Binding, Hints, Import, ImportedRead, Index, ModulePattern, Owner, Read, Receiver, References,
-    WholeRead,
+    Binding, ConfigObject, Hints, Import, ImportedRead, Index, ModulePattern, Owner, Read,
+    Receiver, References, WholeRead,
 };
 
 /// Find what a Python module defines and refers to.

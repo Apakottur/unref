@@ -93,6 +93,9 @@ Enabled by default: yes.
   `app` and `application` variables set to `Flask()` or to what such a factory makes.
 - HTTP method handlers of `MethodView` subclasses, `dispatch_request` of `View` subclasses, and their
   class attributes `methods`, `provide_automatic_options`, `decorators` and `init_every_request`.
+- Uppercase settings that `config.from_object` of an application reads: class attributes of the class
+  it is given and its base classes, and module-level variables of a module or `__name__`. An import
+  string names a module or a `module.Class`.
 - Functions decorated with `after_this_request`, and receivers that `connect` and `connect_via` of
   Flask's signals, such as `request_started`, connect. Not `copy_current_request_context` or
   `stream_with_context`, which only wrap a function.
