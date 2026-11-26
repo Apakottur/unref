@@ -6,7 +6,8 @@ use ruff_text_size::Ranged;
 use rustc_hash::FxHashSet;
 
 use crate::definitions::{
-    Definition, Kind, Unwrap, annotation_name, annotation_names, decorator_names, dotted_name,
+    Definition, Kind, Unwrap, annotation_element_names, annotation_name, annotation_names,
+    decorator_names, dotted_name,
 };
 
 use super::scopes::{Scope, ScopeKind, Target};
@@ -98,6 +99,7 @@ impl<'a> Walker<'_, '_> {
         let mut defaults: Vec<&Expr> = Vec::new();
         let mut annotations: Vec<&Expr> = Vec::new();
         let mut annotated: Vec<(String, Vec<String>)> = Vec::new();
+        let mut element_annotated: Vec<(String, Vec<String>)> = Vec::new();
         if let Some(parameters) = parameters {
             for parameter in parameters {
                 names.push(parameter.name().as_str());
@@ -112,6 +114,10 @@ impl<'a> Walker<'_, '_> {
                 if let Some(annotation) = parameter.annotation() {
                     annotations.push(annotation);
                     annotated.push((parameter.name().to_string(), annotation_names(annotation)));
+                    element_annotated.push((
+                        parameter.name().to_string(),
+                        annotation_element_names(annotation),
+                    ));
                     if let Some((_, function)) = &defined {
                         let name = annotation_name(annotation);
                         if !name.is_empty() {
@@ -156,6 +162,7 @@ impl<'a> Walker<'_, '_> {
             None => (Scope::new(ScopeKind::Function), None),
         };
         body_scope.annotations.extend(annotated);
+        body_scope.element_annotations.extend(element_annotated);
         let (scope, owner) = (self.scope, self.owner);
         body_scope.function_parent = Some(self.reads_target(scope));
         self.scope = self.push_scope(body_scope);

@@ -104,7 +104,8 @@ impl Walker<'_, '_> {
                 .map(|keyword| &keyword.value),
         );
         for argument in passed {
-            if self.value_types(argument).is_empty() && self.instance_attribute(argument).is_none()
+            if self.whole_read_types(argument, true).is_empty()
+                && self.instance_attribute(argument).is_none()
             {
                 continue;
             }
@@ -116,7 +117,7 @@ impl Walker<'_, '_> {
         }
     }
 
-    /// Add a read of a value as a whole, by the types that `value_types` gets for it, or for an
+    /// Add a read of a value as a whole, by the types that `whole_read_types` gets for it, or for an
     /// attribute of the instance, by those of the attribute once its class is walked.
     pub(super) fn add_whole_read(&mut self, value: &Expr, reader: Option<&str>) {
         let local_import = reader
@@ -133,12 +134,22 @@ impl Walker<'_, '_> {
                 .attribute_reads
                 .push((attribute, read.clone()));
         }
-        for value in self.value_types(value) {
+        for value in self.whole_read_types(value, reader.is_some()) {
             self.references.whole_reads.insert(WholeRead {
                 value,
                 ..read.clone()
             });
         }
+    }
+
+    /// Get the types of a value that is read whole, as `value_types` gets them, and for a container
+    /// passed to a function, such as one that serializes it, the types of its elements.
+    fn whole_read_types(&self, value: &Expr, passed: bool) -> Vec<String> {
+        let mut types = self.value_types(value);
+        if passed && let Expr::Name(name) = value {
+            types.extend(self.variable_element_annotations(name.id.as_str()));
+        }
+        types
     }
 
     /// Add a value that the function the walker is in returns or yields, if it is the result of a call.
