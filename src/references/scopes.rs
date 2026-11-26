@@ -261,13 +261,11 @@ impl Walker<'_, '_> {
                 }
             }
             if let Some(binding) = self.scopes[inner].imports.get(root) {
-                // A plain read of a name that is not local, at the module or declared `global`, is also
-                // a read of the name of the enclosing scope, without reading the object. So is any
-                // read of a variable of the module that is assigned a module imported by a string.
-                if !local_names.contains(root)
-                    && (read.attributes.is_empty()
-                        || self.scopes[inner].string_imports.contains(root))
-                {
+                // A read of a name that is not local, at the module or declared `global`, is also a
+                // read of the name of the enclosing scope, without reading the object, as another
+                // binding of the name, such as a fallback in an `except ImportError`, can be the one
+                // that is read.
+                if !local_names.contains(root) {
                     passed.push(Read {
                         owner: read.owner,
                         root: read.root.clone(),

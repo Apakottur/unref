@@ -142,7 +142,7 @@ pub(crate) struct WholeRead {
 #[derive(Debug, Default)]
 pub(crate) struct References {
     /// The reads of the names of the module itself, without the local variables and parameters. A name
-    /// that is listed in `__all__` is read as a plain name. A plain read of a name that the module
+    /// that is listed in `__all__` is read as a plain name. A read of a name that the module
     /// imports, at its top level or declared `global`, also reads its own name, without the object,
     /// such as a fallback definition in an `except ImportError`.
     pub reads: FxHashSet<Read>,
