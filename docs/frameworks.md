@@ -44,6 +44,8 @@ Enabled by default: yes.
   `do_POST`, which it calls by the method of the request.
 - In subclasses of the finders and loaders of `importlib.abc`: `find_spec` and `exec_module`, which
   the import system calls.
+- In subclasses of the `io` base classes, `dict`, `list` and `set`: the methods that they define, such
+  as `readinto` and `setdefault`, which have no Python source to read.
 
 ## `pydantic`
 

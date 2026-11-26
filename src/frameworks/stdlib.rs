@@ -1,5 +1,6 @@
 //! Classes of the standard library whose code calls methods of their subclasses that they do not
-//! define, by a name that it makes when it runs or by the protocol that it follows.
+//! define, by a name that it makes when it runs or by the protocol that it follows, or that are
+//! builtin, with no Python source to read the methods that they define from.
 
 use crate::definitions::{Definition, Kind};
 
@@ -19,6 +20,86 @@ const FINDERS: [&str; 2] = [
 /// The loaders of `importlib.abc`, whose `exec_module` the import system calls.
 const LOADERS: [&str; 1] = ["importlib.abc.Loader"];
 
+/// The builtin classes that projects subclass, with the public methods that they define. The `io`
+/// classes are those of `_io`, which is builtin.
+const BUILTIN_METHODS: [(&[&str], &[&str]); 7] = [
+    (
+        &["io.IOBase"],
+        &[
+            "close",
+            "closed",
+            "fileno",
+            "flush",
+            "isatty",
+            "readable",
+            "readline",
+            "readlines",
+            "seek",
+            "seekable",
+            "tell",
+            "truncate",
+            "writable",
+            "writelines",
+        ],
+    ),
+    (&["io.RawIOBase"], &["read", "readall", "readinto", "write"]),
+    (
+        &["io.BufferedIOBase"],
+        &["detach", "read", "read1", "readinto", "readinto1", "write"],
+    ),
+    (
+        &["io.TextIOBase"],
+        &[
+            "detach", "encoding", "errors", "newlines", "read", "readline", "write",
+        ],
+    ),
+    (
+        &["dict", "builtins.dict"],
+        &[
+            "clear",
+            "copy",
+            "fromkeys",
+            "get",
+            "items",
+            "keys",
+            "pop",
+            "popitem",
+            "setdefault",
+            "update",
+            "values",
+        ],
+    ),
+    (
+        &["list", "builtins.list"],
+        &[
+            "append", "clear", "copy", "count", "extend", "index", "insert", "pop", "remove",
+            "reverse", "sort",
+        ],
+    ),
+    (
+        &["set", "builtins.set"],
+        &[
+            "add",
+            "clear",
+            "copy",
+            "difference",
+            "difference_update",
+            "discard",
+            "intersection",
+            "intersection_update",
+            "isdisjoint",
+            "issubset",
+            "issuperset",
+            "pop",
+            "remove",
+            "symmetric_difference",
+            "symmetric_difference_update",
+            "union",
+            "update",
+        ],
+    ),
+];
+
 /// The rules of the standard library.
 pub(super) struct Stdlib;
 
@@ -27,7 +108,8 @@ impl Rules for Stdlib {
         Self
     }
 
-    /// Check whether a class of the standard library calls a method of a subclass by its name.
+    /// Check whether a class of the standard library calls a method of a subclass by its name, or
+    /// defines it as a builtin class.
     fn uses(&self, context: &Context, definition: &Definition, module: usize) -> bool {
         if definition.kind != Kind::Method {
             return false;
@@ -45,7 +127,9 @@ impl Rules for Stdlib {
         } else if name == "exec_module" {
             &LOADERS
         } else {
-            return false;
+            return BUILTIN_METHODS.iter().any(|(bases, methods)| {
+                methods.contains(&name) && context.inherits(module, class, bases)
+            });
         };
         context.inherits(module, class, bases)
     }

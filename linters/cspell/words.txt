@@ -40,15 +40,20 @@ filterset
 fnmatch
 fnmatchcase
 freqtrade
+fromkeys
 fromlist
 getattr
 gitdir
 hasattr
 httpx
 ignorelist
+isatty
+isdisjoint
 isenabled
 isinstance
 isort
+issubset
+issuperset
 isupper
 jemalloc
 jemallocator
@@ -76,6 +81,7 @@ pathlib
 pathspec
 peekable
 platlib
+popitem
 posonlyargs
 prek
 profdata
@@ -93,6 +99,9 @@ PYTHONPATH
 pytype
 pyvenv
 queryset
+readall
+readinto
+readlines
 reconstructor
 restx
 rfind
@@ -102,6 +111,7 @@ rustc
 rustup
 saleor
 sdist
+seekable
 setattr
 setdefault
 showlocals
@@ -130,6 +140,7 @@ venv
 viewset
 viewsets
 worktrees
+writelines
 wsgi
 Yossi
 zizmor
