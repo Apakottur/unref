@@ -6,8 +6,8 @@ use ruff_python_ast::{self as ast, Expr};
 use ruff_text_size::{Ranged, TextSize};
 
 use crate::definitions::{
-    Definition, Kind, LOCALS, Unwrap, annotation_name, annotation_names, decorator_names,
-    dotted_name,
+    Definition, Kind, LOCALS, Unwrap, annotation_element_names, annotation_name, annotation_names,
+    decorator_names, dotted_name,
 };
 
 use super::dynamic_imports::StringImport;
@@ -70,10 +70,13 @@ impl<'a> Walker<'_, '_> {
             if let ([Expr::Name(target)], Some(annotation)) = (targets, annotation)
                 && self.scopes[self.binder].kind == ScopeKind::Function
             {
-                let binder = self.binder;
-                self.scopes[binder]
+                let scope = &mut self.scopes[self.binder];
+                scope
                     .annotations
                     .insert(target.id.to_string(), annotation_names(annotation));
+                scope
+                    .element_annotations
+                    .insert(target.id.to_string(), annotation_element_names(annotation));
             }
             let annotation = annotation.map(annotation_name);
             let string = match value {

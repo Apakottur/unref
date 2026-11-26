@@ -154,6 +154,78 @@ pub(crate) fn annotation_names(annotation: &Expr) -> Vec<String> {
     }
 }
 
+/// The last part of the names of the containers whose type arguments are the types of their
+/// elements, keys or values.
+const CONTAINERS: &[&str] = &[
+    "AbstractSet",
+    "Collection",
+    "DefaultDict",
+    "Dict",
+    "FrozenSet",
+    "Iterable",
+    "List",
+    "Mapping",
+    "MutableMapping",
+    "MutableSequence",
+    "MutableSet",
+    "OrderedDict",
+    "Sequence",
+    "Set",
+    "Tuple",
+    "defaultdict",
+    "dict",
+    "frozenset",
+    "list",
+    "set",
+    "tuple",
+];
+
+/// Get the dotted names of the element types of a container annotation, as `annotation_names` gets
+/// them, such as `Info` for `dict[str, Info]`, `list[Info] | None` or `list[list[Info]]`.
+pub(crate) fn annotation_element_names(annotation: &Expr) -> Vec<String> {
+    if let Expr::StringLiteral(literal) = annotation {
+        return match ruff_python_parser::parse_expression(literal.value.to_str().trim()) {
+            Ok(parsed) => annotation_element_names(parsed.expr()),
+            Err(_) => Vec::new(),
+        };
+    }
+    match annotation {
+        Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
+            let mut names = annotation_element_names(&union.left);
+            names.extend(annotation_element_names(&union.right));
+            names
+        }
+        Expr::Subscript(subscript) => {
+            let Some(name) = dotted_name(&subscript.value, Unwrap::Subscript) else {
+                return Vec::new();
+            };
+            let name = name.rsplit('.').next().unwrap_or_default();
+            let arguments = match &*subscript.slice {
+                Expr::Tuple(tuple) => tuple.elts.iter().collect(),
+                other => vec![other],
+            };
+            if matches!(name, "Optional" | "Union") {
+                arguments
+                    .into_iter()
+                    .flat_map(annotation_element_names)
+                    .collect()
+            } else if CONTAINERS.contains(&name) {
+                arguments
+                    .into_iter()
+                    .flat_map(|argument| {
+                        let mut names = annotation_names(argument);
+                        names.extend(annotation_element_names(argument));
+                        names
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// Get the dotted name of an expression, such as a decorator, a base class, an annotation or what a
 /// call calls.
 ///
