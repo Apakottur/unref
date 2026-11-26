@@ -154,8 +154,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             }
             Stmt::For(loop_) => {
                 // A loop over a mapping reads its keys.
-                let values = self.value_types(&loop_.iter);
-                self.add_whole_read(values, None);
+                self.add_whole_read(&loop_.iter, None);
                 walk_stmt(self, stmt);
             }
             Stmt::Return(ast::StmtReturn {
@@ -244,8 +243,7 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             Expr::Dict(dict) => {
                 // `{**value}` reads every key of the value.
                 for item in dict.iter().filter(|item| item.key.is_none()) {
-                    let values = self.value_types(&item.value);
-                    self.add_whole_read(values, None);
+                    self.add_whole_read(&item.value, None);
                 }
                 for item in dict {
                     if let Some(key) = &item.key {

@@ -11,7 +11,7 @@ use crate::definitions::{
 };
 
 use super::scopes::{Scope, ScopeKind, Target};
-use super::{Index, Walker};
+use super::{Index, Walker, WholeRead};
 
 /// The body of a function or lambda.
 #[derive(Clone, Copy)]
@@ -34,8 +34,7 @@ impl<'a> Walker<'_, '_> {
             return;
         };
         // The first iterable is read outside the comprehension.
-        let values = self.value_types(&first.iter);
-        self.add_whole_read(values, None);
+        self.add_whole_read(&first.iter, None);
         self.visit_expr(&first.iter);
         let (scope, binder) = (self.scope, self.binder);
         let target = self.reads_target(scope);
@@ -51,8 +50,7 @@ impl<'a> Walker<'_, '_> {
             if index > 0 {
                 // A comprehension over a mapping reads its keys in the current scope,
                 // after the earlier iteration targets have been bound.
-                let values = self.value_types(&generator.iter);
-                self.add_whole_read(values, None);
+                self.add_whole_read(&generator.iter, None);
                 self.visit_expr(&generator.iter);
             }
             self.visit_expr(&generator.target);
@@ -281,6 +279,18 @@ impl<'a> Walker<'_, '_> {
         let inner = self.scope;
         self.scope = scope;
         self.binder = binder;
+        // The methods read the attributes of the instance as a whole by the types that the class
+        // gives them anywhere in its body.
+        let class_scope = &mut self.scopes[inner];
+        let types = std::mem::take(&mut class_scope.attribute_types);
+        for (attribute, read) in std::mem::take(&mut class_scope.attribute_reads) {
+            for value in types.get(&attribute).into_iter().flatten() {
+                self.references.whole_reads.insert(WholeRead {
+                    value: value.clone(),
+                    ..read.clone()
+                });
+            }
+        }
 
         // The names that the class body imports are resolved in it, and its other reads are of names
         // that it had not bound yet, so they go on.

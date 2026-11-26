@@ -78,6 +78,9 @@ impl<'a> Walker<'_, '_> {
                     .element_annotations
                     .insert(target.id.to_string(), annotation_element_names(annotation));
             }
+            if let [target] = targets {
+                self.add_attribute_types(target, value, annotation);
+            }
             let annotation = annotation.map(annotation_name);
             let string = match value {
                 Some(Expr::StringLiteral(literal)) => Some(literal.value.to_str().to_string()),
@@ -177,6 +180,42 @@ impl<'a> Walker<'_, '_> {
                     .calls
                     .insert(name.id.to_string(), vec![call.clone()]);
             }
+        }
+    }
+
+    /// Add the types of an attribute of a class, or of its instance in a method, that is annotated
+    /// or assigned a value of a known type, as `value_types` gets them.
+    fn add_attribute_types(
+        &mut self,
+        target: &Expr,
+        value: Option<&Expr>,
+        annotation: Option<&Expr>,
+    ) {
+        let scope = &self.scopes[self.binder];
+        let (class, name) = match target {
+            Expr::Name(name) if scope.kind == ScopeKind::Class => (self.binder, name.id.as_str()),
+            Expr::Attribute(attribute)
+                if matches!(&*attribute.value, Expr::Name(owner)
+                    if scope.instance.as_deref() == Some(owner.id.as_str())
+                        && !scope.bound.contains(owner.id.as_str())) =>
+            {
+                match scope.defined_in {
+                    Some(class) if self.scopes[class].kind == ScopeKind::Class => {
+                        (class, attribute.attr.as_str())
+                    }
+                    _ => return,
+                }
+            }
+            _ => return,
+        };
+        let mut types = annotation.map_or_default(annotation_names);
+        types.extend(value.map_or_default(|value| self.value_types(value)));
+        if !types.is_empty() {
+            self.scopes[class]
+                .attribute_types
+                .entry(name.to_string())
+                .or_default()
+                .extend(types);
         }
     }
 

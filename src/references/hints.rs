@@ -87,13 +87,11 @@ impl Walker<'_, '_> {
             && WHOLE_METHODS.contains(&func.attr.as_str())
             && call.arguments.is_empty()
         {
-            let values = self.value_types(&func.value);
-            self.add_whole_read(values, None);
+            self.add_whole_read(&func.value, None);
         }
         for keyword in &call.arguments.keywords {
             if keyword.arg.is_none() {
-                let values = self.value_types(&keyword.value);
-                self.add_whole_read(values, None);
+                self.add_whole_read(&keyword.value, None);
             }
         }
         // The name of the function is found only for a call that passes such a value, as few do.
@@ -106,36 +104,52 @@ impl Walker<'_, '_> {
                 .map(|keyword| &keyword.value),
         );
         for argument in passed {
-            // A container passed to a function, such as one that serializes it, reads its elements.
-            let mut values = self.value_types(argument);
-            if let Expr::Name(name) = argument {
-                values.extend(self.variable_element_annotations(name.id.as_str()));
-            }
-            if values.is_empty() {
+            if self.whole_read_types(argument, true).is_empty()
+                && self.instance_attribute(argument).is_none()
+            {
                 continue;
             }
             if let Some(reader) =
                 reader.get_or_insert_with(|| dotted_name(&call.func, Unwrap::Call))
             {
-                self.add_whole_read(values, Some(reader));
+                self.add_whole_read(argument, Some(reader));
             }
         }
     }
 
-    /// Add a read of a value as a whole, given by the dotted names of what it is the result of calling.
-    pub(super) fn add_whole_read(&mut self, values: Vec<String>, reader: Option<&str>) {
-        let owner = self.owner;
+    /// Add a read of a value as a whole, by the types that `whole_read_types` gets for it, or for an
+    /// attribute of the instance, by those of the attribute once its class is walked.
+    pub(super) fn add_whole_read(&mut self, value: &Expr, reader: Option<&str>) {
         let local_import = reader
             .and_then(|reader| self.local_import(reader.split('.').next().unwrap_or(reader)))
             .cloned();
-        self.references
-            .whole_reads
-            .extend(values.into_iter().map(|value| WholeRead {
-                owner,
+        let read = WholeRead {
+            owner: self.owner,
+            value: String::new(),
+            reader: reader.map(str::to_string),
+            local_import,
+        };
+        if let Some((class, attribute)) = self.instance_attribute(value) {
+            self.scopes[class]
+                .attribute_reads
+                .push((attribute, read.clone()));
+        }
+        for value in self.whole_read_types(value, reader.is_some()) {
+            self.references.whole_reads.insert(WholeRead {
                 value,
-                reader: reader.map(str::to_string),
-                local_import: local_import.clone(),
-            }));
+                ..read.clone()
+            });
+        }
+    }
+
+    /// Get the types of a value that is read whole, as `value_types` gets them, and for a container
+    /// passed to a function, such as one that serializes it, the types of its elements.
+    fn whole_read_types(&self, value: &Expr, passed: bool) -> Vec<String> {
+        let mut types = self.value_types(value);
+        if passed && let Expr::Name(name) = value {
+            types.extend(self.variable_element_annotations(name.id.as_str()));
+        }
+        types
     }
 
     /// Add a value that the function the walker is in returns or yields, if it is the result of a call.

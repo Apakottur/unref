@@ -1,9 +1,10 @@
 //! The scopes of a module while it is walked: the names that each binds, and where its reads go when
 //! it ends.
 
+use ruff_python_ast::Expr;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{Binding, ImportedRead, Index, ModulePattern, Read, Receiver, Walker};
+use super::{Binding, ImportedRead, Index, ModulePattern, Read, Receiver, Walker, WholeRead};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ScopeKind {
@@ -57,6 +58,12 @@ pub(super) struct Scope {
     /// In a function, the parameters and local variables that are annotated, with the dotted names of
     /// the annotation as written, one for each side of a union.
     pub(super) annotations: FxHashMap<String, Vec<String>>,
+    /// In a class body, its attributes and those of its instance that are annotated or assigned a
+    /// value of a known type, with the dotted names of the types as written.
+    pub(super) attribute_types: FxHashMap<String, Vec<String>>,
+    /// In a class body, the attributes of its instance that its methods read as a whole, with the
+    /// read, whose value is each of the types of the attribute once the class is walked.
+    pub(super) attribute_reads: Vec<(String, WholeRead)>,
     /// In a function, the parameters and local variables that are annotated with a container, with the
     /// dotted names of the types of its elements as written.
     pub(super) element_annotations: FxHashMap<String, Vec<String>>,
@@ -94,6 +101,8 @@ impl Scope {
             members: FxHashMap::default(),
             calls: FxHashMap::default(),
             annotations: FxHashMap::default(),
+            attribute_types: FxHashMap::default(),
+            attribute_reads: Vec::new(),
             element_annotations: FxHashMap::default(),
             string_imports: FxHashSet::default(),
             module_patterns: FxHashMap::default(),
@@ -188,6 +197,30 @@ impl Walker<'_, '_> {
             scope = found.comprehension_parent;
         }
         Vec::new()
+    }
+
+    /// Get the class scope and the name of an attribute of the instance, if a value is one, as
+    /// `self.options` in a method, looking through enclosing scopes for a comprehension.
+    pub(super) fn instance_attribute(&self, value: &Expr) -> Option<(usize, String)> {
+        let Expr::Attribute(attribute) = value else {
+            return None;
+        };
+        let Expr::Name(name) = &*attribute.value else {
+            return None;
+        };
+        let mut scope = self.scope;
+        loop {
+            let found = &self.scopes[scope];
+            if found.bound.contains(name.id.as_str()) {
+                return None;
+            }
+            if found.instance.as_deref() == Some(name.id.as_str()) {
+                let class = found.defined_in?;
+                return (self.scopes[class].kind == ScopeKind::Class)
+                    .then(|| (class, attribute.attr.to_string()));
+            }
+            scope = found.comprehension_parent?;
+        }
     }
 
     /// Bind a name in the current scope.
