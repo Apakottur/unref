@@ -177,6 +177,10 @@ pub(crate) struct References {
     /// The names that the functions of the module import, by the index of the function in the
     /// definitions of the module, each with what it stands for.
     pub local_bindings: FxHashMap<Index, FxHashMap<String, Binding>>,
+    /// The variables of the module that are assigned a dotted name at its top level, such as `Base =
+    /// logging.Handler`, each with the dotted names that it is assigned as they are written, without
+    /// their type arguments.
+    pub aliases: FxHashMap<String, Vec<String>>,
     /// The functions and classes that are local variables of a function, by their index in the
     /// definitions of the module. A read of their name elsewhere is not a reference to them.
     pub local_definitions: FxHashSet<usize>,

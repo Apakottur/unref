@@ -38,6 +38,9 @@ pub(crate) struct ModuleSymbols {
     pub decorators: FxHashMap<String, Vec<String>>,
     /// The names of the members of the classes of the module, by the name of the class.
     pub members: FxHashMap<String, FxHashSet<String>>,
+    /// The variables of the module that are assigned a dotted name at its top level, with the dotted
+    /// names that they are assigned as they are written.
+    pub aliases: FxHashMap<String, Vec<String>>,
 }
 
 impl ModuleSymbols {
@@ -78,6 +81,7 @@ impl ModuleSymbols {
             locals: FxHashMap::default(),
             decorators: FxHashMap::default(),
             members: FxHashMap::default(),
+            aliases: references.aliases.clone(),
         };
         for definition in definitions {
             if matches!(definition.kind, Kind::Class | Kind::Function) {
