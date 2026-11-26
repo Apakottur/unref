@@ -28,8 +28,8 @@ use reads::attribute_chain;
 use scopes::{Scope, ScopeKind, Target};
 
 pub(crate) use types::{
-    Binding, Hints, Import, ImportedRead, Index, ModulePattern, Owner, Read, Receiver, References,
-    WholeRead,
+    Binding, ConfigObject, Hints, Import, ImportedRead, Index, ModulePattern, Owner, Read,
+    Receiver, References, WholeRead,
 };
 
 /// Find what a Python module defines and refers to.
@@ -210,7 +210,12 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                         self.add_module_read(&subscript.slice);
                     }
                 }
-                walk_expr(self, expr);
+                // A key of the namespace is read or written by itself, not every name of it.
+                if self.is_module_namespace(&subscript.value) {
+                    self.visit_expr(&subscript.slice);
+                } else {
+                    walk_expr(self, expr);
+                }
             }
             Expr::Call(call) => self.visit_call(call, None),
             Expr::Yield(ast::ExprYield {
@@ -261,7 +266,14 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
                         }
                     }
                 }
-                walk_expr(self, expr);
+                self.visit_expr(&compare.operands[0]);
+                for (operator, container) in compare.ops.iter().zip(&compare.operands[1..]) {
+                    if !matches!(operator, CmpOp::In | CmpOp::NotIn)
+                        || !self.is_module_namespace(container)
+                    {
+                        self.visit_expr(container);
+                    }
+                }
             }
             Expr::Lambda(lambda) => self.visit_function(
                 lambda.parameters.as_deref(),

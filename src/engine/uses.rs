@@ -245,6 +245,15 @@ pub(super) fn find_uses(project: &Project, classes: &Classes) -> AllUses {
                 .definitions
                 .insert(project.first_definition[file] + index);
         }
+        // The namespace of the module read as a whole reads each of its names.
+        for owner in &references.namespace_reads {
+            let names = project
+                .file_definitions(file)
+                .iter()
+                .filter(|definition| definition.class.is_none())
+                .map(|definition| (file, Name::new(&definition.name)));
+            uses.entry(project.code(file, *owner)).names.extend(names);
+        }
         // An object of a function is read by its name in the module, such as an enum in a function.
         for (owner, index, attributes) in &references.local_objects {
             let definition = &project.definitions[project.first_definition[file] + index];

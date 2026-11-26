@@ -142,7 +142,7 @@ pub(crate) struct WholeRead {
 #[derive(Debug, Default)]
 pub(crate) struct References {
     /// The reads of the names of the module itself, without the local variables and parameters. A name
-    /// that is listed in `__all__` is read as a plain name. A plain read of a name that the module
+    /// that is listed in `__all__` is read as a plain name. A read of a name that the module
     /// imports, at its top level or declared `global`, also reads its own name, without the object,
     /// such as a fallback definition in an `except ImportError`.
     pub reads: FxHashSet<Read>,
@@ -188,6 +188,9 @@ pub(crate) struct References {
     /// each with the index of the definition in the definitions of the module and the attributes read
     /// from it, in order, as in `Color.parse` for an enum.
     pub local_objects: FxHashSet<(Owner, usize, Vec<Name>)>,
+    /// The owners that read every name of the module through its namespace, as by iterating
+    /// `globals()` or passing it on.
+    pub namespace_reads: FxHashSet<Owner>,
 }
 
 /// What a Python module reveals about its values that only the rules of frameworks read, such as the
@@ -214,6 +217,18 @@ pub(crate) struct Hints {
     /// dotted name of what it calls as it is written, such as `os.environ.setdefault`, and its leading
     /// positional arguments that are string literals.
     pub string_calls: FxHashSet<(String, Vec<String>)>,
+    /// The calls of `config.from_object`, whose argument Flask reads the uppercase attributes of, each
+    /// by the function that it is in, the dotted name of what it calls as it is written, such as
+    /// `app.config.from_object`, and its argument.
+    pub config_objects: FxHashSet<(Owner, String, ConfigObject)>,
+}
+
+/// What `config.from_object` of Flask is given: a dotted name as it is written, such as `Config` or
+/// `__name__`, or a string that names a module or a class in it, such as `"config.Production"`.
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ConfigObject {
+    Name(String),
+    String(String),
 }
 
 /// The local variables of each function of a module that are assigned the result of a call, by the

@@ -11,7 +11,9 @@
 //! such a decorator makes one. It calls a factory, a function at the top level named `create_app`
 //! or `make_app` that sets a local variable to an application or returns one, and loads a variable
 //! at the top level named `app` or `application` that is set to an application or to what a factory
-//! makes.
+//! makes. The config of an application reads the uppercase attributes of what its `from_object` is
+//! given: a class, with those of its base classes, a module, `__name__`, or a string that names a
+//! module or a class in one, which it imports, so the class is used.
 //!
 //! Flask calls a function that `after_this_request` registers, after the request that it is defined
 //! in, and the receivers that the `connect` and `connect_via` decorators of its signals, such as
@@ -21,10 +23,12 @@
 use rustc_hash::FxHashSet;
 
 use crate::definitions::{Definition, Kind};
-use crate::references::Index;
+use crate::references::{ConfigObject, Index, Owner};
 
 use super::pytest::{PYTEST_FIXTURES, Pytest};
-use super::{Call, Context, HTTP_METHODS, Instances, Rules, Settings, has_any, is_top_level};
+use super::{
+    Call, Context, HTTP_METHODS, Instances, Rules, Settings, has_any, is_top_level, is_uppercase,
+};
 
 /// The classes of Flask's applications and blueprints, as `flask` gives them out, and where they are
 /// defined.
@@ -40,6 +44,8 @@ const FLASK_CURRENT_APP: [&str; 2] = ["flask.current_app", "flask.globals.curren
 /// The factories and the variables of an application that the Flask CLI finds by their names.
 const FLASK_FACTORIES: [&str; 2] = ["create_app", "make_app"];
 const FLASK_APP_VARIABLES: [&str; 2] = ["app", "application"];
+/// The method of an application's config that reads the uppercase attributes of an object.
+const FLASK_FROM_OBJECT: &str = ".config.from_object";
 /// The methods of an application or a blueprint that register the function they decorate.
 const FLASK_DECORATORS: [&str; 33] = [
     "route",
@@ -136,6 +142,10 @@ pub(super) struct Flask {
     factories: FxHashSet<String>,
     /// The signals.
     signals: Instances,
+    /// The classes, by their dotted names, and the modules whose uppercase attributes the config of an
+    /// application reads.
+    config_classes: FxHashSet<String>,
+    config_modules: FxHashSet<usize>,
 }
 
 impl Rules for Flask {
@@ -148,6 +158,8 @@ impl Rules for Flask {
                 variables: FLASK_SIGNALS.map(String::from).into_iter().collect(),
                 ..Instances::default()
             },
+            config_classes: FxHashSet::default(),
+            config_modules: FxHashSet::default(),
         };
         flask.apps.locals = context.local_instances(&FLASK_APPS);
         flask
@@ -182,6 +194,7 @@ impl Rules for Flask {
 
     fn finish(&mut self, context: &Context) {
         self.groups = self.command_groups(context);
+        self.config_objects(context);
     }
 
     /// Check whether Flask calls a definition by itself.
@@ -201,6 +214,25 @@ impl Rules for Flask {
             && FLASK_VIEW_ATTRIBUTES.contains(&definition.name.as_str())
             && let Some(class) = context.class_name(definition, module)
             && context.inherits(module, class, &FLASK_VIEWS)
+        {
+            return true;
+        }
+        if definition.kind == Kind::Class
+            && self
+                .config_classes
+                .contains(&context.dotted_name(module, &definition.qualified_name))
+        {
+            return true;
+        }
+        if is_uppercase(&definition.name)
+            && ((definition.kind == Kind::Attribute
+                && context.class_name(definition, module).is_some_and(|class| {
+                    self.config_classes
+                        .contains(&context.dotted_name(module, class))
+                }))
+                || (definition.kind == Kind::Variable
+                    && is_top_level(definition)
+                    && self.config_modules.contains(&module)))
         {
             return true;
         }
@@ -285,6 +317,58 @@ impl Flask {
                 .resolve(module, call)
                 .iter()
                 .any(|name| self.factories.contains(name))
+    }
+
+    /// Find the classes and the modules whose uppercase attributes `config.from_object` of an
+    /// application reads: what it is given, a class with its base classes, a module, or `__name__`, or
+    /// a string that names a module, or a class in one.
+    fn config_objects(&mut self, context: &Context) {
+        for (module, file) in context.files.iter().enumerate() {
+            for (owner, called, object) in &file.hints.config_objects {
+                if !called
+                    .strip_suffix(FLASK_FROM_OBJECT)
+                    .is_some_and(|app| self.is_app(context, module, *owner, app))
+                {
+                    continue;
+                }
+                let names = match object {
+                    ConfigObject::Name(name) if name == "__name__" => {
+                        self.config_modules.insert(module);
+                        continue;
+                    }
+                    ConfigObject::Name(name) => context.hierarchy.resolve(module, name),
+                    ConfigObject::String(name) => context.hierarchy.follow_name(name),
+                };
+                for name in names.iter() {
+                    self.config_modules.extend(
+                        (0..context.module_names.len())
+                            .filter(|&other| context.module_names[other].name == *name),
+                    );
+                    self.config_classes.insert(name.clone());
+                }
+            }
+        }
+    }
+
+    /// Check whether a name, as it is written in a function of a module or at its top level, is an
+    /// application or a blueprint.
+    fn is_app(&self, context: &Context, module: usize, owner: Owner, name: &str) -> bool {
+        owner.is_some_and(|function| {
+            self.apps
+                .locals
+                .contains(&(module, function, name.to_string()))
+        }) || context
+            .hierarchy
+            .resolve(module, name)
+            .iter()
+            .any(|resolved| {
+                self.apps.variables.contains(resolved)
+                    || (resolved == name
+                        && self
+                            .apps
+                            .variables
+                            .contains(&context.dotted_name(module, name)))
+            })
     }
 
     /// Get the groups of commands of Flask's CLI: the instances of `AppGroup`, and the functions that

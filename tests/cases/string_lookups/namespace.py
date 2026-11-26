@@ -53,3 +53,22 @@ read_locals()
 # Code in a string is not read.
 BY_EVAL = 15  # expect: 1 [unused-variable]
 eval("BY_EVAL")
+
+# Updating the namespace, or looking up a name that is built when the code runs, does not read it.
+UPDATED = 16  # expect: 1 [unused-variable]
+globals().update(UPDATED=17)
+globals().get("updated".upper())
+
+# Inside a function, the local variables are not the names of the module.
+BY_LOCAL_ITERATION = 18  # expect: 1 [unused-variable]
+
+
+def iterate_locals():
+    return list(locals().values())
+
+
+iterate_locals()
+
+# Importing reads only the name of the package from the namespace.
+BY_IMPORT = 19  # expect: 1 [unused-variable]
+__import__("helpers", globals(), locals(), ["by_getattr"])
