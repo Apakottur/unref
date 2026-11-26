@@ -54,10 +54,8 @@ repos:
       - id: unref
 ```
 
-## Adopting unref
-
-See [adopting unref](https://unref.readthedocs.io/en/latest/adopting/) for trying it on your project and
-reporting wrong findings.
+See the [FAQ](https://unref.readthedocs.io/en/latest/faq/#how-do-i-adopt-unref-in-an-existing-project) for
+adopting unref in an existing project.
 
 ## Contributing
 

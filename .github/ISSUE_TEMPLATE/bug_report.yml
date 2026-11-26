@@ -12,7 +12,7 @@ body:
     id: project
     attributes:
       label: Project
-      description: A link to the project, if it is public, so we can run unref on all of it.
+      description: A link to the project, if it is public.
 
   - type: textarea
     id: files
