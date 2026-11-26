@@ -103,7 +103,7 @@ pub(crate) fn find_unused(
         .map(|path| resolve(path))
         .filter(|root| root.is_dir())
         .collect();
-    let names: Vec<ModuleName> = files.iter().map(|path| module_name(path, &roots)).collect();
+    let mut names: Vec<ModuleName> = files.iter().map(|path| module_name(path, &roots)).collect();
     let mut files_by_name: FxHashMap<String, Vec<usize>> = FxHashMap::default();
     for (index, name) in names.iter().enumerate() {
         files_by_name
@@ -118,6 +118,7 @@ pub(crate) fn find_unused(
         .map(|(path, name)| root_name(path, name, &project_root))
         .collect();
     for (index, root_name) in root_names.iter().enumerate() {
+        names[index].root.clone_from(root_name);
         if let Some(root_name) = root_name {
             files_by_name
                 .entry(root_name.clone())

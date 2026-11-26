@@ -12,6 +12,8 @@ pub(crate) struct ModuleName {
     pub name: String,
     /// Whether the file is the `__init__.py` of a package.
     pub is_package: bool,
+    /// The name that the file is also imported by from the project root, as [`root_name`] gives it.
+    pub root: Option<String>,
 }
 
 impl ModuleName {
@@ -21,31 +23,46 @@ impl ModuleName {
     /// `from .helpers import name`, and None in `from . import name`. `level` is the number of
     /// leading dots of the import, 0 for an absolute import.
     ///
+    /// An import with more dots than there are packages in the name goes up through the directories
+    /// of the name from the project root, if the file has one.
+    ///
     /// Returns None if the import has more dots than there are packages.
     pub(crate) fn resolve(&self, module: Option<&str>, level: u32) -> Option<String> {
         if level == 0 {
             return module.map(ToString::to_string);
         }
-
-        // One dot is the package of this module, and each further dot is one package up.
-        let mut package: Vec<&str> = if self.name.is_empty() {
-            Vec::new()
-        } else {
-            self.name.split('.').collect()
-        };
-        if !self.is_package {
-            package.pop();
-        }
-        let level = usize::try_from(level).unwrap_or(usize::MAX);
-        if level > package.len() {
-            return None;
-        }
-        package.truncate(package.len() - level + 1);
-        if let Some(module) = module {
-            package.push(module);
-        }
-        Some(package.join("."))
+        resolve_relative(&self.name, self.is_package, module, level).or_else(|| {
+            let root = self.root.as_deref()?;
+            resolve_relative(root, self.is_package, module, level)
+        })
     }
+}
+
+/// Resolve a relative import against the dotted name of the module that it is in.
+fn resolve_relative(
+    name: &str,
+    is_package: bool,
+    module: Option<&str>,
+    level: u32,
+) -> Option<String> {
+    // One dot is the package of this module, and each further dot is one package up.
+    let mut package: Vec<&str> = if name.is_empty() {
+        Vec::new()
+    } else {
+        name.split('.').collect()
+    };
+    if !is_package {
+        package.pop();
+    }
+    let level = usize::try_from(level).unwrap_or(usize::MAX);
+    if level > package.len() {
+        return None;
+    }
+    package.truncate(package.len() - level + 1);
+    if let Some(module) = module {
+        package.push(module);
+    }
+    Some(package.join("."))
 }
 
 /// Get the name that a Python file is imported by.
@@ -85,6 +102,7 @@ pub(crate) fn module_name(path: &Path, roots: &[PathBuf]) -> ModuleName {
     ModuleName {
         name: parts.join("."),
         is_package,
+        root: None,
     }
 }
 
@@ -205,6 +223,7 @@ mod tests {
         let module = ModuleName {
             name: "package.sub.module".to_string(),
             is_package: false,
+            root: None,
         };
         assert_eq!(module.resolve(Some("os"), 0).as_deref(), Some("os"));
         assert_eq!(
@@ -218,11 +237,24 @@ mod tests {
         let package = ModuleName {
             name: "package".to_string(),
             is_package: true,
+            root: None,
         };
         assert_eq!(
             package.resolve(Some("module"), 1).as_deref(),
             Some("package.module")
         );
         assert_eq!(package.resolve(None, 2), None);
+
+        let rooted = ModuleName {
+            name: "module".to_string(),
+            is_package: false,
+            root: Some("directory.sub.module".to_string()),
+        };
+        assert_eq!(
+            rooted.resolve(Some("helpers"), 1).as_deref(),
+            Some("directory.sub.helpers")
+        );
+        assert_eq!(rooted.resolve(None, 2).as_deref(), Some("directory"));
+        assert_eq!(rooted.resolve(None, 3), None);
     }
 }

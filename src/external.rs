@@ -97,6 +97,7 @@ impl ExternalModules {
             ModuleName {
                 name: name.to_string(),
                 is_package,
+                root: None,
             },
             &facts.definitions,
             &facts.references,
