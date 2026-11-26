@@ -14,6 +14,20 @@ A definition is unused when no entry point of the project reaches it. The entry 
 What an entry point uses is used, and so is what that uses, and so on. Anything else is unused, even if
 other unused code references it.
 
+## How do I adopt unref in an existing project?
+
+A large project can have many findings at first, some of them wrong. Some guidelines:
+
+1. Run `uvx unref` and delete what is really unused.
+2. The remaining findings are likely used by:
+    - A [framework](frameworks.md) that unref does not cover, or that is turned off.
+    - An [entry point](configuration.md#entry-points) of the project that is not configured.
+    - Code that finds them by name, such as plugins or handlers: list them in
+      [`used-names`](configuration.md#used-names).
+3. [Ignore](rules.md#ignoring-a-finding) what is left in the code, and report what unref gets wrong or
+   misses in an [issue](https://github.com/Apakottur/unref/issues/new?template=bug_report.yml).
+4. Once it is clean, run unref as a [pre-commit hook or in GitHub Actions](usage.md).
+
 ## How do I check a library?
 
 A library is used by code outside the project, so its public API is unused unless the project uses it,

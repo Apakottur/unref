@@ -54,6 +54,9 @@ repos:
       - id: unref
 ```
 
+See the [FAQ](https://unref.readthedocs.io/en/latest/faq/#how-do-i-adopt-unref-in-an-existing-project) for
+adopting unref in an existing project.
+
 ## Contributing
 
 Bug reports and other feedback are welcome as [issues](https://github.com/Apakottur/unref/issues). To

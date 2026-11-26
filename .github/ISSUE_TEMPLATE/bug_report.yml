@@ -8,6 +8,12 @@ body:
         The smallest project that shows the bug helps the most: a few short files, the configuration
         and the command.
 
+  - type: input
+    id: project
+    attributes:
+      label: Project
+      description: A link to the project, if it is public.
+
   - type: textarea
     id: files
     attributes:
