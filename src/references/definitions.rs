@@ -35,6 +35,24 @@ impl<'a> Walker<'_, '_> {
         }
     }
 
+    /// Add a variable of the module that is assigned a dotted name, or a union of them, such as `Base =
+    /// logging.Handler` or `Message = Request | Response`, with each name as it is written.
+    pub(super) fn add_alias(&mut self, target: &str, value: &Expr) {
+        if self.scopes[self.binder].kind != ScopeKind::Module
+            || matches!(value, Expr::StringLiteral(_))
+        {
+            return;
+        }
+        let names = annotation_names(value)
+            .into_iter()
+            .filter(|name| name != "None");
+        self.references
+            .aliases
+            .entry(target.to_string())
+            .or_default()
+            .extend(names);
+    }
+
     /// Add the variables and attributes that an assignment defines, the names that an assignment to
     /// `__all__` lists, and what the assignment refers to.
     pub(super) fn visit_assign(
@@ -83,15 +101,8 @@ impl<'a> Walker<'_, '_> {
                     wrapped_by.as_ref(),
                 );
             }
-            if let ([Expr::Name(target)], Some(value)) = (targets, value)
-                && self.scopes[self.binder].kind == ScopeKind::Module
-                && let Some(name) = dotted_name(value, Unwrap::Subscript)
-            {
-                self.references
-                    .aliases
-                    .entry(target.id.to_string())
-                    .or_default()
-                    .push(name);
+            if let ([Expr::Name(target)], Some(value)) = (targets, value) {
+                self.add_alias(target.id.as_str(), value);
             }
             // A variable of a function that is assigned one of several values, as `a if test else b`,
             // or another variable, is assigned what each of them is assigned the result of calling.

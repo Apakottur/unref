@@ -166,6 +166,9 @@ impl<'a> Visitor<'a> for Walker<'_, '_> {
             Stmt::TypeAlias(alias) => {
                 // Its value is evaluated when it is used, but what it reads is still read.
                 self.define_target(&alias.name, false, None, None, None, None);
+                if let Expr::Name(name) = &*alias.name {
+                    self.add_alias(name.id.as_str(), &alias.value);
+                }
                 walk_stmt(self, stmt);
                 self.visit_type_strings(&alias.value);
             }
