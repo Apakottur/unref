@@ -10,7 +10,7 @@ from pydantic import BaseModel as Renamed
 
 class Direct(BaseModel):
     table_name = {}
-    field: int  # expect: 5 [unused-attribute]
+    other = {}  # expect: 5 [unused-attribute]
 
 
 class ThroughModule(pydantic.BaseModel):

@@ -62,6 +62,8 @@ Enabled by default: yes.
 - Fields of classes with `dataclasses.dataclass`, Pydantic's `dataclass` or an attrs decorator such as
   `attrs.define`.
 - Fields of `NamedTuple` subclasses.
+- Fields of classes that `typing.dataclass_transform` (PEP 681) applies to: through a decorator, a
+  base class or a metaclass, such as `sqlalchemy.orm.MappedAsDataclass`.
 
 ## `sqlalchemy`
 

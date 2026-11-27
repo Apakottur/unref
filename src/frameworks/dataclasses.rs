@@ -4,6 +4,10 @@
 //! class variable, or, in a class of attrs, a name that is set to a call of `attr.ib` or
 //! `attrs.field`. A class is a dataclass when it has one of their decorators itself, so a subclass
 //! of a dataclass without one has no fields of its own.
+//!
+//! A class is also a dataclass when `typing.dataclass_transform` marks it as one, as PEP 681 gives:
+//! when it has a decorator that is marked, inherits from a class that is marked, or has a metaclass
+//! that is marked, or inherits from a class that has one. The class that is marked itself is not one.
 
 use crate::definitions::{Definition, Kind};
 
@@ -42,6 +46,12 @@ const ATTRS_FIELDS: [&str; 7] = [
     "attrs.field",
 ];
 
+/// The decorator that marks a decorator, a base class or a metaclass as one that makes dataclasses.
+const DATACLASS_TRANSFORMS: [&str; 2] = [
+    "typing.dataclass_transform",
+    "typing_extensions.dataclass_transform",
+];
+
 /// The rules of the dataclasses, the named tuples and the classes of attrs.
 pub(super) struct Dataclasses;
 
@@ -62,6 +72,7 @@ impl Rules for Dataclasses {
         let decorators = context.hierarchy.decorators(module, class);
         if !has_any(&decorators, &DATACLASS_DECORATORS)
             && !context.inherits(module, class, &NAMED_TUPLES)
+            && !is_transformed(context, module, class)
         {
             return false;
         }
@@ -73,4 +84,14 @@ impl Rules for Dataclasses {
                     .as_ref()
                     .is_some_and(|call| context.resolves_to(module, call, &ATTRS_FIELDS)))
     }
+}
+
+/// Check whether `typing.dataclass_transform` makes a class of a module a dataclass: through one of its
+/// decorators, one of its base classes, or its metaclass or that of one of its base classes.
+fn is_transformed(context: &Context, module: usize, class: &str) -> bool {
+    let hierarchy = context.hierarchy;
+    let marked = |name: &String| has_any(&hierarchy.decorators_of(name), &DATACLASS_TRANSFORMS);
+    hierarchy.decorators(module, class).iter().any(marked)
+        || hierarchy.ancestors(module, class).iter().any(marked)
+        || hierarchy.metaclasses(module, class).iter().any(marked)
 }

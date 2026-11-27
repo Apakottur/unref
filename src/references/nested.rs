@@ -236,11 +236,16 @@ impl<'a> Walker<'_, '_> {
             .filter_map(|base| dotted_name(base, Unwrap::Subscript))
             .collect();
         let other_bases = bases.len() < written_bases.len();
+        let metaclass = class.arguments.as_deref().and_then(|arguments| {
+            let keyword = arguments.find_keyword("metaclass")?;
+            dotted_name(&keyword.value, Unwrap::Subscript)
+        });
         let index = self.definitions.len();
         let mut definition = Definition {
             decorators: decorator_names(&class.decorator_list),
             bases,
             other_bases,
+            metaclass,
             ..self.definition(
                 Kind::Class,
                 &class.name,
