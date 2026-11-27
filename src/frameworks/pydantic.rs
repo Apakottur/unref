@@ -9,7 +9,7 @@ use super::{Context, Rules, Settings};
 
 /// `pydantic.BaseModel` as `pydantic` gives it out, and where it is defined, also in the Pydantic 1 API
 /// of `pydantic.v1`. Packages such as `pydantic_settings` import it from where it is defined.
-const PYDANTIC_MODELS: [&str; 4] = [
+pub(super) const PYDANTIC_MODELS: [&str; 4] = [
     "pydantic.BaseModel",
     "pydantic.main.BaseModel",
     "pydantic.v1.BaseModel",

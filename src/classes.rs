@@ -19,6 +19,7 @@ pub(crate) struct ClassHierarchy {
     resolver: Resolver,
     ancestors: Cache,
     inherited: Cache,
+    metaclasses: Cache,
     resolved_decorators: Cache,
     resolved: Cache,
     followed: RefCell<FxHashMap<String, Names>>,
@@ -31,6 +32,7 @@ impl ClassHierarchy {
             resolver,
             ancestors: RefCell::default(),
             inherited: RefCell::default(),
+            metaclasses: RefCell::default(),
             resolved_decorators: RefCell::default(),
             resolved: RefCell::default(),
             followed: RefCell::default(),
@@ -94,8 +96,39 @@ impl ClassHierarchy {
         })
     }
 
-    /// Get the decorators of a class, by their dotted names, such as `dataclasses.dataclass`. A
-    /// decorator that is imported through several modules has the name of each.
+    /// Get the metaclasses of a class and of the base classes it inherits from, directly or not, by
+    /// their dotted names, with the base classes of the metaclasses.
+    pub(crate) fn metaclasses(&self, module: usize, name: &str) -> Names {
+        cached(&self.metaclasses, module, name, || {
+            let mut found = FxHashSet::default();
+            let mut add = |file: usize, class: &str| {
+                if let Some(metaclass) = self.resolver.module(file).metaclasses.get(class) {
+                    found.extend(self.resolve_in(file, class, metaclass).iter().cloned());
+                }
+            };
+            add(module, name);
+            for ancestor in self.ancestors(module, name).iter() {
+                for (file, class) in self.resolver.locate(ancestor) {
+                    add(file, &class);
+                }
+            }
+            found
+        })
+    }
+
+    /// Get the decorators of a class or function that is given by its dotted name, wherever it is
+    /// defined, by their dotted names.
+    pub(crate) fn decorators_of(&self, name: &str) -> FxHashSet<String> {
+        let mut found = FxHashSet::default();
+        for (file, symbol) in self.resolver.locate(name) {
+            found.extend(self.decorators(file, &symbol).iter().cloned());
+        }
+        found
+    }
+
+    /// Get the decorators of a class or function, by their dotted names, such as
+    /// `dataclasses.dataclass`. A decorator that is imported through several modules has the name of
+    /// each.
     pub(crate) fn decorators(&self, module: usize, name: &str) -> Names {
         cached(&self.resolved_decorators, module, name, || {
             let mut found = FxHashSet::default();

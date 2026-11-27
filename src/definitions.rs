@@ -69,6 +69,9 @@ pub(crate) struct Definition {
     /// For a class, whether one of its base classes is not a dotted name, such as a call that makes
     /// one, so that what it inherits from is not known.
     pub other_bases: bool,
+    /// For a class, the dotted name of its metaclass as it is written in `metaclass=`, or None if it
+    /// does not give one, or gives one that is not a dotted name.
+    pub metaclass: Option<String>,
     /// For a variable or a class attribute, whether it is first assigned by its name in an unpacking,
     /// such as `second` in `first, second = pair()`, where Python needs a name to bind.
     pub unpacked: bool,

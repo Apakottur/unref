@@ -33,9 +33,12 @@ pub(crate) struct ModuleSymbols {
     /// The classes and functions that are defined in the functions of the module, by their own name,
     /// each with its names in the module.
     pub locals: FxHashMap<String, Vec<String>>,
-    /// The classes of the module, by their name in the module, with their decorators as they are
-    /// written.
+    /// The classes and functions of the module, by their name in the module, with their decorators as
+    /// they are written.
     pub decorators: FxHashMap<String, Vec<String>>,
+    /// The classes of the module that give a metaclass, by their name in the module, with the metaclass
+    /// as it is written.
+    pub metaclasses: FxHashMap<String, String>,
     /// The names of the members of the classes of the module, by the name of the class.
     pub members: FxHashMap<String, FxHashSet<String>>,
     /// The variables of the module that are assigned a dotted name at its top level, with the dotted
@@ -80,6 +83,7 @@ impl ModuleSymbols {
             bases: FxHashMap::default(),
             locals: FxHashMap::default(),
             decorators: FxHashMap::default(),
+            metaclasses: FxHashMap::default(),
             members: FxHashMap::default(),
             aliases: references.aliases.clone(),
         };
@@ -99,12 +103,18 @@ impl ModuleSymbols {
                     .or_default()
                     .extend(definition.bases.iter().cloned());
             }
-            if definition.kind == Kind::Class {
+            if matches!(definition.kind, Kind::Class | Kind::Function) {
                 symbols
                     .decorators
                     .entry(definition.qualified_name.clone())
                     .or_default()
                     .extend(definition.decorators.iter().cloned());
+            }
+            if let Some(metaclass) = &definition.metaclass {
+                symbols
+                    .metaclasses
+                    .entry(definition.qualified_name.clone())
+                    .or_insert_with(|| metaclass.clone());
             }
             if let Some(class) = definition.class {
                 symbols

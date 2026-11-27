@@ -390,6 +390,7 @@ impl<'a> Walker<'_, '_> {
             merged_into: None,
             bases: Vec::new(),
             other_bases: false,
+            metaclass: None,
             unpacked: false,
             annotation: None,
             call: None,
