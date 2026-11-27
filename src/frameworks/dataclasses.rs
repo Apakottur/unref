@@ -8,9 +8,12 @@
 //! A class is also a dataclass when `typing.dataclass_transform` marks it as one, as PEP 681 gives:
 //! when it has a decorator that is marked, inherits from a class that is marked, or has a metaclass
 //! that is marked, or inherits from a class that has one. The class that is marked itself is not one.
+//! A model of Pydantic, whose metaclass is marked, is left to the rules of Pydantic, which leave out its
+//! private attributes.
 
 use crate::definitions::{Definition, Kind};
 
+use super::pydantic::PYDANTIC_MODELS;
 use super::{Context, Rules, Settings, has_any};
 
 /// The decorators that make a dataclass, as `dataclasses`, Pydantic and attrs give them out, and
@@ -87,8 +90,12 @@ impl Rules for Dataclasses {
 }
 
 /// Check whether `typing.dataclass_transform` makes a class of a module a dataclass: through one of its
-/// decorators, one of its base classes, or its metaclass or that of one of its base classes.
+/// decorators, one of its base classes, or its metaclass or that of one of its base classes. A model of
+/// Pydantic is not one.
 fn is_transformed(context: &Context, module: usize, class: &str) -> bool {
+    if context.inherits(module, class, &PYDANTIC_MODELS) {
+        return false;
+    }
     let hierarchy = context.hierarchy;
     let marked = |name: &String| has_any(&hierarchy.decorators_of(name), &DATACLASS_TRANSFORMS);
     hierarchy.decorators(module, class).iter().any(marked)
